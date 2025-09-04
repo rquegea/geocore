@@ -1,0 +1,79 @@
+# Dependencies
+node_modules/
+**pycache**/
+*.pyc
+*.pyo
+*.pyd
+.Python
+vendor/
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+config.php
+database.php
+db_config.php
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Database
+*.db
+*.sqlite3
+*.sql
+backup.sql
+database_dump.sql
+
+# Logs
+*.log
+logs/
+error.log
+access.log
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build outputs
+.next/
+dist/
+build/
+
+# Docker
+.dockerignore
+
+# Temporary files
+*.tmp
+*.temp
+
+# PHP specific
+composer.phar
+.composer/
+
+# Cache
+cache/
+tmp/
+
+# Uploads (si tienes carpeta de uploads sensibles)
+uploads/private/
+
+# Session files
+sessions/
+
+EOF
