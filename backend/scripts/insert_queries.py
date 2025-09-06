@@ -64,6 +64,73 @@ QUERIES = [
     ("¿Qué discursos circulan online en España sobre 'el futuro del entretenimiento' y 'los empleos creativos del mañana', y cómo puede The Core School conectar su propuesta educativa con esos mensajes?", "The Core School", "Future Outlook", "es")
 ]
 
+# --- Nuevas queries solicitadas ---
+# Fase 1: Descubrimiento y Exploración
+QUERIES += [
+    ("¿Qué carreras creativas tienen más futuro en España?", "The Core School", "Future Outlook & Trends", "es"),
+    ("¿Qué hay que estudiar para trabajar en cine o en series de Netflix?", "The Core School", "Curriculum & Programs", "es"),
+    ("Salidas profesionales y sueldos en el sector de los videojuegos.", "The Core School", "Employment & Jobs", "es"),
+    ("¿Qué hace un productor de televisión y qué se necesita para serlo?", "The Core School", "Employment & Jobs", "es"),
+    ("Trabajos en el mundo audiovisual que no sean los típicos.", "The Core School", "Employment & Jobs", "es"),
+    ("¿Se puede vivir bien trabajando en la industria del cine en España?", "The Core School", "Employment & Jobs", "es"),
+    ("Historias de éxito de gente que estudió carreras creativas.", "The Core School", "Alumni & Success Stories", "es"),
+    ("¿Qué perfiles buscan las productoras de videojuegos y series?", "The Core School", "Job Market", "es"),
+    ("¿Merece la pena estudiar una carrera en el sector audiovisual o hay mucho paro?", "The Core School", "Parents & Family Concerns", "es"),
+    ("Cómo saber si una carrera creativa es para mí.", "The Core School", "Audience & Research", "es"),
+    ("¿Cuánto cuesta estudiar cine en España?", "The Core School", "Scholarships & Cost", "es"),
+    ("Becas para estudiar carreras de arte y creatividad en Madrid.", "The Core School", "Scholarships & Cost", "es"),
+    ("¿Cuántos jóvenes en España no saben qué estudiar y qué carreras creativas les interesan más?", "The Core School", "Audience & Research", "es"),
+    ("¿Qué inspira a los jóvenes a estudiar carreras de cine, TV o videojuegos en lugar de grados tradicionales?", "The Core School", "Motivation & Triggers", "es"),
+    ("¿Por qué los jóvenes en España rechazan trabajos de oficina y qué carreras audiovisuales ven como una mejor alternativa?", "The Core School", "Career Preferences", "es"),
+]
+
+# Fase 2: Comparando Opciones (Búsqueda de Escuelas)
+QUERIES += [
+    ("Mejores escuelas para estudiar cine en Madrid.", "The Core School", "Competition & Benchmarking", "es"),
+    ("¿Dónde puedo estudiar guion en España?", "The Core School", "Curriculum & Programs", "es"),
+    ("¿Qué diferencia hay entre un grado universitario de comunicación audiovisual y una escuela especializada?", "The Core School", "Curriculum & Programs", "es"),
+    ("Máster para especializarme en postproducción y efectos visuales.", "The Core School", "Curriculum & Programs", "es"),
+    ("Cursos o grados para aprender a crear formatos de TV como concursos o realities.", "The Core School", "Curriculum & Programs", "es"),
+    ("Compara The Core School con ECAM, TAI y U-Tad: ¿cuál es mejor para estudiar cine?", "The Core School", "Competition & Benchmarking", "es"),
+    ("Ventajas de The Core School frente a otras escuelas de audiovisuales en España.", "The Core School", "Competition & Benchmarking", "es"),
+    ("Opiniones sobre el precio de The Core School, ¿vale la pena comparado con otras opciones?", "The Core School", "Scholarships & Cost", "es"),
+    ("Mejor escuela en España para estudiar producción de TV y realities.", "The Core School", "Competition & Benchmarking", "es"),
+    ("¿De qué escuela de cine se habla más en redes sociales en España: The Core School, ECAM o TAI?", "The Core School", "Share of Voice & Monitoring", "es"),
+    ("ECAM vs The Core School para estudiar dirección.", "The Core School", "Competition & Benchmarking", "es"),
+    ("TAI vs The Core School, opiniones de alumnos.", "The Core School", "Competition & Benchmarking", "es"),
+    ("¿Qué escuela tiene mejores conexiones con la industria, U-Tad o The Core School?", "The Core School", "Brand Partnerships", "es"),
+]
+
+# Fase 3: Interés Específico en The Core School
+QUERIES += [
+    ("¿Qué opinan los estudiantes sobre The Core School?", "The Core School", "Students & Experience", "es"),
+    ("¿Qué se dice de The Core School en TikTok y foros en 2025?", "The Core School", "Digital Trends & Marketing", "es"),
+    ("¿Es fácil encontrar trabajo después de estudiar en The Core School?", "The Core School", "Employment & Jobs", "es"),
+    ("¿Qué sueldo se puede esperar al graduarse en The Core School?", "The Core School", "Employment & Jobs", "es"),
+    ("¿Qué tal son los profesores y qué conexiones tiene The Core School con la industria?", "The Core School", "Students & Experience", "es"),
+    ("Ejemplos de alumnos de The Core School que ahora trabajen en grandes empresas.", "The Core School", "Alumni & Success Stories", "es"),
+    ("¿Cómo son las instalaciones y platós de The Core School?", "The Core School", "Campus & Facilities", "es"),
+    ("¿Qué hay que hacer para entrar en The Core School?", "The Core School", "Admissions & Enrollment", "es"),
+    ("¿Qué becas y ayudas ofrece The Core School?", "The Core School", "Scholarships & Cost", "es"),
+    ("¿Qué asignaturas o másteres hacen única a The Core School?", "The Core School", "Curriculum & Programs", "es"),
+    ("¿The Core School enseña a usar IA y nuevas tecnologías para cine y videojuegos?", "The Core School", "Innovation & Technology", "es"),
+    ("Casos de éxito de alumni de The Core School.", "The Core School", "Alumni & Success Stories", "es"),
+    ("Experiencia de los estudiantes en el campus de The Core School.", "The Core School", "Students & Experience", "es"),
+    ("¿Qué empresas colaboran con The Core School para hacer prácticas?", "The Core School", "Brand Partnerships", "es"),
+]
+
+# Fase 4: Dudas de Padres y Familiares
+QUERIES += [
+    ("Cuando un joven quiere estudiar algo audiovisual, ¿qué es lo que más preocupa a los padres en España?", "The Core School", "Parents & Family Concerns", "es"),
+    ("¿Qué datos sobre empleo y salarios convencen a los padres de que estudiar una carrera audiovisual es una buena opción?", "The Core School", "Parents & Family Concerns", "es"),
+    ("Argumentos para convencer a mis padres de que quiero estudiar cine.", "The Core School", "Parents & Family Concerns", "es"),
+    ("Seguridad laboral y estabilidad en el sector audiovisual.", "The Core School", "Parents & Family Concerns", "es"),
+    ("Dudas sobre el coste de la matrícula en The Core School.", "The Core School", "Scholarships & Cost", "es"),
+    ("¿The Core School es un título oficial o privado?", "The Core School", "Admissions & Enrollment", "es"),
+    ("Opiniones de padres sobre The Core School.", "The Core School", "Parents & Family Concerns", "es"),
+    ("¿Qué apoyo ofrece The Core School a los estudiantes para encontrar trabajo?", "The Core School", "Employment & Jobs", "es"),
+]
+
 def insert_thecore_queries():
     conn = psycopg2.connect(
         host="localhost",
@@ -79,8 +146,13 @@ def insert_thecore_queries():
     
     # Primero borrar menciones e insights relacionados (para evitar errores de foreign key)
     cur.execute("DELETE FROM mentions;")
-    cur.execute("DELETE FROM insights;") 
-    cur.execute("DELETE FROM citations;")
+    cur.execute("DELETE FROM insights;")
+    # Borrar citations solo si existe
+    try:
+        cur.execute("DELETE FROM citations;")
+    except psycopg2.errors.UndefinedTable:
+        conn.rollback()
+        print("ℹ️ Tabla 'citations' no existe. Continuando…")
     
     # Ahora borrar todas las queries
     cur.execute("DELETE FROM queries;")
@@ -99,12 +171,20 @@ def insert_thecore_queries():
     # Insertar las queries de The Core
     print(f"🎯 Insertando las {len(QUERIES)} queries de The Core School...")
     for i, (query, brand, topic, lang) in enumerate(QUERIES, 1):
-        cur.execute("""
-            INSERT INTO queries (query, brand, topic, enabled, language)
-            VALUES (%s, %s, %s, TRUE, %s)
-            ON CONFLICT (query) DO NOTHING;
-        """, (query, brand, topic, lang))
-        print(f"   {i:2d}. {query[:80]}...")
+        # Evitar duplicados de forma portable (sin ON CONFLICT)
+        cur.execute("SELECT 1 FROM queries WHERE query = %s", (query,))
+        exists = cur.fetchone() is not None
+        if not exists:
+            cur.execute(
+                """
+                INSERT INTO queries (query, brand, topic, language, enabled)
+                VALUES (%s, %s, %s, %s, TRUE)
+                """,
+                (query, brand, topic, lang)
+            )
+            print(f"   {i:2d}. {query[:80]}... (+)")
+        else:
+            print(f"   {i:2d}. {query[:80]}... (skip)")
 
     conn.commit()
     print(f"✅ Insertadas las {len(QUERIES)} queries de The Core School correctamente.\n")
