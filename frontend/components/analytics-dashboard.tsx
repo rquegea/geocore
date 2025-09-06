@@ -24,7 +24,7 @@ import {
   CheckCircle2,
 } from "lucide-react"
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, PieChart, Pie, Cell, BarChart, Bar } from "recharts"
-import { getVisibility, getCompetitors, getMentions, getModels, getPrompts, getSources, getTopics, getPromptDetails, getSentiment, getTopicsCloud, createPrompt, updatePrompt, deletePrompt, getInsights, type PromptsByTopic, type PromptDetails, type InsightRow } from "@/services/api"
+import { getVisibility, getCompetitors, getMentions, getModels, getPrompts, getTopics, getPromptDetails, getSentiment, getTopicsCloud, createPrompt, updatePrompt, deletePrompt, getInsights, type PromptsByTopic, type PromptDetails, type InsightRow } from "@/services/api"
 import { VisibilityData, Competitor, Mention } from "@/types"
 import { cn } from "@/lib/utils"
 import { DateRange } from "react-day-picker"
@@ -147,9 +147,8 @@ export function AnalyticsDashboard() {
   // Filtro: solo modelo (chat)
   const [modelOptions, setModelOptions] = useState<string[]>([])
   const [selectedModel, setSelectedModel] = useState<string>("all")
-  // Filtro: source
-  const [sourceOptions, setSourceOptions] = useState<string[]>([])
-  const [selectedSource, setSelectedSource] = useState<string>("all")
+  // Filtro: source (oculto, siempre 'all')
+  const selectedSource = "all"
 
   // Prompts data
   const [promptsGrouped, setPromptsGrouped] = useState<PromptsByTopic[]>([])
@@ -272,19 +271,17 @@ export function AnalyticsDashboard() {
       }
     }
     loadDashboardData()
-  }, [dateRange, selectedModel, selectedSource, selectedTopic]);
+  }, [dateRange, selectedModel, selectedTopic]);
 
   // cargar opciones de filtros (model, source, topic)
   useEffect(() => {
     const loadFiltersLists = async () => {
       try {
-        const [modelsRes, sourcesRes, topicsRes] = await Promise.all([
+        const [modelsRes, topicsRes] = await Promise.all([
           getModels(),
-          getSources(),
           getTopics(),
         ])
         setModelOptions(["all", ...modelsRes.models])
-        setSourceOptions(["all", ...sourcesRes.sources])
         setTopicOptions(["all", ...topicsRes.topics])
       } catch (e) {
         console.error("No se pudieron cargar los listados de filtros", e)
@@ -311,7 +308,7 @@ export function AnalyticsDashboard() {
       }
     }
     load()
-  }, [activeSidebarSection, dateRange, selectedModel, selectedSource, selectedTopic])
+  }, [activeSidebarSection, dateRange, selectedModel, selectedTopic])
 
   type StrategyItem = { id: string; text: string; impact: "Alto" | "Medio" | "Bajo"; createdAt: string | null }
   const aggregatedInsights = useMemo(() => {
@@ -868,17 +865,6 @@ export function AnalyticsDashboard() {
                             ))}
                           </SelectContent>
                         </Select>
-                        {/* Source */}
-                        <Select value={selectedSource} onValueChange={setSelectedSource}>
-                          <SelectTrigger className="w-[180px]">
-                            <SelectValue placeholder="Fuente" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {sourceOptions.map((s) => (
-                              <SelectItem key={s} value={s}>{s === 'all' ? 'Todas las fuentes' : s}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
                         {/* Model (Chat) */}
                         <Select value={selectedModel} onValueChange={setSelectedModel}>
                           <SelectTrigger className="w-[180px]">
@@ -1110,12 +1096,6 @@ export function AnalyticsDashboard() {
                           <SelectTrigger className="w-[180px]"><SelectValue placeholder="Tema" /></SelectTrigger>
                           <SelectContent>
                             {topicOptions.map((t) => (<SelectItem key={t} value={t}>{t === 'all' ? 'Todos los temas' : t}</SelectItem>))}
-                          </SelectContent>
-                        </Select>
-                        <Select value={selectedSource} onValueChange={setSelectedSource}>
-                          <SelectTrigger className="w-[180px]"><SelectValue placeholder="Fuente" /></SelectTrigger>
-                          <SelectContent>
-                            {sourceOptions.map((s) => (<SelectItem key={s} value={s}>{s === 'all' ? 'Todas las fuentes' : s}</SelectItem>))}
                           </SelectContent>
                         </Select>
                         <Select value={selectedModel} onValueChange={setSelectedModel}>
