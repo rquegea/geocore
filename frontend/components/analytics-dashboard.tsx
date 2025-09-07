@@ -23,16 +23,17 @@ import {
   AlertTriangle,
   CheckCircle2,
 } from "lucide-react"
-import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, PieChart, Pie, Cell, BarChart, Bar } from "recharts"
-import { getVisibility, getCompetitors, getMentions, getModels, getPrompts, getTopics, getPromptDetails, getSentiment, getTopicsCloud, createPrompt, updatePrompt, deletePrompt, getInsights, type PromptsByTopic, type PromptDetails, type InsightRow } from "@/services/api"
+import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, PieChart, Pie, Cell, BarChart, Bar, AreaChart, Area, Brush } from "recharts"
+import Image from "next/image"
+import { getVisibility, getShareOfVoice, getMentions, getModels, getPrompts, getTopics, getPromptDetails, getSentiment, getTopicsCloud, createPrompt, updatePrompt, deletePrompt, getInsights, categorizePromptApi, type PromptsByTopic, type PromptDetails, type InsightRow, type ShareOfVoiceResponse } from "@/services/api"
 import { VisibilityData, Competitor, Mention } from "@/types"
 import { cn } from "@/lib/utils"
 import { DateRange } from "react-day-picker"
 import { format, subDays } from "date-fns"
 import { es } from "date-fns/locale"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Calendar } from "@/components/ui/calendar"
+import { DateRangePicker } from "@/components/ui/date-range-picker"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import PulsingCircle from "@/components/ui/pulsing-circle"
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible"
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
 
@@ -85,6 +86,37 @@ function translateTopicToSpanish(topic: string): string {
     "Employment & Jobs": "Empleo y Profesiones",
     "Share of Voice & Monitoring": "Share of Voice y Monitorización",
     "Future Outlook & Trends": "Perspectivas y Tendencias",
+    // Variantes sin ampersand o con nombres canónicos
+    "Admissions & Enrollment": "Admisiones e Inscripción",
+    "Admissions Enrollment": "Admisiones e Inscripción",
+    "Scholarships & Cost": "Becas y Coste",
+    "Curriculum & Programs": "Plan de estudios y Programas",
+    "Curriculum Programs": "Plan de estudios y Programas",
+    "Campus & Facilities": "Campus e Instalaciones",
+    "Campus Facilities": "Campus e Instalaciones",
+    "Events & Community": "Eventos y Comunidad",
+    "Alumni & Success Stories": "Alumni y Casos de éxito",
+    "Alumni Success Stories": "Alumni y Casos de éxito",
+    // Otras categorías vistas en menús
+    "Brand Monitoring": "Monitorización de Marca",
+    "Brand Partnerships": "Alianzas de Marca",
+    "Career Preferences": "Preferencias de Carrera",
+    "Competition Benchmarking": "Benchmarking de Competencia",
+    "Competitive Analysis": "Análisis Competitivo",
+    "Competitor Benchmark": "Benchmark de Competidores",
+    "Digital Marketing": "Marketing Digital",
+    "Digital Trends": "Tendencias Digitales",
+    "Digital Trends Marketing": "Tendencias Digitales y Marketing",
+    "Employment Jobs": "Empleo y Profesiones",
+    "Employment Outcomes": "Resultados de Empleabilidad",
+    "Future Outlook": "Perspectivas de Futuro",
+    "Future Outlook Trends": "Perspectivas y Tendencias de Futuro",
+    "Industry Buzz": "Buzz del sector",
+    "Industry Perception": "Percepción del Sector",
+    "Innovation Perception": "Percepción de la Innovación",
+    "Innovation Technology": "Innovación y Tecnología",
+    "Job Market": "Mercado laboral",
+    "Motivation Triggers": "Motivaciones y Disparadores",
     "Uncategorized": "Sin categoría",
   };
   return map[topic] || topic;
@@ -116,10 +148,41 @@ function emojiForTopic(topic: string): string {
   return "🧭";
 }
 
+// Utilidad simple para exportar datos a CSV en cliente
+function downloadCSV(filename: string, rows: Array<Record<string, unknown>>) {
+  try {
+    if (!rows || rows.length === 0) return
+    const headers = Object.keys(rows[0] || {})
+    const escapeCell = (value: unknown) => {
+      const s = value === null || value === undefined ? "" : String(value)
+      // Encerrar en comillas y escapar comillas internas
+      return '"' + s.replaceAll('"', '""') + '"'
+    }
+    const lines = [
+      headers.join(","),
+      ...rows.map((r) => headers.map((h) => escapeCell((r as Record<string, unknown>)[h])).join(",")),
+    ]
+    const csv = lines.join("\n")
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.setAttribute("download", filename)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    console.error("No se pudo exportar el CSV", e)
+  }
+}
+
 export function AnalyticsDashboard() {
   // 2. ESTADOS
   const [visibility, setVisibility] = useState<VisibilityApiResponse | null>(null)
   const [competitorData, setCompetitorData] = useState<Competitor[]>([])
+  const [sovByTopic, setSovByTopic] = useState<Record<string, Competitor[]>>({})
+  const [selectedSovTopic, setSelectedSovTopic] = useState<string>("All")
   const [mentions, setMentions] = useState<Mention[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -131,7 +194,7 @@ export function AnalyticsDashboard() {
   });
   // Nuevo estado para saber qué opción está activa en la UI
   const [activePeriod, setActivePeriod] = useState<PresetPeriod>('30d');
-  const [isDatePopoverOpen, setIsDatePopoverOpen] = useState(false)
+  const [isDatePopoverOpen, setIsDatePopoverOpen] = useState(false) // legacy flag (no longer used)
 
   const [activeTab, setActiveTab] = useState("Visibility")
   const [activeSidebarSection, setActiveSidebarSection] = useState("Answer Engine Insights")
@@ -142,6 +205,7 @@ export function AnalyticsDashboard() {
   const [strategySearch, setStrategySearch] = useState("")
   const [selectedBucket, setSelectedBucket] = useState<"all" | "opportunities" | "risks" | "trends">("all")
   const [plannedItems, setPlannedItems] = useState<string[]>([])
+  const [newPlanItem, setNewPlanItem] = useState<string>("")
   const [strategySort, setStrategySort] = useState<"impact" | "date" | "alpha">("impact")
 
   // Filtro: solo modelo (chat)
@@ -149,6 +213,8 @@ export function AnalyticsDashboard() {
   const [selectedModel, setSelectedModel] = useState<string>("all")
   // Filtro: source (oculto, siempre 'all')
   const selectedSource = "all"
+  // Visibilidad ya usa 'Índice de Visibilidad' en backend
+  const sovTopics = useMemo(() => Object.keys(sovByTopic || {}), [sovByTopic])
 
   // Prompts data
   const [promptsGrouped, setPromptsGrouped] = useState<PromptsByTopic[]>([])
@@ -164,6 +230,10 @@ export function AnalyticsDashboard() {
   const [newPromptQuery, setNewPromptQuery] = useState("")
   const [newPromptTopic, setNewPromptTopic] = useState("")
   const [newPromptBrand, setNewPromptBrand] = useState("")
+  const [autoDetectedTopic, setAutoDetectedTopic] = useState<string>("")
+  const [autoDetectConfidence, setAutoDetectConfidence] = useState<number>(0)
+  const [autoDetectSuggestion, setAutoDetectSuggestion] = useState<string>("")
+  const [autoDetectSuggestionIsNew, setAutoDetectSuggestionIsNew] = useState<boolean>(false)
   // Editar/Eliminar Prompt
   const [editPromptOpen, setEditPromptOpen] = useState(false)
   const [editPromptId, setEditPromptId] = useState<number | null>(null)
@@ -174,10 +244,66 @@ export function AnalyticsDashboard() {
   // Sentiment API-backed state
   const [sentimentApi, setSentimentApi] = useState<{ timeseries: { date: string; avg: number }[]; distribution: { negative: number; neutral: number; positive: number }; negatives: { id: number; summary: string | null; key_topics: string[]; source_title: string | null; source_url: string | null; sentiment: number; created_at: string | null }[]; positives?: { id: number; summary: string | null; key_topics: string[]; source_title: string | null; source_url: string | null; sentiment: number; created_at: string | null }[] } | null>(null)
   const [topicsCloud, setTopicsCloud] = useState<{ topic: string; count: number; avg_sentiment?: number }[]>([])
+  // Resumen por tema aplicando filtros globales a cada tema individualmente
+  const [topicSummaries, setTopicSummaries] = useState<Record<string, { positive: number; neutral: number; negative: number; total: number; positivePercent: number }>>({})
+  const [topicSummariesLoading, setTopicSummariesLoading] = useState<boolean>(false)
+
+  // Configuración de gráficos (3 opciones): tipo, zoom (brush) y exportar
+  const [visibilityChartType, setVisibilityChartType] = useState<"line" | "area">("line")
+  const [visibilityBrush, setVisibilityBrush] = useState(false)
+  const [sovDonut, setSovDonut] = useState(true)
+  const [sovShowLabels, setSovShowLabels] = useState(false)
+  const [sentimentChartType, setSentimentChartType] = useState<"line" | "area">("line")
+  const [sentimentBrush, setSentimentBrush] = useState(false)
 
   // Índices para rotación de highlights
   const [negHighlightIdx, setNegHighlightIdx] = useState(0)
   const [posHighlightIdx, setPosHighlightIdx] = useState(0)
+  // Barra global de filtros reutilizable
+  const GlobalFiltersToolbar = () => (
+    <div className="flex items-center gap-2">
+      {/* Presets de periodo */}
+      <Select onValueChange={(value: PresetPeriod) => handlePresetChange(value)} value={activePeriod}>
+        <SelectTrigger className="w-[180px]">
+          <SelectValue placeholder="Seleccionar período" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="7d">Últimos 7 días</SelectItem>
+          <SelectItem value="30d">Últimos 30 días</SelectItem>
+          <SelectItem value="90d">Últimos 90 días</SelectItem>
+          {activePeriod === 'custom' && <SelectItem value="custom" disabled>Rango Personalizado</SelectItem>}
+        </SelectContent>
+      </Select>
+
+      {/* Calendario */}
+      <DateRangePicker value={dateRange} onChange={handleCustomDateChange} />
+
+      {/* Tema (traducción visible) */}
+      <Select value={selectedTopic} onValueChange={setSelectedTopic}>
+        <SelectTrigger className="w-[180px]">
+          <SelectValue placeholder="Tema" />
+        </SelectTrigger>
+        <SelectContent>
+          {topicOptions.map((t) => (
+            <SelectItem key={t} value={t}>{t === 'all' ? 'Todos los temas' : translateTopicToSpanish(t)}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      {/* Modelo */}
+      <Select value={selectedModel} onValueChange={setSelectedModel}>
+        <SelectTrigger className="w-[180px]">
+          <SelectValue placeholder="Modelo" />
+        </SelectTrigger>
+        <SelectContent>
+          {modelOptions.map((m) => (
+            <SelectItem key={m} value={m}>{m === 'all' ? 'Todos los modelos' : m}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  )
+
 
   const openPrompt = async (promptId: number) => {
     try {
@@ -206,16 +332,20 @@ export function AnalyticsDashboard() {
 
   // Sentiment derived data from API
   const sentimentComputed = useMemo(() => {
-    const timeseries = (sentimentApi?.timeseries || []).map(p => ({ date: p.date, value: Math.max(0, Math.min(100, p.avg * 100)) }))
+    // Escala simétrica: -1..1 -> 0..100 para representar bajadas y subidas sin aplanar negativos
+    const toPercent = (avg: number) => Math.max(0, Math.min(100, ((avg + 1) / 2) * 100))
+    const timeseries = (sentimentApi?.timeseries || []).map(p => ({ date: p.date, value: toPercent(p.avg) }))
     const first3 = timeseries.slice(0, 3)
     const last3 = timeseries.slice(-3)
     const avg = (arr: { value: number }[]) => arr.length ? arr.reduce((s, x) => s + x.value, 0) / arr.length : 0
     const delta = Math.round((avg(last3) - avg(first3)) * 10) / 10
     const total = (sentimentApi ? (sentimentApi.distribution.negative + sentimentApi.distribution.neutral + sentimentApi.distribution.positive) : 0) || 1
     const positivePercent = sentimentApi ? (sentimentApi.distribution.positive / total) * 100 : 0
+    const neutralPercent = sentimentApi ? (sentimentApi.distribution.neutral / total) * 100 : 0
     const negativePercent = sentimentApi ? (sentimentApi.distribution.negative / total) * 100 : 0
     return {
       positivePercent,
+      neutralPercent,
       negativePercent,
       delta,
       timeseries,
@@ -239,6 +369,17 @@ export function AnalyticsDashboard() {
     return () => clearInterval(id)
   }, [sentimentComputed.negatives, sentimentComputed.positives])
 
+  // Mantener sincronizado el selector de SOV con el filtro global de tema
+  useEffect(() => {
+    if (selectedTopic === 'all') {
+      setSelectedSovTopic('All')
+    } else if (sovTopics.includes(selectedTopic)) {
+      setSelectedSovTopic(selectedTopic)
+    } else {
+      setSelectedSovTopic('All')
+    }
+  }, [selectedTopic, sovTopics])
+
   // 3. USEEFFECT (sin cambios en su lógica, siempre depende de dateRange)
   useEffect(() => {
     if (!dateRange?.from || !dateRange?.to) {
@@ -249,16 +390,17 @@ export function AnalyticsDashboard() {
         setIsLoading(true)
         setError(null)
         const filters = { model: selectedModel, source: selectedSource, topic: selectedTopic }
-        const [visibilityResponse, competitorsResponse, mentionsResponse, promptsRes, sentimentRes, topicsCloudRes] = await Promise.all([
+        const [visibilityResponse, sovResponse, mentionsResponse, promptsRes, sentimentRes, topicsCloudRes] = await Promise.all([
           getVisibility(dateRange, filters),
-          getCompetitors(dateRange, filters),
+          getShareOfVoice(dateRange, filters),
           getMentions(dateRange, filters),
           getPrompts(dateRange, filters),
           getSentiment(dateRange, filters),
           getTopicsCloud(dateRange, filters),
         ]);
         setVisibility(visibilityResponse);
-        setCompetitorData(competitorsResponse.ranking);
+        setCompetitorData((sovResponse as ShareOfVoiceResponse).overall_ranking);
+        setSovByTopic((sovResponse as ShareOfVoiceResponse).by_topic || {});
         setMentions(mentionsResponse.mentions);
         setPromptsGrouped(promptsRes.topics);
         setSentimentApi(sentimentRes);
@@ -289,6 +431,35 @@ export function AnalyticsDashboard() {
     }
     loadFiltersLists()
   }, [])
+
+  // Cargar resumen por tema (aplica los filtros de fecha/model/source a cada tema, uno a uno)
+  useEffect(() => {
+    const loadPerTopic = async () => {
+      if (!dateRange?.from || !dateRange?.to) return
+      if (!topicOptions || topicOptions.length <= 1) return
+      try {
+        setTopicSummariesLoading(true)
+        const baseFilters = { model: selectedModel, source: selectedSource }
+        const topics = topicOptions.filter(t => t !== 'all')
+        const limited = topics.slice(0, 20) // evitar ráfagas grandes
+        const results = await Promise.all(limited.map(async (t) => {
+          const res = await getSentiment(dateRange, { ...baseFilters, topic: t })
+          const d = res.distribution
+          const total = Math.max((d.negative + d.neutral + d.positive), 0)
+          const positivePercent = total ? (d.positive / total) * 100 : 0
+          return [t, { positive: d.positive, neutral: d.neutral, negative: d.negative, total, positivePercent }] as const
+        }))
+        const map: Record<string, { positive: number; neutral: number; negative: number; total: number; positivePercent: number }> = {}
+        results.forEach(([t, data]) => { map[t] = data })
+        setTopicSummaries(map)
+      } catch (e) {
+        console.error('No se pudo cargar el resumen por tema', e)
+      } finally {
+        setTopicSummariesLoading(false)
+      }
+    }
+    loadPerTopic()
+  }, [dateRange, selectedModel, selectedSource, topicOptions])
 
   // Cargar insights reales cuando estemos en "Estrategias y objetivos"
   useEffect(() => {
@@ -345,15 +516,29 @@ export function AnalyticsDashboard() {
     }
   }, [insightsRows, strategySearch, strategySort])
 
+  // Sugerir CTAs cuando no existan en los insights: derivar de oportunidades/ riesgos/ tendencias
+  const suggestedCtas: string[] = useMemo(() => {
+    if (aggregatedInsights.ctas && aggregatedInsights.ctas.length > 0) {
+      return aggregatedInsights.ctas
+    }
+    const derived: string[] = []
+    aggregatedInsights.opportunities.slice(0, 10).forEach((o) => {
+      derived.push(`Aprovechar oportunidad: ${o.text}`)
+    })
+    aggregatedInsights.trends.slice(0, 10).forEach((t) => {
+      derived.push(`Capitalizar tendencia: ${t.text}`)
+    })
+    aggregatedInsights.risks.slice(0, 10).forEach((r) => {
+      derived.push(`Mitigar riesgo: ${r.text}`)
+    })
+    return derived
+  }, [aggregatedInsights])
+
   const refreshPromptsAndTopics = async () => {
     try {
       const filters = { model: selectedModel, source: selectedSource, topic: selectedTopic }
-      const [promptsRes, topicsRes] = await Promise.all([
-        getPrompts(dateRange!, filters),
-        getTopics(),
-      ])
+      const promptsRes = await getPrompts(dateRange!, filters)
       setPromptsGrouped(promptsRes.topics)
-      setTopicOptions(["all", ...(topicsRes.topics || [])])
     } catch (e) {
       console.error("No se pudieron refrescar prompts/topics", e)
     }
@@ -362,15 +547,13 @@ export function AnalyticsDashboard() {
   const handleCreatePrompt = async () => {
     try {
       if (!newPromptQuery.trim()) return
-      await createPrompt({
-        query: newPromptQuery.trim(),
-        topic: newPromptTopic.trim() || undefined,
-        brand: newPromptBrand.trim() || undefined,
-      })
+      const detected = autoDetectedTopic || newPromptTopic.trim() || undefined
+      await createPrompt({ query: newPromptQuery.trim(), topic: detected, brand: newPromptBrand.trim() || undefined })
       setAddPromptOpen(false)
       setNewPromptQuery("")
       setNewPromptTopic("")
       setNewPromptBrand("")
+      setAutoDetectedTopic("")
       await refreshPromptsAndTopics()
     } catch (e) {
       console.error("No se pudo crear el prompt", e)
@@ -421,11 +604,8 @@ export function AnalyticsDashboard() {
   };
 
   const handleCustomDateChange = (range: DateRange | undefined) => {
-      setDateRange(range);
-      setActivePeriod('custom'); // Marcar que estamos en un rango personalizado
-      if (range?.from && range?.to) {
-        setIsDatePopoverOpen(false)
-      }
+    setDateRange(range)
+    setActivePeriod('custom')
   }
 
   // 5. MANEJO DE CARGA Y ERROR (sin cambios)
@@ -488,13 +668,12 @@ export function AnalyticsDashboard() {
               <div className="flex items-center justify-between p-6">
                 <div className="flex items-center gap-4">
                   <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 bg-blue-600 rounded flex items-center justify-center shadow-sm">
-                      <span className="text-xs text-white font-semibold">A</span>
-                    </div>
+                    <Image src="/the-core-logo.png" alt="The Core School" width={28} height={28} className="w-7 h-7 object-contain" />
                     <h1 className="text-xl font-semibold text-black"> The Core School </h1>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  <GlobalFiltersToolbar />
                   <Button variant="ghost" size="sm"> <MoreHorizontal className="w-4 h-4" /> </Button>
                 </div>
               </div>
@@ -726,7 +905,7 @@ export function AnalyticsDashboard() {
                     ) : (
                       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                         <div className="lg:col-span-2 space-y-2">
-                          {aggregatedInsights.ctas.slice(0, 50).map((cta, i) => (
+                          {(suggestedCtas.length > 0 ? suggestedCtas : aggregatedInsights.ctas).slice(0, 50).map((cta, i) => (
                             <div key={`cta-${i}`} className="flex items-start gap-2 p-2 border rounded">
                               <div className="mt-1 w-2 h-2 rounded-full bg-green-500" />
                               <div className="text-sm text-gray-900">{cta}</div>
@@ -737,8 +916,13 @@ export function AnalyticsDashboard() {
                             </div>
                           ))}
                           {aggregatedInsights.quotes.slice(0, 8).map((q, i) => (
-                            <div key={`q-${i}`} className="p-3 border rounded bg-gray-50 text-sm italic text-gray-700">“{q}”</div>
+                            <div key={`q-${i}`} className="p-3 border rounded bg-gray-50 text-sm italic text-gray-700">"{q}"</div>
                           ))}
+                          {suggestedCtas.length === 0 && aggregatedInsights.quotes.length === 0 && (
+                            <div className="p-6 border rounded text-sm text-muted-foreground bg-gray-50">
+                              No hay recomendaciones para este rango y filtros. Ajusta los filtros o genera nuevas menciones para ver sugerencias aquí.
+                            </div>
+                          )}
                         </div>
                         <div className="lg:col-span-1">
                           <Card className="shadow-sm bg-white sticky top-4">
@@ -758,6 +942,16 @@ export function AnalyticsDashboard() {
                                     </div>
                                   ))
                                 )}
+                              </div>
+                              <div className="mt-3 flex gap-2">
+                                <Input value={newPlanItem} onChange={(e) => setNewPlanItem(e.target.value)} placeholder="Añadir nota rápida" />
+                                <Button
+                                  onClick={() => {
+                                    if (!newPlanItem.trim()) return
+                                    setPlannedItems((prev) => [...prev, newPlanItem.trim()])
+                                    setNewPlanItem("")
+                                  }}
+                                >Añadir</Button>
                               </div>
                               <div className="mt-3 flex gap-2">
                                 <Button className="flex-1" onClick={() => navigator.clipboard.writeText(plannedItems.join("\n"))}>Copiar plan</Button>
@@ -780,9 +974,7 @@ export function AnalyticsDashboard() {
               <div className="flex items-center justify-between p-6">
                 <div className="flex items-center gap-4">
                   <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 bg-blue-600 rounded flex items-center justify-center shadow-sm">
-                      <span className="text-xs text-white font-semibold">A</span>
-                    </div>
+                    <Image src="/the-core-logo.png" alt="The Core School" width={28} height={28} className="w-7 h-7 object-contain" />
                     <h1 className="text-xl font-semibold text-black"> The Core School </h1>
                   </div>
                 </div>
@@ -802,81 +994,8 @@ export function AnalyticsDashboard() {
                 {activeTab === 'Visibility' && visibility && (
                   <>
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-4">
-                        
-                        {/* Selector para presets */}
-                        <Select onValueChange={(value: PresetPeriod) => handlePresetChange(value)} value={activePeriod}>
-                            <SelectTrigger className="w-[180px]">
-                                <SelectValue placeholder="Seleccionar período" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="7d">Últimos 7 días</SelectItem>
-                                <SelectItem value="30d">Últimos 30 días</SelectItem>
-                                <SelectItem value="90d">Últimos 90 días</SelectItem>
-                                {activePeriod === 'custom' && <SelectItem value="custom" disabled>Rango Personalizado</SelectItem>}
-                            </SelectContent>
-                        </Select>
-
-                        {/* Selector de calendario para rango personalizado */}
-                        <Popover open={isDatePopoverOpen} onOpenChange={setIsDatePopoverOpen}>
-                          <PopoverTrigger asChild>
-                            <Button
-                              id="date"
-                              variant={"outline"}
-                              className={cn( "w-[260px] justify-start text-left font-normal shadow-sm bg-white border-gray-200", !dateRange && "text-muted-foreground" )}
-                            >
-                              <CalendarIcon className="mr-2 h-4 w-4" />
-                              {dateRange?.from ? (
-                                dateRange.to ? (
-                                  <>
-                                    {format(dateRange.from, "dd LLL y", { locale: es })} -{" "}
-                                    {format(dateRange.to, "dd LLL y", { locale: es })}
-                                  </>
-                                ) : (
-                                  format(dateRange.from, "dd LLL y", { locale: es })
-                                )
-                              ) : (
-                                <span>Elige una fecha</span>
-                              )}
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-[280px] p-2" align="start" side="bottom" sideOffset={6}>
-                            <Calendar
-                              initialFocus
-                              mode="range"
-                              defaultMonth={dateRange?.from}
-                              selected={dateRange}
-                              onSelect={handleCustomDateChange}
-                              numberOfMonths={1}
-                            />
-                          </PopoverContent>
-                        </Popover>
-
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {/* Topic */}
-                        <Select value={selectedTopic} onValueChange={setSelectedTopic}>
-                          <SelectTrigger className="w-[180px]">
-                            <SelectValue placeholder="Tema" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {topicOptions.map((t) => (
-                              <SelectItem key={t} value={t}>{t === 'all' ? 'Todos los temas' : t}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        {/* Model (Chat) */}
-                        <Select value={selectedModel} onValueChange={setSelectedModel}>
-                          <SelectTrigger className="w-[180px]">
-                            <SelectValue placeholder="Modelo" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {modelOptions.map((m) => (
-                              <SelectItem key={m} value={m}>{m === 'all' ? 'Todos los modelos' : m}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
+                      <GlobalFiltersToolbar />
+                      <div className="flex items-center gap-2"></div>
                     </div>
                     
                     {/* El resto del JSX no necesita cambios */}
@@ -888,7 +1007,23 @@ export function AnalyticsDashboard() {
                               <CardTitle className="text-lg font-semibold">Puntuación de visibilidad</CardTitle>
                               <p className="text-sm text-muted-foreground"> Frecuencia con la que The Core School aparece en respuestas generadas por IA </p>
                             </div>
-                            <Button variant="outline" size="sm"> Configurar gráfico <ChevronDown className="w-4 h-4 ml-2" /> </Button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="outline" size="sm"> Configurar gráfico <ChevronDown className="w-4 h-4 ml-2" /> </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-56">
+                                <DropdownMenuItem onClick={() => setVisibilityChartType((t) => (t === "line" ? "area" : "line"))}>
+                                  Tipo: {visibilityChartType === "line" ? "Línea" : "Área"} (alternar)
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => setVisibilityBrush((v) => !v)}>
+                                  {visibilityBrush ? "Quitar zoom (Brush)" : "Activar zoom (Brush)"}
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onClick={() => downloadCSV("visibilidad.csv", (visibility?.series || []).map((d) => ({ Fecha: (d as any).date, Valor: (d as any).value })))}>
+                                  Exportar CSV
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </CardHeader>
                           <CardContent>
                             <div className="mb-6">
@@ -902,12 +1037,37 @@ export function AnalyticsDashboard() {
                             </div>
                             <div className="h-64">
                               <ResponsiveContainer width="100%" height="100%">
-                                <LineChart data={visibility.series}>
-                                  <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
-                                  <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} domain={["dataMin - 1", "dataMax + 1"]} />
-                                  <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }} />
-                                  <Line type="monotone" dataKey="value" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={{ fill: "hsl(var(--chart-2))", strokeWidth: 2, r: 4 }} />
-                                </LineChart>
+                                {visibilityChartType === "line" ? (
+                                  <LineChart data={visibility.series}>
+                                    <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
+                                    <YAxis
+                                      axisLine={false}
+                                      tickLine={false}
+                                      domain={[0, 100]}
+                                      ticks={[0,10,20,30,40,50,60,70,80,90,100]}
+                                      tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }}
+                                      tickFormatter={(v: number) => `${v}%`}
+                                    />
+                                    <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }} formatter={(v: number) => [`${Number(v).toFixed(1)}%`, 'Índice de Visibilidad']} />
+                                    <Line type="monotone" dataKey="value" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={{ fill: "hsl(var(--chart-2))", strokeWidth: 2, r: 4 }} />
+                                    {visibilityBrush && <Brush dataKey="date" height={20} />}
+                                  </LineChart>
+                                ) : (
+                                  <AreaChart data={visibility.series}>
+                                    <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
+                                    <YAxis
+                                      axisLine={false}
+                                      tickLine={false}
+                                      domain={[0, 100]}
+                                      ticks={[0,10,20,30,40,50,60,70,80,90,100]}
+                                      tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }}
+                                      tickFormatter={(v: number) => `${v}%`}
+                                    />
+                                    <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }} formatter={(v: number) => [`${Number(v).toFixed(1)}%`, 'Índice de Visibilidad']} />
+                                    <Area type="monotone" dataKey="value" stroke="hsl(var(--chart-2))" fill="hsl(var(--chart-2))" fillOpacity={0.2} />
+                                    {visibilityBrush && <Brush dataKey="date" height={20} />}
+                                  </AreaChart>
+                                )}
                               </ResponsiveContainer>
                             </div>
                             <div className="flex items-center gap-4 mt-4">
@@ -990,14 +1150,30 @@ export function AnalyticsDashboard() {
                               <CardTitle className="text-lg font-semibold">Share of Voice</CardTitle>
                               <p className="text-sm text-muted-foreground"> Menciones de {primaryBrandName} en respuestas generadas por IA en relación con competidores </p>
                             </div>
-                            <Button variant="outline" size="sm"> Configurar gráfico <ChevronDown className="w-4 h-4 ml-2" /> </Button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="outline" size="sm"> Configurar gráfico <ChevronDown className="w-4 h-4 ml-2" /> </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-56">
+                                <DropdownMenuItem onClick={() => setSovDonut((v) => !v)}>
+                                  Tipo: {sovDonut ? "Donut" : "Pie"} (alternar)
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => setSovShowLabels((v) => !v)}>
+                                  {sovShowLabels ? "Ocultar etiquetas" : "Mostrar etiquetas"}
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onClick={() => downloadCSV("share_of_voice.csv", pieData.map((d) => ({ Marca: d.name, Valor: d.value })))}>
+                                  Exportar CSV
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </CardHeader>
                           <CardContent>
                             {/* Pie chart comparativo de share of voice por marca */}
                             <div className="h-72">
                               <ResponsiveContainer width="100%" height="100%">
                                 <PieChart>
-                                  <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} innerRadius={50} paddingAngle={2}>
+                                  <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} innerRadius={sovDonut ? 50 : 0} paddingAngle={2} label={sovShowLabels}>
                                     {pieData.map((entry, index) => (
                                       <Cell key={`cell-${index}`} fill={entry.color} />
                                     ))}
@@ -1033,7 +1209,7 @@ export function AnalyticsDashboard() {
                                 <span>Activo</span>
                                 <span>Share of Voice</span>
                               </div>
-                              {competitorData.slice(0, 3).map((competitor) => (
+                              {competitorData.map((competitor) => (
                                 <div
                                   key={competitor.rank}
                                   className={`flex items-center justify-between p-2 rounded ${competitor.name === primaryBrandName ? "bg-accent/20" : ""}`}
@@ -1054,57 +1230,49 @@ export function AnalyticsDashboard() {
                         </Card>
                       </div>
                     </div>
+
+                    {/* Share of Voice por Tema */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-lg font-semibold">Share of Voice por Tema</h3>
+                        <Select value={selectedSovTopic} onValueChange={(v) => { setSelectedSovTopic(v); setSelectedTopic(v === 'All' ? 'all' : v); }}>
+                          <SelectTrigger className="w-[240px]"><SelectValue placeholder="Tema" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="All">Todos</SelectItem>
+                            {sovTopics.map(t => (<SelectItem key={t} value={t}>{translateTopicToSpanish(t)}</SelectItem>))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Card className="shadow-sm bg-white">
+                        <CardContent>
+                          {selectedSovTopic === 'All' ? (
+                            <div className="text-sm text-muted-foreground">Selecciona un tema para ver su ranking específico.</div>
+                          ) : (
+                            <div className="space-y-2">
+                              {(sovByTopic[selectedSovTopic] || []).map((item) => (
+                                <div key={`${selectedSovTopic}-${item.rank}`} className="flex items-center justify-between p-2 rounded border">
+                                  <div className="flex items-center gap-3">
+                                    <span className="text-sm text-muted-foreground">{item.rank}.</span>
+                                    <div className={`w-3 h-3 rounded-full ${item.color}`}></div>
+                                    <span className="text-sm font-medium">{item.name}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm font-medium">{item.score}</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </div>
                   </>
                 )}
                 {activeTab === 'Sentiment' && (
                   <>
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-4">
-                        <Select onValueChange={(value: PresetPeriod) => handlePresetChange(value)} value={activePeriod}>
-                          <SelectTrigger className="w-[180px]">
-                            <SelectValue placeholder="Seleccionar período" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="7d">Últimos 7 días</SelectItem>
-                            <SelectItem value="30d">Últimos 30 días</SelectItem>
-                            <SelectItem value="90d">Últimos 90 días</SelectItem>
-                            {activePeriod === 'custom' && <SelectItem value="custom" disabled>Rango Personalizado</SelectItem>}
-                          </SelectContent>
-                        </Select>
-                        <Popover open={isDatePopoverOpen} onOpenChange={setIsDatePopoverOpen}>
-                          <PopoverTrigger asChild>
-                            <Button id="date" variant={"outline"} className={cn("w-[260px] justify-start text-left font-normal shadow-sm bg-white border-gray-200", !dateRange && "text-muted-foreground")}> 
-                              <CalendarIcon className="mr-2 h-4 w-4" />
-                              {dateRange?.from ? (
-                                dateRange.to ? (<>
-                                  {format(dateRange.from, "dd LLL y", { locale: es })} - {format(dateRange.to, "dd LLL y", { locale: es })}
-                                </>) : (
-                                  format(dateRange.from, "dd LLL y", { locale: es })
-                                )
-                              ) : (
-                                <span>Elige una fecha</span>
-                              )}
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-[280px] p-2" align="start" side="bottom" sideOffset={6}>
-                            <Calendar initialFocus mode="range" defaultMonth={dateRange?.from} selected={dateRange} onSelect={handleCustomDateChange} numberOfMonths={1} />
-                          </PopoverContent>
-                        </Popover>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Select value={selectedTopic} onValueChange={setSelectedTopic}>
-                          <SelectTrigger className="w-[180px]"><SelectValue placeholder="Tema" /></SelectTrigger>
-                          <SelectContent>
-                            {topicOptions.map((t) => (<SelectItem key={t} value={t}>{t === 'all' ? 'Todos los temas' : t}</SelectItem>))}
-                          </SelectContent>
-                        </Select>
-                        <Select value={selectedModel} onValueChange={setSelectedModel}>
-                          <SelectTrigger className="w-[180px]"><SelectValue placeholder="Modelo" /></SelectTrigger>
-                          <SelectContent>
-                            {modelOptions.map((m) => (<SelectItem key={m} value={m}>{m === 'all' ? 'Todos los modelos' : m}</SelectItem>))}
-                          </SelectContent>
-                        </Select>
-                      </div>
+                      <GlobalFiltersToolbar />
+                      <div className="flex items-center gap-2"></div>
                     </div>
 
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -1115,7 +1283,23 @@ export function AnalyticsDashboard() {
                               <CardTitle className="text-lg font-semibold">Análisis de sentimiento</CardTitle>
                               <p className="text-sm text-muted-foreground"> Sentimiento positivo a lo largo del tiempo </p>
                             </div>
-                            <Button variant="outline" size="sm"> Configurar gráfico <ChevronDown className="w-4 h-4 ml-2" /> </Button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="outline" size="sm"> Configurar gráfico <ChevronDown className="w-4 h-4 ml-2" /> </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-56">
+                                <DropdownMenuItem onClick={() => setSentimentChartType((t) => (t === "line" ? "area" : "line"))}>
+                                  Tipo: {sentimentChartType === "line" ? "Línea" : "Área"} (alternar)
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => setSentimentBrush((v) => !v)}>
+                                  {sentimentBrush ? "Quitar zoom (Brush)" : "Activar zoom (Brush)"}
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onClick={() => downloadCSV("sentimiento.csv", (sentimentComputed.timeseries || []).map((d) => ({ Fecha: d.date, Valor: d.value })))}>
+                                  Exportar CSV
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </CardHeader>
                           <CardContent>
                             <div className="mb-6">
@@ -1129,26 +1313,40 @@ export function AnalyticsDashboard() {
                             </div>
                             <div className="h-64">
                               <ResponsiveContainer width="100%" height="100%">
-                                <LineChart data={sentimentComputed.timeseries}>
-                                  <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
-                                  <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} domain={[0, 100]} />
-                                  <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }} formatter={(v) => [`${Number(v).toFixed(1)}%`, 'Positivo']} />
-                                  <Line type="monotone" dataKey="value" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={{ fill: "hsl(var(--chart-1))", strokeWidth: 2, r: 4 }} />
-                                </LineChart>
+                                {sentimentChartType === "line" ? (
+                                  <LineChart data={sentimentComputed.timeseries}>
+                                    <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
+                                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} domain={[0, 100]} />
+                                    <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }} formatter={(v) => [`${Number(v).toFixed(1)}%`, 'Positivo']} />
+                                    <Line type="monotone" dataKey="value" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={{ fill: "hsl(var(--chart-1))", strokeWidth: 2, r: 4 }} />
+                                    {sentimentBrush && <Brush dataKey="date" height={20} />}
+                                  </LineChart>
+                                ) : (
+                                  <AreaChart data={sentimentComputed.timeseries}>
+                                    <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
+                                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} domain={[0, 100]} />
+                                    <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }} formatter={(v) => [`${Number(v).toFixed(1)}%`, 'Positivo']} />
+                                    <Area type="monotone" dataKey="value" stroke="hsl(var(--chart-1))" fill="hsl(var(--chart-1))" fillOpacity={0.2} />
+                                    {sentimentBrush && <Brush dataKey="date" height={20} />}
+                                  </AreaChart>
+                                )}
                               </ResponsiveContainer>
                             </div>
 
                             <div className="mt-6">
                               <div className="flex items-center justify-between text-sm mb-2">
                                 <span>Negativo</span>
+                                <span>Neutral</span>
                                 <span>Positivo</span>
                               </div>
                               <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden flex">
                                 <div className="h-3 bg-red-500" style={{ width: `${Math.min(100, Math.max(0, sentimentComputed.negativePercent))}%` }}></div>
+                                <div className="h-3 bg-gray-400" style={{ width: `${Math.min(100, Math.max(0, sentimentComputed.neutralPercent || 0))}%` }}></div>
                                 <div className="h-3 bg-green-500" style={{ width: `${Math.min(100, Math.max(0, sentimentComputed.positivePercent))}%` }}></div>
                               </div>
                               <div className="flex items-center justify-between text-xs text-muted-foreground mt-1">
                                 <span>{sentimentComputed.negativePercent.toFixed(1)}%</span>
+                                <span>{(sentimentComputed.neutralPercent || 0).toFixed(1)}%</span>
                                 <span>{sentimentComputed.positivePercent.toFixed(1)}%</span>
                               </div>
                             </div>
@@ -1163,26 +1361,6 @@ export function AnalyticsDashboard() {
                           </CardHeader>
                           <CardContent>
                             <div className="space-y-4">
-                              {/* Negativo */}
-                              {sentimentComputed.negatives && sentimentComputed.negatives.length > 0 ? (
-                                (() => { const m = sentimentComputed.negatives[negHighlightIdx % sentimentComputed.negatives.length]; return (
-                                  <div key={`neg-${m.id}-${negHighlightIdx}`} className="p-3 border rounded bg-red-50 border-red-200">
-                                    <div className="text-xs text-red-700 mb-1">Negativo · {m.sentiment?.toFixed(2)}</div>
-                                    <div className="text-sm text-gray-900 line-clamp-3">{m.summary || ''}</div>
-                                    <div className="mt-2 flex flex-wrap gap-1">
-                                      {(m.key_topics || []).slice(0, 5).map((t, i) => (
-                                        <Badge key={`${m.id}-t-${i}`} variant="secondary" className="text-xs">{t}</Badge>
-                                      ))}
-                                    </div>
-                                    {m.source_url && (
-                                      <div className="mt-2 text-xs"><a href={m.source_url} target="_blank" rel="noreferrer" className="text-blue-600 underline">{m.source_title || m.source_url}</a></div>
-                                    )}
-                                  </div>
-                                ) })()
-                              ) : (
-                                <div className="p-3 border rounded bg-gray-50 border-gray-200 text-sm text-gray-600">No hay ninguna negativa</div>
-                              )}
-
                               {/* Positivo */}
                               {sentimentComputed.positives && sentimentComputed.positives.length > 0 ? (
                                 (() => { const p = sentimentComputed.positives[posHighlightIdx % sentimentComputed.positives.length]; return (
@@ -1202,6 +1380,26 @@ export function AnalyticsDashboard() {
                               ) : (
                                 <div className="p-3 border rounded bg-gray-50 border-gray-200 text-sm text-gray-600">No hay ninguna positiva</div>
                               )}
+
+                              {/* Negativo */}
+                              {sentimentComputed.negatives && sentimentComputed.negatives.length > 0 ? (
+                                (() => { const m = sentimentComputed.negatives[negHighlightIdx % sentimentComputed.negatives.length]; return (
+                                  <div key={`neg-${m.id}-${negHighlightIdx}`} className="p-3 border rounded bg-red-50 border-red-200">
+                                    <div className="text-xs text-red-700 mb-1">Negativo · {m.sentiment?.toFixed(2)}</div>
+                                    <div className="text-sm text-gray-900 line-clamp-3">{m.summary || ''}</div>
+                                    <div className="mt-2 flex flex-wrap gap-1">
+                                      {(m.key_topics || []).slice(0, 5).map((t, i) => (
+                                        <Badge key={`${m.id}-t-${i}`} variant="secondary" className="text-xs">{t}</Badge>
+                                      ))}
+                                    </div>
+                                    {m.source_url && (
+                                      <div className="mt-2 text-xs"><a href={m.source_url} target="_blank" rel="noreferrer" className="text-blue-600 underline">{m.source_title || m.source_url}</a></div>
+                                    )}
+                                  </div>
+                                ) })()
+                              ) : (
+                                <div className="p-3 border rounded bg-gray-50 border-gray-200 text-sm text-gray-600">No hay ninguna negativa</div>
+                              )}
                             </div>
                           </CardContent>
                         </Card>
@@ -1212,6 +1410,7 @@ export function AnalyticsDashboard() {
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
                         <h3 className="text-lg font-semibold">Temas</h3>
+                        {topicSummariesLoading && <span className="text-xs text-muted-foreground">Calculando por tema…</span>}
                       </div>
                       <Card className="shadow-sm bg-white border-gray-200">
                         <CardContent className="p-0">
@@ -1221,18 +1420,22 @@ export function AnalyticsDashboard() {
                                 <tr>
                                   <th className="text-left p-4 font-medium text-gray-600">Tema</th>
                                   <th className="text-left p-4 font-medium text-gray-600">Sentimiento medio</th>
+                                  <th className="text-left p-4 font-medium text-gray-600">% positivo (filtros)</th>
                                   <th className="text-left p-4 font-medium text-gray-600">Ocurrencias</th>
                                 </tr>
                               </thead>
                               <tbody className="bg-white">
-                                {topicsCloud.slice(0, 50).map((t) => (
+                                {(() => {
+                                  const top = topicsCloud.slice(0, 50)
+                                  const maxCount = Math.max(...top.map(t => t.count || 0), 1)
+                                  return top.map((t) => (
                                   <tr key={t.topic} className="border-b border-gray-100 hover:bg-gray-50">
                                     <td className="p-4">
                                       <div className="flex items-center gap-3">
                                         <div className="w-8 h-8 bg-blue-50 border border-blue-200 rounded-full flex items-center justify-center">
                                           <span className="text-base">🧩</span>
                                         </div>
-                                        <div className="font-medium text-gray-900">{t.topic}</div>
+                                        <div className="font-medium text-gray-900">{translateTopicToSpanish(t.topic)}</div>
                                       </div>
                                     </td>
                                     <td className="p-4">
@@ -1241,13 +1444,17 @@ export function AnalyticsDashboard() {
                                       </span>
                                     </td>
                                     <td className="p-4">
+                                      <span className="text-sm text-gray-900">{(topicSummaries[t.topic]?.positivePercent ?? 0).toFixed(1)}%</span>
+                                    </td>
+                                    <td className="p-4">
                                       <div className="flex items-center gap-3">
                                         <span className="font-medium">{t.count}</span>
-                                        <div className="w-32 h-1.5 bg-gray-200 rounded-full overflow-hidden"><div className="h-1.5 bg-gray-800" style={{ width: `${Math.min(100, t.count) }%` }}></div></div>
+                                        <div className="w-32 h-1.5 bg-gray-200 rounded-full overflow-hidden"><div className="h-1.5 bg-gray-800" style={{ width: `${Math.max(0, Math.min(100, (t.count / maxCount) * 100)) }%` }}></div></div>
                                       </div>
                                     </td>
                                   </tr>
-                                ))}
+                                  ))
+                                })()}
                               </tbody>
                             </table>
                           </div>
@@ -1261,10 +1468,17 @@ export function AnalyticsDashboard() {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-4">
                         <h2 className="text-xl font-semibold text-gray-900">Prompts</h2>
-                        <Button variant="outline" size="sm" className="shadow-sm bg-white border-gray-200">
-                          Agrupar por: Tema
-                          <ChevronDown className="w-4 h-4 ml-2" />
-                        </Button>
+                        {/* Filtro de Tema igual al de Visibilidad */}
+                        <Select value={selectedTopic} onValueChange={setSelectedTopic}>
+                          <SelectTrigger className="w-[220px]">
+                            <SelectValue placeholder="Todos los topics" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {topicOptions.map((t) => (
+                              <SelectItem key={t} value={t}>{t === 'all' ? 'Todos los topics' : translateTopicToSpanish(t)}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                         <Button size="sm" onClick={() => setAddPromptOpen(true)} className="shadow-sm">+ Añadir Prompt</Button>
                       </div>
                       <div className="relative">
@@ -1297,7 +1511,14 @@ export function AnalyticsDashboard() {
                                   const isOpen = !!openTopics[group.topic]
                                   return (
                                     <>
-                                      <tr key={group.topic} className="border-b border-gray-100 hover:bg-gray-50 bg-white cursor-pointer" onClick={() => setOpenTopics(prev => ({ ...prev, [group.topic]: !prev[group.topic] }))}>
+                                      <tr
+                                        key={group.topic}
+                                        className="border-b border-gray-100 hover:bg-gray-50 bg-white cursor-pointer"
+                                        onClick={() => {
+                                          setSelectedTopic(group.topic)
+                                          setOpenTopics(prev => ({ ...prev, [group.topic]: !prev[group.topic] }))
+                                        }}
+                                      >
                                         <td className="p-4">
                                           <div className="flex items-center gap-3">
                                             <ChevronRight className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
@@ -1380,7 +1601,7 @@ export function AnalyticsDashboard() {
                 )}
                 {/* Modal de detalle de prompt */}
                 <Dialog open={promptModalOpen} onOpenChange={setPromptModalOpen}>
-                  <DialogContent className="w-[96vw] max-w-[1400px] max-h-[85vh] overflow-y-auto">
+                  <DialogContent className="w-[95vw] max-w-7xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                       <DialogTitle className="text-lg">{promptDetails?.query || "Prompt"}</DialogTitle>
                     </DialogHeader>
@@ -1394,14 +1615,14 @@ export function AnalyticsDashboard() {
                           <div className="text-xs text-muted-foreground">Rango aplicado al dashboard</div>
                         </div>
 
-                        {/* Gráficos */}
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Gráficos (full width, apilados) */}
+                        <div className="grid grid-cols-1 gap-6">
                           <Card className="shadow-sm bg-white">
                             <CardHeader>
                               <CardTitle className="text-sm">Puntuación de visibilidad</CardTitle>
                             </CardHeader>
                             <CardContent>
-                              <div className="h-[300px] sm:h-[340px] md:h-[380px] lg:h-[420px]">
+                              <div className="h-[360px] sm:h-[400px] md:h-[440px] lg:h-[480px]">
                                 <ResponsiveContainer width="100%" height="100%">
                                   <LineChart data={promptDetails.timeseries}>
                                     <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
@@ -1454,28 +1675,25 @@ export function AnalyticsDashboard() {
                   </DialogContent>
                 </Dialog>
 
-                {/* Modal para crear nuevo prompt */}
+                {/* Modal para crear nuevo prompt - versión minimalista con círculo animado */}
                 <Dialog open={addPromptOpen} onOpenChange={setAddPromptOpen}>
-                  <DialogContent className="sm:max-w-[520px]">
-                    <DialogHeader>
-                      <DialogTitle className="text-lg">Añadir nuevo Prompt</DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-3">
-                      <div>
-                        <label className="block text-sm text-gray-600 mb-1">Consulta</label>
-                        <Input value={newPromptQuery} onChange={(e) => setNewPromptQuery(e.target.value)} placeholder="Escribe el prompt..." />
+                  <DialogContent className="sm:max-w-[640px]">
+                    <div className="flex flex-col items-center gap-4 py-2">
+                      <div className="w-full flex items-center justify-center mt-1">
+                        <PulsingCircle position="center" size={120} />
                       </div>
-                      <div>
-                        <label className="block text-sm text-gray-600 mb-1">Topic (opcional)</label>
-                        <Input value={newPromptTopic} onChange={(e) => setNewPromptTopic(e.target.value)} placeholder="p.ej. Target Audience Research" />
+                      <div className="text-center">
+                        <div className="text-xl font-semibold">¿Qué prompt te gustaría introducir?</div>
                       </div>
-                      <div>
-                        <label className="block text-sm text-gray-600 mb-1">Brand (opcional)</label>
-                        <Input value={newPromptBrand} onChange={(e) => setNewPromptBrand(e.target.value)} placeholder="p.ej. The Core School" />
-                      </div>
-                      <div className="flex justify-end gap-2 pt-2">
+                      <Input
+                        value={newPromptQuery}
+                        onChange={async (e) => { const v = e.target.value; setNewPromptQuery(v); try { if (v.trim().length >= 6) { const res = await categorizePromptApi(v, newPromptTopic || undefined); setAutoDetectedTopic(res.category || ""); setAutoDetectConfidence(res.confidence || 0); setAutoDetectSuggestion(res.suggestion || ""); setAutoDetectSuggestionIsNew(!!res.suggestion_is_new); } else { setAutoDetectedTopic(""); setAutoDetectConfidence(0); setAutoDetectSuggestion(""); setAutoDetectSuggestionIsNew(false); } } catch {} }}
+                        placeholder="Escribe el prompt..."
+                        className="w-full"
+                      />
+                      <div className="w-full flex items-center justify-between gap-3">
                         <Button variant="outline" onClick={() => setAddPromptOpen(false)}>Cancelar</Button>
-                        <Button onClick={handleCreatePrompt} disabled={!newPromptQuery.trim()}>Guardar</Button>
+                        <Button onClick={handleCreatePrompt} disabled={!newPromptQuery.trim()} className="rounded-full px-4 py-2">→</Button>
                       </div>
                     </div>
                   </DialogContent>

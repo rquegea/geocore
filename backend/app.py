@@ -87,6 +87,7 @@ def parse_filters(request):
     model = request.args.get('model', 'all')
     source = request.args.get('source', 'all')
     topic = request.args.get('topic', 'all')
+    brand = request.args.get('brand', os.getenv('DEFAULT_BRAND', 'The Core School'))
     sentiment = request.args.get('sentiment', 'all')
     hide_bots = request.args.get('hideBots', '0') == '1'
     status_param = request.args.get('status', 'active')
@@ -99,6 +100,7 @@ def parse_filters(request):
         'model': model,
         'source': source,
         'topic': topic,
+        'brand': brand,
         'sentiment': sentiment,
         'hide_bots': hide_bots,
         'status': status_param,
@@ -297,6 +299,116 @@ def categorize_prompt(topic: str | None, query_text: str | None) -> str:
     return canonicalize_topic(topic or '')
 
 
+def categorize_prompt_detailed(topic: str | None, query_text: str | None) -> dict:
+    """Versión detallada: devuelve categoría, puntuación, alternativas y sugerencia.
+    Regla: combina keywords de taxonomía, similitud con nombre de categoría y patrones de frases.
+    """
+    brand = request.args.get('brand') or os.getenv('DEFAULT_BRAND', 'The Core School')
+
+    # 1) Cargar taxonomía/keywords
+    try:
+        ensure_taxonomy_table()
+        conn = get_db_connection(); cur = conn.cursor()
+        cur.execute("SELECT category, COALESCE(keywords,'[]'::jsonb) FROM topic_taxonomy WHERE brand = %s", (brand,))
+        rows = cur.fetchall(); cur.close(); conn.close()
+        categories_source = { r[0]: list(r[1] or []) } if rows else _CATEGORY_KEYWORDS
+        if rows:
+            # Si solo hay una fila, ampliar con base por defecto
+            categories_source = { r[0]: list(r[1] or []) for r in rows }
+    except Exception:
+        categories_source = _CATEGORY_KEYWORDS
+
+    tokens = _tokenize((topic or '') + ' ' + (query_text or ''))
+
+    # 2) Patrones complementarios (ES/EN)
+    PATTERNS = [
+        (r"alumni|casos\s+de\s+exito|éxito|testimonios|trayectorias", "Alumni & Success Stories"),
+        (r"plan\s+de\s+estudios|curriculum|asignaturas|programas", "Curriculum & Programs"),
+        (r"empleo|empleabilidad|salidas|profesiones|trabajo|job\s*market", "Employment & Jobs"),
+        (r"becas|precio|coste|costo|financiaci[oó]n|roi", "Scholarships & Cost"),
+        (r"competencia|competidores|benchmark", "Competition & Benchmarking"),
+        (r"marca|reputaci[oó]n|monitor", "Brand & Reputation"),
+        (r"tendencias|digital|marketing|redes", "Digital Trends & Marketing"),
+        (r"campus|instalaciones|recursos", "Campus & Facilities"),
+        (r"innovaci[oó]n|tecnolog[ií]a|ia|ai|vr|ar", "Innovation & Technology"),
+        (r"estudiantes|experiencia|expectativas", "Students & Experience"),
+        (r"padres|familia|preocupaciones", "Parents & Family Concerns"),
+    ]
+
+    import re
+    bonus_pattern: dict[str, int] = {}
+    q = (query_text or '').lower()
+    for rx, cat in PATTERNS:
+        if re.search(rx, q):
+            bonus_pattern[cat] = bonus_pattern.get(cat, 0) + 3
+
+    # 3) Scoring por categoría
+    from difflib import SequenceMatcher
+    scores: list[tuple[str, float]] = []
+    for cat, kw_list in categories_source.items():
+        score = 0.0
+        # coincidencia de keywords
+        for kw in kw_list:
+            kwt = _tokenize(kw)
+            if kwt & tokens:
+                score += 2.0
+        # similitud fuzzy con nombre
+        score += SequenceMatcher(None, _normalize_topic_key(' '.join(tokens)), _normalize_topic_key(cat)).ratio() * 2.0
+        # bonus por patrones
+        score += bonus_pattern.get(cat, 0)
+        scores.append((cat, score))
+
+    scores.sort(key=lambda x: x[1], reverse=True)
+    best_cat, best_score = (scores[0] if scores else (canonicalize_topic(topic or ''), 0.0))
+    second_score = scores[1][1] if len(scores) > 1 else 0.0
+    confidence = 0.0
+    if best_score > 0:
+        # normalización simple en función de separación y magnitud
+        confidence = min(1.0, max(0.0, (best_score - second_score + 1) / (best_score + 1)))
+
+    suggestion = None
+    suggestion_is_new = False
+    # similitud a categorías existentes a partir del texto del prompt
+    base_text = canonicalize_topic(query_text or topic or '')
+    known = list(categories_source.keys())
+    closest_existing = None
+    closest_score = 0.0
+    for cat in known:
+        s = SequenceMatcher(None, _normalize_topic_key(base_text), _normalize_topic_key(cat)).ratio()
+        if s > closest_score:
+            closest_score = s; closest_existing = cat
+    is_close_match = bool(closest_existing and closest_score >= 0.75)
+    # Si la confianza es baja o no hay patrones claros, sugerir crear tópico a partir de frase clave
+    if confidence < 0.5:
+        # heurística: Usa primera coincidencia de PATTERNS como etiqueta si no está ya
+        sug = None
+        for _, cat in PATTERNS:
+            if bonus_pattern.get(cat):
+                sug = cat
+                break
+        if not sug:
+            # fallback: usa canónico del topic/consulta
+            sug = canonicalize_topic(topic or query_text or 'Uncategorized')
+        # si hay un existente muy similar, preferirlo
+        if is_close_match:
+            suggestion = closest_existing
+            suggestion_is_new = False
+        else:
+            suggestion_is_new = sug not in set(known)
+            suggestion = sug
+
+    return {
+        "category": best_cat,
+        "confidence": round(float(confidence), 2),
+        "alternatives": [{"category": c, "score": round(float(s), 2)} for c, s in scores[:5]],
+        "suggestion": suggestion,
+        "suggestion_is_new": suggestion_is_new,
+        "closest_existing": closest_existing,
+        "closest_score": round(float(closest_score), 2),
+        "is_close_match": is_close_match,
+    }
+
+
 # --- ENDPOINTS DE LA API ---
 @app.route('/api/taxonomy', methods=['GET'])
 def list_taxonomy():
@@ -452,106 +564,218 @@ def get_mentions():
 
 @app.route('/api/visibility', methods=['GET'])
 def get_visibility():
-    """Obtener datos de visibilidad general."""
+    """Visibilidad = menciones de la marca / total de menciones (con filtros aplicados).
+    Devuelve score del periodo, delta y serie diaria en porcentaje (0–100%).
+    """
     try:
         filters = parse_filters(request)
-        conn = get_db_connection()
-        cur = conn.cursor()
-        
-        # Filtros dinámicos (se agrupa por día)
-        where_clauses = ["m.created_at >= %s AND m.created_at < %s"]
+        brand = request.args.get('brand') or os.getenv('DEFAULT_BRAND', 'The Core School')
+        conn = get_db_connection(); cur = conn.cursor()
+
+        where = ["m.created_at >= %s AND m.created_at < %s"]
         params = [filters['start_date'], filters['end_date']]
-        join_queries = False
         if filters.get('model') and filters['model'] != 'all':
-            where_clauses.append("m.engine = %s")
-            params.append(filters['model'])
+            where.append("m.engine = %s"); params.append(filters['model'])
         if filters.get('source') and filters['source'] != 'all':
-            where_clauses.append("m.source = %s")
-            params.append(filters['source'])
+            where.append("m.source = %s"); params.append(filters['source'])
         if filters.get('topic') and filters['topic'] != 'all':
-            where_clauses.append("q.topic = %s")
-            params.append(filters['topic'])
-            join_queries = True
+            where.append("q.topic = %s"); params.append(filters['topic'])
+        where_sql = " AND ".join(where)
 
-        where_sql = " AND ".join(where_clauses)
-        join_sql = "JOIN queries q ON m.query_id = q.id" if join_queries else ""
+        # Sinónimos/cadenas para detectar la marca en contenido (key_topics o texto)
+        BRAND_SYNONYMS = {
+            "The Core School": ["the core school", "the core", "thecore"],
+        }
+        synonyms = [s.lower() for s in BRAND_SYNONYMS.get(brand, [brand.lower()])]
+        like_patterns = [f"%{s}%" for s in synonyms]
 
-        query = f"""
-        SELECT DATE(m.created_at), COUNT(*)
-        FROM mentions m
-        {join_sql}
-        WHERE {where_sql}
-        GROUP BY DATE(m.created_at)
-        ORDER BY DATE(m.created_at);
-        """
-        cur.execute(query, tuple(params))
-        series_data = cur.fetchall()
+        # Conteo total por día (denominador)
+        cur.execute(f"""
+            SELECT DATE(m.created_at) AS d, COUNT(*)
+            FROM mentions m
+            JOIN queries q ON m.query_id = q.id
+            WHERE {where_sql}
+            GROUP BY DATE(m.created_at)
+            ORDER BY DATE(m.created_at)
+        """, tuple(params))
+        total_rows = cur.fetchall()
 
-        series = [{"date": row[0].strftime('%b %d'), "value": row[1]} for row in series_data]
+        # Conteo de días donde aparece la marca en el contenido (numerador)
+        cur.execute(f"""
+            SELECT DATE(m.created_at) AS d, COUNT(*)
+            FROM mentions m
+            JOIN queries q ON m.query_id = q.id
+            WHERE {where_sql}
+              AND (
+                EXISTS (
+                  SELECT 1 FROM jsonb_array_elements_text(COALESCE(to_jsonb(m.key_topics),'[]'::jsonb)) kt
+                  WHERE LOWER(TRIM(kt)) = ANY(%s)
+                )
+                OR LOWER(COALESCE(m.response,'')) LIKE ANY(%s)
+                OR LOWER(COALESCE(m.source_title,'')) LIKE ANY(%s)
+              )
+            GROUP BY DATE(m.created_at)
+            ORDER BY DATE(m.created_at)
+        """, tuple(params + [synonyms, like_patterns, like_patterns]))
+        core_rows = cur.fetchall()
 
-        cur.close()
-        conn.close()
-        
-        # El score y delta se calcularían con una lógica más compleja, por ahora los dejamos fijos.
-        return jsonify({ "visibility_score": 12.2, "delta": -0.2, "series": series})
+        from datetime import timedelta
+        core_by_day = {d: int(c or 0) for d, c in core_rows}
+        total_by_day = {d: int(c or 0) for d, c in total_rows}
+
+        start_day = filters['start_date'].date()
+        end_day = filters['end_date'].date()
+        day = start_day
+        series = []
+        num_sum = 0
+        den_sum = 0
+        while day <= end_day:
+            num = int(core_by_day.get(day, 0))
+            den = int(total_by_day.get(day, 0))
+            num_sum += num
+            den_sum += den
+            pct = round((num / max(den, 1)) * 100.0, 1)
+            series.append({"date": day.strftime('%b %d'), "value": pct})
+            day += timedelta(days=1)
+
+        visibility_score = round((num_sum / max(den_sum, 1)) * 100.0, 1)
+
+        n = len(series)
+        if n >= 2:
+            mid = n // 2
+            first = sum(p['value'] for p in series[:mid]) / max(mid, 1)
+            second = sum(p['value'] for p in series[mid:]) / max(n - mid, 1)
+            delta = round(second - first, 1)
+        else:
+            delta = 0.0
+
+        cur.close(); conn.close()
+        return jsonify({"visibility_score": visibility_score, "delta": delta, "series": series})
     except Exception as e:
         print(f"Error en get_visibility: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/industry/ranking', methods=['GET'])
 def get_industry_ranking():
-    """Obtener ranking de industria."""
+    """Share of Voice general y por tema basado en detección por key_topics.
+    - overall_ranking: porcentaje por marca sobre el total de ocurrencias de marcas detectadas
+    - by_topic: mismo cálculo pero segmentado por q.topic
+    Filtros: mismos de parse_filters (fecha, modelo, source, topic)
+    """
     try:
         filters = parse_filters(request)
-        conn = get_db_connection()
-        cur = conn.cursor()
-        
-        where_clauses = ["m.created_at >= %s AND m.created_at < %s"]
+        conn = get_db_connection(); cur = conn.cursor()
+
+        where = ["m.created_at >= %s AND m.created_at < %s"]
         params = [filters['start_date'], filters['end_date']]
         if filters.get('model') and filters['model'] != 'all':
-            where_clauses.append("m.engine = %s")
-            params.append(filters['model'])
+            where.append("m.engine = %s"); params.append(filters['model'])
         if filters.get('source') and filters['source'] != 'all':
-            where_clauses.append("m.source = %s")
-            params.append(filters['source'])
+            where.append("m.source = %s"); params.append(filters['source'])
+        # APLICAR FILTRO POR TEMA SI SE SOLICITA
         if filters.get('topic') and filters['topic'] != 'all':
-            where_clauses.append("q.topic = %s")
-            params.append(filters['topic'])
+            # 1) Coincidencia directa por topic de la query
+            topic_filter = filters['topic']
+            # 2) Ó por palabras clave de la categoría presentes en key_topics
+            #    (usa taxonomía por brand si existe; si no, mapping por defecto)
+            try:
+                brand = request.args.get('brand') or os.getenv('DEFAULT_BRAND', 'The Core School')
+                ensure_taxonomy_table()
+                conn_kw = get_db_connection(); cur_kw = conn_kw.cursor()
+                cur_kw.execute("SELECT COALESCE(keywords,'[]'::jsonb) FROM topic_taxonomy WHERE brand = %s AND category = %s", (brand, topic_filter))
+                row_kw = cur_kw.fetchone(); cur_kw.close(); conn_kw.close()
+                keywords = (row_kw[0] if row_kw else None) or _CATEGORY_KEYWORDS.get(topic_filter, [])
+            except Exception:
+                keywords = _CATEGORY_KEYWORDS.get(topic_filter, [])
 
-        where_sql = " AND ".join(where_clauses)
+            # normaliza keywords a minúsculas
+            kw_lowers = [k.strip().lower() for k in keywords if isinstance(k, str) and k.strip()]
+            if kw_lowers:
+                where.append("(q.topic = %s OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(to_jsonb(m.key_topics),'[]'::jsonb)) kt WHERE LOWER(TRIM(kt)) = ANY(%s)))")
+                params.extend([topic_filter, kw_lowers])
+            else:
+                where.append("q.topic = %s"); params.append(topic_filter)
+        where_sql = " AND ".join(where)
 
-        query = f"""
-        SELECT q.brand, COUNT(m.id) as mention_count
-        FROM mentions m
-        JOIN queries q ON m.query_id = q.id
-        WHERE {where_sql}
-        GROUP BY q.brand
-        ORDER BY mention_count DESC;
-        """
-        cur.execute(query, tuple(params))
-        ranking_data = cur.fetchall()
-        cur.close()
-        conn.close()
-        
-        # Asignamos colores y formato para el frontend
+        # Obtener menciones con key_topics
+        cur.execute(f"""
+            SELECT m.key_topics, q.topic
+            FROM mentions m
+            JOIN queries q ON m.query_id = q.id
+            WHERE {where_sql}
+        """, tuple(params))
+        rows = cur.fetchall()
+
+        # Diccionario de marcas y sinónimos
+        BRAND_SYNONYMS = {
+            "The Core School": ["the core", "the core school", "thecore"],
+            "U-TAD": ["u-tad", "utad"],
+            "ECAM": ["ecam"],
+            "TAI": ["tai"],
+            "CES": ["ces"],
+            "CEV": ["cev"],
+            "FX Barcelona Film School": ["fx barcelona", "fx barcelona film school", "fx animation"],
+            "Septima Ars": ["septima ars", "séptima ars"],
+        }
+
+        def detect_brands(topics_list):
+            found = []
+            if not topics_list:
+                return found
+            for canon, alts in BRAND_SYNONYMS.items():
+                for a in alts:
+                    if any((str(t or '').lower().strip() == a) for t in topics_list):
+                        found.append(canon)
+                        break
+            return found
+
+        from collections import defaultdict
+        overall_counts = defaultdict(int)
+        topic_counts = defaultdict(lambda: defaultdict(int))
+        for key_topics, topic in rows:
+            brands = detect_brands(key_topics or [])
+            if not brands:
+                continue
+            for b in brands:
+                overall_counts[b] += 1
+                topic_counts[topic or 'Uncategorized'][b] += 1
+
         colors = ["bg-blue-500", "bg-red-500", "bg-blue-600", "bg-yellow-500", "bg-gray-800"]
-        ranking = []
-        total_mentions = sum(row[1] for row in ranking_data)
-        
-        for i, row in enumerate(ranking_data):
-            brand, count = row
-            score = (count / max(total_mentions, 1)) * 100
-            ranking.append({
+        # overall ranking
+        total_mentions = sum(overall_counts.values()) or 1
+        overall_sorted = sorted(overall_counts.items(), key=lambda x: x[1], reverse=True)
+        overall = []
+        for i, (b, c) in enumerate(overall_sorted):
+            overall.append({
                 "rank": i + 1,
-                "name": brand,
-                "score": f"{score:.1f}%",
-                "change": "+0.0%", # El cambio necesitaría una consulta al período anterior
+                "name": b,
+                "score": f"{(c/total_mentions)*100:.1f}%",
+                "change": "+0.0%",
                 "positive": True,
                 "color": colors[i % len(colors)],
-                "selected": brand == "The Core School" # Marcar la marca principal
+                "selected": b == "The Core School"
             })
 
-        return jsonify({"ranking": ranking})
+        # by_topic ranking
+        by_topic = {}
+        for t, counts in topic_counts.items():
+            tot = sum(counts.values()) or 1
+            pairs = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+            rk = []
+            for i, (b, c) in enumerate(pairs):
+                rk.append({
+                    "rank": i + 1,
+                    "name": b,
+                    "score": f"{(c/tot)*100:.1f}%",
+                    "change": "+0.0%",
+                    "positive": True,
+                    "color": colors[i % len(colors)],
+                    "selected": b == "The Core School"
+                })
+            by_topic[t] = rk
+
+        cur.close(); conn.close()
+        return jsonify({"overall_ranking": overall, "by_topic": by_topic})
     except Exception as e:
         print(f"Error en get_industry_ranking: {e}")
         return jsonify({"error": str(e)}), 500
@@ -592,6 +816,8 @@ def get_insights():
             where_clauses.append("m.source = %s"); params.append(filters['source'])
         if filters.get('topic') and filters['topic'] != 'all':
             where_clauses.append("q.topic = %s"); params.append(filters['topic'])
+        if filters.get('brand'):
+            where_clauses.append("COALESCE(q.brand, '') = %s"); params.append(filters['brand'])
 
         where_sql = " AND ".join(where_clauses)
         sql = f"""
@@ -629,6 +855,8 @@ def get_sentiment():
             where_clauses.append("m.source = %s"); params.append(filters['source'])
         if filters.get('topic') and filters['topic'] != 'all':
             where_clauses.append("q.topic = %s"); params.append(filters['topic'])
+        if filters.get('brand'):
+            where_clauses.append("COALESCE(q.brand, '') = %s"); params.append(filters['brand'])
 
         where_sql = " AND ".join(where_clauses)
         join_sql = "JOIN queries q ON m.query_id = q.id"
@@ -645,12 +873,12 @@ def get_sentiment():
         ts_rows = cur.fetchall()
         timeseries = [{"date": r[0].strftime('%b %d'), "avg": float(r[1] or 0.0)} for r in ts_rows]
 
-        # Buckets (umbrales endurecidos)
+        # Buckets (umbrales afinados)
         cur.execute(f"""
             SELECT 
-                SUM(CASE WHEN m.sentiment < -0.4 THEN 1 ELSE 0 END) AS negative,
-                SUM(CASE WHEN m.sentiment BETWEEN -0.4 AND 0.4 THEN 1 ELSE 0 END) AS neutral,
-                SUM(CASE WHEN m.sentiment > 0.4 THEN 1 ELSE 0 END) AS positive
+                SUM(CASE WHEN m.sentiment < -0.3 THEN 1 ELSE 0 END) AS negative,
+                SUM(CASE WHEN m.sentiment BETWEEN -0.3 AND 0.3 THEN 1 ELSE 0 END) AS neutral,
+                SUM(CASE WHEN m.sentiment > 0.3 THEN 1 ELSE 0 END) AS positive
             FROM mentions m
             {join_sql}
             WHERE {where_sql}
@@ -658,12 +886,12 @@ def get_sentiment():
         bucket_row = cur.fetchone() or (0,0,0)
         distribution = {"negative": int(bucket_row[0] or 0), "neutral": int(bucket_row[1] or 0), "positive": int(bucket_row[2] or 0)}
 
-        # Top negativas recientes (sentimiento < -0.4 y confianza >= 0.6)
+        # Top negativas recientes (sentimiento < -0.3 y confianza >= 0.6)
         cur.execute(f"""
             SELECT m.id, m.summary, m.key_topics, m.source_title, m.source_url, m.sentiment, m.created_at
             FROM mentions m
             {join_sql}
-            WHERE {where_sql} AND COALESCE(m.sentiment, 0) < -0.4 AND COALESCE(m.confidence_score, 0) >= 0.6
+            WHERE {where_sql} AND COALESCE(m.sentiment, 0) < -0.3 AND COALESCE(m.confidence_score, 0) >= 0.6
             ORDER BY m.sentiment ASC NULLS FIRST, m.created_at DESC
             LIMIT 20
         """, tuple(params))
@@ -681,12 +909,12 @@ def get_sentiment():
             for r in neg_rows
         ]
 
-        # Top positivas recientes (sentimiento > 0.4 y confianza >= 0.6)
+        # Top positivas recientes (sentimiento > 0.3 y confianza >= 0.6)
         cur.execute(f"""
             SELECT m.id, m.summary, m.key_topics, m.source_title, m.source_url, m.sentiment, m.created_at
             FROM mentions m
             {join_sql}
-            WHERE {where_sql} AND COALESCE(m.sentiment, 0) > 0.4 AND COALESCE(m.confidence_score, 0) >= 0.6
+            WHERE {where_sql} AND COALESCE(m.sentiment, 0) > 0.3 AND COALESCE(m.confidence_score, 0) >= 0.6
             ORDER BY m.sentiment DESC NULLS LAST, m.created_at DESC
             LIMIT 20
         """, tuple(params))
@@ -802,6 +1030,7 @@ def get_topics():
         raw_topics = [row[0] for row in cur.fetchall()]
         cur.close(); conn.close()
         canon_set = { canonicalize_topic(t) for t in raw_topics }
+        # Ordenar por nombre traducible pero mantener claves canónicas como fuente de verdad
         topics = sorted(list(canon_set))
         return jsonify({"topics": topics})
     except Exception as e:
@@ -1167,6 +1396,19 @@ def get_prompt_details(query_id: int):
         })
     except Exception as e:
         print(f"Error en get_prompt_details: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/categorize', methods=['POST'])
+def categorize_endpoint():
+    """Devuelve categoría detectada + confianza, alternativas y sugerencia."""
+    try:
+        payload = request.get_json(silent=True) or {}
+        query_text = payload.get('query')
+        topic = payload.get('topic')
+        detail = categorize_prompt_detailed(topic, query_text)
+        return jsonify(detail)
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/query-visibility/<brand>', methods=['GET'])

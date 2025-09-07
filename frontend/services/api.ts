@@ -42,7 +42,7 @@ const buildDateQuery = (periodOrRange: DateRange | string): string => {
   return `?range=30d`;
 }
 
-type FilterParams = { model?: string; source?: string; topic?: string };
+type FilterParams = { model?: string; source?: string; topic?: string; brand?: string };
 
 const appendFilters = (qs: string, filters?: FilterParams): string => {
   if (!filters) return qs;
@@ -50,6 +50,7 @@ const appendFilters = (qs: string, filters?: FilterParams): string => {
   if (filters.model && filters.model !== 'all') url.set('model', filters.model);
   if (filters.source && filters.source !== 'all') url.set('source', filters.source);
   if (filters.topic && filters.topic !== 'all') url.set('topic', filters.topic);
+  if (filters.brand) url.set('brand', filters.brand);
   return `?${url.toString()}`;
 }
 
@@ -58,9 +59,10 @@ export const getVisibility = (periodOrRange: DateRange | string, filters?: Filte
   return fetchFromAPI<VisibilityApiResponse>(`/api/visibility${qs}`);
 };
 
-export const getCompetitors = (periodOrRange: DateRange | string, filters?: FilterParams): Promise<{ ranking: Competitor[] }> => {
+export interface ShareOfVoiceResponse { overall_ranking: Competitor[]; by_topic: Record<string, Competitor[]> }
+export const getShareOfVoice = (periodOrRange: DateRange | string, filters?: FilterParams): Promise<ShareOfVoiceResponse> => {
   const qs = appendFilters(buildDateQuery(periodOrRange), filters);
-  return fetchFromAPI<{ ranking: Competitor[] }>(`/api/industry/ranking${qs}`);
+  return fetchFromAPI<ShareOfVoiceResponse>(`/api/industry/ranking${qs}`);
 };
 
 export const getMentions = (periodOrRange: DateRange | string, filters?: FilterParams): Promise<{ mentions: Mention[] }> => {
@@ -137,6 +139,13 @@ export const updatePrompt = async (id: number, payload: UpdatePromptPayload) => 
 export const deletePrompt = async (id: number) => {
   const res = await fetch(`${API_URL}/api/prompts/${id}`, { method: 'DELETE' });
   if (!res.ok) throw new Error(`Error eliminando prompt: ${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+// Categorization helper
+export const categorizePromptApi = async (query: string, topic?: string): Promise<{ category: string; confidence: number; alternatives: { category: string; score: number }[]; suggestion?: string; suggestion_is_new?: boolean; closest_existing?: string; closest_score?: number; is_close_match?: boolean }> => {
+  const res = await fetch(`${API_URL}/api/categorize`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query, topic }) });
+  if (!res.ok) throw new Error(`Error categorizando prompt: ${res.status} ${res.statusText}`);
   return res.json();
 }
 
