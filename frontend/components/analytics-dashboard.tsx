@@ -136,26 +136,30 @@ function canonicalizeTopicFromLabel(label: string): string {
 // Emoji relacionado con el topic
 function emojiForTopic(topic: string): string {
   const t = topic.toLowerCase();
-  if (t.includes("credit") || t.includes("tarjeta")) return "💳";
-  if (t.includes("bank") || t.includes("banca")) return "🏦";
-  if (t.includes("auto") || t.includes("car")) return "🚗";
-  if (t.includes("mortgage") || t.includes("hipotec")) return "🏠";
-  if (t.includes("invest") || t.includes("bróker") || t.includes("broker")) return "📈";
-  if (t.includes("insurance") || t.includes("seguro")) return "🛡️";
-  if (t.includes("p2p") || t.includes("payment") || t.includes("pago")) return "💸";
-  if (t.includes("audience") || t.includes("público") || t.includes("investigación")) return "🔍";
-  if (t.includes("motivation") || t.includes("motivaci")) return "✨";
-  if (t.includes("parents") || t.includes("padres") || t.includes("famil")) return "👨‍👩‍👧";
-  if (t.includes("competition") || t.includes("competencia") || t.includes("benchmark")) return "🏁";
-  if (t.includes("brand") || t.includes("reputation") || t.includes("reputación") || t.includes("marca")) return "🏷️";
-  if (t.includes("digital") || t.includes("marketing") || t.includes("trends") || t.includes("tendencias")) return "🌐";
-  if (t.includes("industry") || t.includes("market") || t.includes("mercado")) return "🏭";
-  if (t.includes("student") || t.includes("estudiante") || t.includes("experience") || t.includes("experiencia")) return "🎓";
-  if (t.includes("innovation") || t.includes("innovación") || t.includes("technology") || t.includes("tecnolog")) return "🧪";
-  if (t.includes("employment") || t.includes("empleo") || t.includes("jobs") || t.includes("trabaj")) return "💼";
-  if (t.includes("share of voice") || t.includes("monitor")) return "📣";
-  if (t.includes("future") || t.includes("futuro") || t.includes("outlook")) return "🔮";
-  if (t.includes("loan") || t.includes("préstam")) return "💵";
+  // Catálogo académico/marketing
+  if (t.includes("competition") || t.includes("competencia") || t.includes("benchmark")) return "🏁"; // Competition & Benchmarking
+  if (t.includes("admissions") || t.includes("admisiones") || t.includes("inscripci")) return "📝"; // Admissions & Enrollment
+  if (
+    t.includes("curriculum") || t.includes("programs") || t.includes("programas") ||
+    t.includes("grado") || t.includes("grados") || t.includes("máster") || t.includes("master") ||
+    t.includes("dónde estudiar") || t.includes("donde estudiar") || t.includes("centros de formaci")
+  ) return "📚"; // Curriculum & Programs
+  if (t.includes("scholarships") || t.includes("becas") || t.includes("cost") || t.includes("coste") || t.includes("precio")) return "💰"; // Scholarships & Cost
+  if (t.includes("engineering") || t.includes("software") || t.includes("ingenier") || t.includes("programaci")) return "💻"; // Engineering & Software
+  if (t.includes("audiovisual") || t.includes("cine") || t.includes("vfx") || t.includes("animaci") || t.includes("sonido")) return "🎬"; // Audiovisual & Media
+  if (t.includes("brand") || t.includes("reputation") || t.includes("reputaci") || t.includes("marca")) return "🏷️"; // Brand & Reputation
+  if (t.includes("students") || t.includes("estudiantes") || t.includes("experiencia")) return "🎓"; // Students & Experience
+  if (t.includes("parents") || t.includes("padres") || t.includes("famil")) return "👨‍👩‍👧"; // Parents & Family Concerns
+  if (t.includes("digital") || t.includes("marketing") || t.includes("trends") || t.includes("tendencias")) return "🌐"; // Digital Trends & Marketing
+  if (t.includes("industry") || t.includes("mercado")) return "🏭"; // Industry & Market
+  if (t.includes("innovation") || t.includes("innovaci") || t.includes("technology") || t.includes("tecnolog")) return "🤖"; // Innovation & Technology
+  if (t.includes("employment") || t.includes("empleo") || t.includes("jobs") || t.includes("trabaj")) return "💼"; // Employment & Jobs
+  if (t.includes("campus") || t.includes("instalaciones") || t.includes("facilities")) return "🏫"; // Campus & Facilities
+  if (t.includes("events") || t.includes("eventos") || t.includes("community") || t.includes("comunidad")) return "📅"; // Events & Community
+  if (t.includes("share of voice") || t.includes("monitor")) return "📣"; // Share of Voice & Monitoring
+  if (t.includes("future") || t.includes("futuro") || t.includes("outlook")) return "🔮"; // Future Outlook & Trends
+  if (t.includes("partnerships") || t.includes("colaboraciones") || t.includes("alianzas")) return "🤝"; // Partnerships & Collaborations
+  if (t.includes("alumni") || t.includes("éxito") || t.includes("exito") || t.includes("testimonios")) return "🏆"; // Alumni & Success Stories
   return "🧭";
 }
 
@@ -551,18 +555,27 @@ export function AnalyticsDashboard() {
   const handleCreatePrompt = async () => {
     try {
       if (!newPromptQuery.trim()) return
+      // Usamos el tópico que el usuario ha aceptado explícitamente.
       const detected = autoDetectedTopic || newPromptTopic.trim() || undefined
       await createPrompt({ query: newPromptQuery.trim(), topic: detected, brand: newPromptBrand.trim() || undefined })
+      
+      // --- INICIO DE LA CORRECCIÓN ---
+      // Resetear TODOS los estados del modal a sus valores iniciales
       setAddPromptOpen(false)
       setNewPromptQuery("")
       setNewPromptTopic("")
       setNewPromptBrand("")
       setAutoDetectedTopic("")
+      setAddPromptStep('input'); // <-- ESTA LÍNEA ES LA CLAVE
+      // --- FIN DE LA CORRECCIÓN ---
+
       await refreshPromptsAndTopics()
     } catch (e) {
       console.error("No se pudo crear el prompt", e)
+      // Opcional: mostrar un paso de error si la creación falla
+      setAddPromptStep('error');
     }
-  }
+  } 
 
   const openEditPrompt = (id: number, query: string, topic?: string | null, brand?: string | null) => {
     setEditPromptId(id)
@@ -1610,8 +1623,10 @@ export function AnalyticsDashboard() {
                                                       className="flex items-center justify-between py-2 rounded px-2 hover:bg-gray-50"
                                                       role="button"
                                                       tabIndex={0}
+                                                      onClick={() => openPrompt(p.id)}
+                                                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { openPrompt(p.id); } }}
                                                     >
-                                                      <div className="text-sm text-gray-900 line-clamp-2 max-w-[50%]" onClick={() => openPrompt(p.id)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { openPrompt(p.id); } }}>
+                                                      <div className="text-sm text-gray-900 line-clamp-2 max-w-[50%]">
                                                         {p.query}
                                                       </div>
                                                       <div className="flex items-center gap-4 text-sm text-muted-foreground">
@@ -1620,8 +1635,8 @@ export function AnalyticsDashboard() {
                                                         <div className="w-28 text-right">Ranking: <span className="font-medium text-gray-900">#{p.rank}</span></div>
                                                         <div className="w-32 text-right">Ejecuciones: <span className="font-medium text-gray-900">{p.executions}</span></div>
                                                         <div className="flex items-center gap-2">
-                                                          <Button size="sm" variant="outline" onClick={() => openEditPrompt(p.id, p.query as string, group.topic, undefined)}>Editar</Button>
-                                                          <Button size="sm" variant="destructive" onClick={() => handleDeletePrompt(p.id)}>Eliminar</Button>
+                                                          <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); openEditPrompt(p.id, p.query as string, group.topic, undefined); }}>Editar</Button>
+                                                          <Button size="sm" variant="destructive" onClick={(e) => { e.stopPropagation(); handleDeletePrompt(p.id); }}>Eliminar</Button>
                                                         </div>
                                                       </div>
                                                     </div>
@@ -1647,7 +1662,7 @@ export function AnalyticsDashboard() {
                 )}
                 {/* Modal de detalle de prompt */}
                 <Dialog open={promptModalOpen} onOpenChange={setPromptModalOpen}>
-                  <DialogContent className="w-[95vw] max-w-7xl max-h-[90vh] overflow-y-auto">
+                  <DialogContent className="w-[98vw] max-w-[1400px] lg:max-w-[1500px] 2xl:max-w-[1600px] max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                       <DialogTitle className="text-lg">{promptDetails?.query || "Prompt"}</DialogTitle>
                     </DialogHeader>
@@ -1661,63 +1676,72 @@ export function AnalyticsDashboard() {
                           <div className="text-xs text-muted-foreground">Rango aplicado al dashboard</div>
                         </div>
 
-                        {/* Gráficos (full width, apilados) */}
-                        <div className="grid grid-cols-1 gap-6">
-                          <Card className="shadow-sm bg-white">
-                            <CardHeader>
-                              <CardTitle className="text-sm">Puntuación de visibilidad</CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                              <div className="h-[360px] sm:h-[400px] md:h-[440px] lg:h-[480px]">
-                                <ResponsiveContainer width="100%" height="100%">
-                                  <LineChart data={promptDetails.timeseries}>
-                                    <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
-                                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
-                                    <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }} />
-                                    <Line type="monotone" dataKey="count" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={false} />
-                                  </LineChart>
-                                </ResponsiveContainer>
-                              </div>
-                            </CardContent>
-                          </Card>
-                          <Card className="shadow-sm bg-white">
-                            <CardHeader>
-                              <CardTitle className="text-sm">Visibilidad por plataforma</CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                              <div className="h-[300px] sm:h-[340px] md:h-[380px] lg:h-[420px]">
-                                <ResponsiveContainer width="100%" height="100%">
-                                  <BarChart data={promptDetails.platforms}>
-                                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
-                                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
-                                    <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }} />
-                                    <Bar dataKey="value" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-                                  </BarChart>
-                                </ResponsiveContainer>
-                              </div>
-                            </CardContent>
-                          </Card>
-                        </div>
-
-                        {/* Tabla de ejecuciones */}
-                        <Card className="shadow-sm bg-white">
-                          <CardHeader>
-                            <CardTitle className="text-sm">Ejecuciones</CardTitle>
-                          </CardHeader>
-                          <CardContent>
-                            <div className="space-y-3 max-h-64 overflow-auto">
-                              {promptDetails.executions.map((e) => (
-                                <div key={e.id} className="grid grid-cols-1 lg:grid-cols-6 gap-3 items-start border rounded p-2">
-                                  <div className="text-xs text-muted-foreground lg:col-span-1">{e.created_at}</div>
-                                  <div className="text-xs text-muted-foreground lg:col-span-1">{e.engine} · {e.source}</div>
-                                  <div className="text-sm lg:col-span-4">{e.response}</div>
+                        {/* --- INICIO DE LA CORRECCIÓN DE LAYOUT --- */}
+                        <div className="flex flex-col lg:flex-row gap-6">
+                          
+                          {/* COLUMNA IZQUIERDA: GRÁFICOS */}
+                          <div className="flex-1 flex flex-col gap-6">
+                            <Card className="shadow-sm bg-white">
+                              <CardHeader>
+                                <CardTitle className="text-sm">Puntuación de visibilidad</CardTitle>
+                              </CardHeader>
+                              <CardContent>
+                                <div className="h-[250px]">
+                                  <ResponsiveContainer width="100%" height="100%">
+                                    <LineChart data={promptDetails.timeseries}>
+                                      <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
+                                      <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
+                                      <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }} />
+                                      <Line type="monotone" dataKey="count" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={false} />
+                                    </LineChart>
+                                  </ResponsiveContainer>
                                 </div>
-                              ))}
-                            </div>
-                          </CardContent>
-                        </Card>
+                              </CardContent>
+                            </Card>
+                            <Card className="shadow-sm bg-white">
+                              <CardHeader>
+                                <CardTitle className="text-sm">Visibilidad por plataforma</CardTitle>
+                              </CardHeader>
+                              <CardContent>
+                                <div className="h-[250px]">
+                                  <ResponsiveContainer width="100%" height="100%">
+                                    <BarChart data={promptDetails.platforms}>
+                                      <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
+                                      <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
+                                      <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }} />
+                                      <Bar dataKey="value" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+                                    </BarChart>
+                                  </ResponsiveContainer>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          </div>
+
+                          {/* COLUMNA DERECHA: EJECUCIONES */}
+                          <div className="lg:w-1/2">
+                            <Card className="shadow-sm bg-white h-full">
+                              <CardHeader>
+                                <CardTitle className="text-sm">Ejecuciones</CardTitle>
+                              </CardHeader>
+                              <CardContent>
+                                <div className="space-y-3 max-h-[520px] overflow-auto">
+                                  {promptDetails.executions.map((e) => (
+                                    <div key={e.id} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-start border rounded p-2 text-xs">
+                                      <div className="text-muted-foreground md:col-span-1">{e.created_at}</div>
+                                      <div className="text-muted-foreground md:col-span-1">{e.engine} · {e.source}</div>
+                                      <div className="text-sm md:col-span-2">{e.response}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </CardContent>
+                            </Card>
+                          </div>
+                        </div>
+                        {/* --- FIN DE LA CORRECCIÓN DE LAYOUT --- */}
                       </div>
-                    ) : null}
+                    ) : (
+                      <div className="p-8 text-sm text-muted-foreground">Este prompt no ha sido analizado todavía.</div>
+                    )}
                   </DialogContent>
                 </Dialog>
 

@@ -12,15 +12,12 @@ from dotenv import load_dotenv
 import re
 import unicodedata
 from difflib import SequenceMatcher
-from src.engines.openai_engine import fetch_response, get_embedding
+from src.engines.openai_engine import fetch_response
 
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
-
-# Caché sencilla de embeddings en memoria para reducir llamadas repetidas
-_EMBEDDING_CACHE: dict[str, list[float]] = {}
 
 # --- CONFIGURACIÓN Y HELPERS ---
 
@@ -61,32 +58,69 @@ def _best_topic_by_similarity(candidate: str, topics: list[str]) -> tuple[str, f
 
 
 def categorize_prompt_with_ai(query_text: str, topics: list[str]) -> str:
-    """Usa un LLM para clasificar una query en una lista de topics."""
+    """Usa un LLM para clasificar una query; mapea a categorías existentes si son parecidas."""
+    # Preparamos los topics como una lista numerada para la IA
     topics_list_str = "\n".join([f"{i+1}. {topic}" for i, topic in enumerate(topics)])
 
     prompt = f"""
-Eres un asistente experto en organización de contenido para una escuela de formación audiovisual llamada "The Core School".
+Eres un asistente experto en organización de contenido para "The Core School". Tu tarea es clasificar la siguiente "Consulta del Usuario" en una de las "Categorías Disponibles".
 
-Tu tarea es clasificar la siguiente "Consulta del Usuario" en una de las "Categorías Disponibles". Debes responder únicamente con el nombre exacto de la categoría que mejor se ajuste.
+Instrucciones Clave:
 
-**Categorías Disponibles:**
+Si la consulta es clara y relevante para la escuela (cine, audiovisual, software, videojuegos, marketing, etc.), clasifícala en una categoría existente o crea una nueva.
+
+Si la consulta es demasiado vaga, ambigua, sin sentido, o completamente irrelevante (ej. "dónde comprar pan", "el cielo es azul"), responde únicamente con la palabra: Inclasificable.
+
+Categorías Disponibles:
 {topics_list_str}
 
-**Consulta del Usuario:**
+Consulta del Usuario:
 "{query_text}"
 
-Analiza la consulta y devuelve solo el nombre de la categoría más apropiada de la lista anterior.
+Responde solo con el nombre de la categoría o con la palabra "Inclasificable".
 """
     try:
-        best_category = fetch_response(prompt, model="gpt-4o-mini", temperature=0.1)
-        cleaned_category = (best_category or "").strip().split('.')[-1].strip()
+        # Usamos el motor de OpenAI para obtener la respuesta
+        best_category = fetch_response(prompt, model="gpt-4o-mini", temperature=0.0)
+
+        # Limpiamos respuesta (a veces IA añade números o frases)
+        cleaned_category = (best_category or "").strip()
+        if "\n" in cleaned_category:
+            cleaned_category = cleaned_category.split("\n", 1)[0]
+        if ":" in cleaned_category and cleaned_category.lower().startswith("categoria"):
+            cleaned_category = cleaned_category.split(":", 1)[-1]
+        cleaned_category = cleaned_category.strip().split('.')[-1].strip()
+
+        if cleaned_category.lower() == "inclasificable":
+            return "Inclasificable"
+
+        # Si coincide exactamente con una categoría conocida
         if cleaned_category in topics:
             return cleaned_category
-        else:
-            best_match = max(topics, key=lambda t: SequenceMatcher(None, cleaned_category, t).ratio())
-            return best_match
+
+        # Si no coincide, mapear por similitud a categoría existente cuando sea alta
+        mapped, score = _best_topic_by_similarity(cleaned_category, topics)
+        if score >= 0.72:
+            return mapped
+
+        # Como respaldo: si la query contiene términos del dominio, preferir el mejor match aunque no supere umbral alto
+        DOMAIN_HINTS = [
+            "cine", "film", "rodaje", "guion", "guión", "fotografia", "fotografía",
+            "animacion", "animación", "vfx", "edicion", "edición", "postproduccion", "postproducción",
+            "videojuego", "videojuegos", "programacion", "programación", "software", "ingenieria", "ingeniería",
+            "marketing", "comunicacion", "comunicación", "master", "máster", "grado", "curso", "beca", "becas",
+            "escuela", "universidad"
+        ]
+        qtoks = set(_normalize_text_for_match(query_text))
+        if any(h in qtoks for h in DOMAIN_HINTS) and score >= 0.6:
+            return mapped
+
+        # En caso contrario, devolver tal cual (puede ser nueva categoría)
+        return cleaned_category or (mapped if mapped else "Inclasificable")
+
     except Exception as e:
         print(f"Error en la categorización con IA: {e}")
+        # Si todo falla, volvemos a la lógica antigua como respaldo
         return categorize_prompt(None, query_text)
 
 DB_CONFIG = {
@@ -127,6 +161,20 @@ def ensure_taxonomy_table():
         """
     )
     conn.commit(); cur.close(); conn.close()
+
+def get_category_catalog_for_brand(brand: str | None) -> list[str]:
+    """Obtiene el catálogo de categorías para una brand desde topic_taxonomy.
+    Si no hay filas, devuelve el catálogo por defecto (_CATEGORY_KEYWORDS).
+    """
+    try:
+        ensure_taxonomy_table()
+        brand_eff = brand or os.getenv('DEFAULT_BRAND', 'The Core School')
+        conn = get_db_connection(); cur = conn.cursor()
+        cur.execute("SELECT category FROM topic_taxonomy WHERE brand = %s", (brand_eff,))
+        rows = cur.fetchall(); cur.close(); conn.close()
+        return [r[0] for r in rows] if rows else list(_CATEGORY_KEYWORDS.keys())
+    except Exception:
+        return list(_CATEGORY_KEYWORDS.keys())
 
 def parse_filters(request):
     start_date_str = request.args.get('start_date')
@@ -429,9 +477,13 @@ def categorize_prompt_detailed(topic: str | None, query_text: str | None) -> dic
     # 2) Patrones complementarios (ES/EN)
     PATTERNS = [
         (r"alumni|casos\s+de\s+exito|éxito|testimonios|trayectorias", "Alumni & Success Stories"),
+        # Programas: consultas de intención de estudio y centros de formación
+        (r"(d[oó]nde\s+estudiar|centros?\s+de\s+formaci[oó]n|grado\s+en|grados?\s+de|m[aá]ster(?:es)?\s+en)", "Curriculum & Programs"),
         (r"plan\s+de\s+estudios|curriculum|asignaturas|programas", "Curriculum & Programs"),
         (r"empleo|empleabilidad|salidas|profesiones|trabajo|job\s*market", "Employment & Jobs"),
         (r"becas|precio|coste|costo|financiaci[oó]n|roi", "Scholarships & Cost"),
+        # Benchmarking: comparativas explícitas tipo "mejor universidad/centro/escuela" o "X vs Y"
+        (r"(mejor\s+(universidad|centro|escuela)|\bvs\b|comparar|comparaci[oó]n)", "Competition & Benchmarking"),
         (r"competencia|competidores|benchmark", "Competition & Benchmarking"),
         (r"marca|reputaci[oó]n|monitor", "Brand & Reputation"),
         (r"tendencias|digital|marketing|redes", "Digital Trends & Marketing"),
@@ -724,9 +776,8 @@ def get_visibility():
         # Filtro por tema con categorización dinámica por IA (alineado con /api/prompts)
         if filters.get('topic') and filters['topic'] != 'all':
             topic_filter = filters['topic']
-            # 1) Obtener catálogo de topics disponibles y todas las queries activas
-            cur.execute("SELECT DISTINCT topic FROM queries WHERE enabled = TRUE AND topic IS NOT NULL AND topic <> ''")
-            available_topics = [row[0] for row in cur.fetchall()]
+            # 1) Obtener catálogo de categorías (taxonomía o por defecto) y todas las queries activas
+            available_topics = get_category_catalog_for_brand(filters.get('brand'))
             cur.execute("SELECT id, query FROM queries WHERE enabled = TRUE")
             qrows = cur.fetchall()
             # 2) Categorizar con IA cada query y quedarnos con las del tema seleccionado
@@ -839,8 +890,7 @@ def get_visibility_ranking():
         # Filtro por tema con categorización dinámica por IA (alineado con /api/prompts)
         if filters.get('topic') and filters['topic'] != 'all':
             topic_filter = filters['topic']
-            cur.execute("SELECT DISTINCT topic FROM queries WHERE enabled = TRUE AND topic IS NOT NULL AND topic <> ''")
-            available_topics = [row[0] for row in cur.fetchall()]
+            available_topics = get_category_catalog_for_brand(filters.get('brand'))
             cur.execute("SELECT id, query FROM queries WHERE enabled = TRUE")
             qrows = cur.fetchall()
             dyn_ids = []
@@ -1436,21 +1486,8 @@ def get_prompts_grouped():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Primero, obtenemos la lista de topics permitidos. Preferimos taxonomía por brand.
-        # Si no hay taxonomía, caemos a los topics existentes de queries.
-        available_topics: list[str] = []
-        try:
-            brand = request.args.get('brand') or os.getenv('DEFAULT_BRAND', 'The Core School')
-            ensure_taxonomy_table()
-            cur.execute("SELECT category FROM topic_taxonomy WHERE brand = %s ORDER BY category", (brand,))
-            rows_tax = cur.fetchall()
-            if rows_tax:
-                available_topics = [r[0] for r in rows_tax]
-        except Exception:
-            available_topics = []
-        if not available_topics:
-            cur.execute("SELECT DISTINCT topic FROM queries WHERE enabled = TRUE AND topic IS NOT NULL AND topic <> ''")
-            available_topics = [row[0] for row in cur.fetchall()]
+        # Catálogo de categorías (taxonomía por brand o catálogo por defecto)
+        available_topics = get_category_catalog_for_brand(filters.get('brand'))
 
         # Obtenemos los prompts (queries) activos y sus métricas
         cur.execute(
@@ -1663,13 +1700,7 @@ def create_prompt():
             }), 200
 
         # Determinar categoría para almacenar en topic canónico (IA + fallback)
-        try:
-            cur.execute("SELECT category FROM topic_taxonomy WHERE brand = %s", (brand,))
-            available_topics = [row[0] for row in cur.fetchall()]
-        except Exception:
-            available_topics = []
-        if not available_topics:
-            available_topics = list(_CATEGORY_KEYWORDS.keys())
+        available_topics = get_category_catalog_for_brand(brand)
         canonical_topic = categorize_prompt_with_ai(query_text, available_topics)
 
         cur.execute(
@@ -1722,14 +1753,7 @@ def update_prompt(query_id: int):
             cur.close(); conn.close()
             new_query = qtext if qtext is not None else current_query
             # determinar topics disponibles
-            try:
-                cur = conn.cursor(); cur.execute("SELECT DISTINCT topic FROM queries WHERE enabled = TRUE AND topic IS NOT NULL AND topic <> ''")
-                available_topics = [r[0] for r in cur.fetchall()]
-                cur.close(); conn.close()
-            except Exception:
-                available_topics = []
-            if not available_topics:
-                available_topics = list(_CATEGORY_KEYWORDS.keys())
+            available_topics = get_category_catalog_for_brand(brand)
             cat = categorize_prompt_with_ai(new_query, available_topics)
             fields.append('topic = %s'); values.append(cat)
             if qtext is not None:
@@ -1874,28 +1898,172 @@ def categorize_endpoint():
         payload = request.get_json(silent=True) or {}
         query_text = payload.get('query')
 
-        # Cargar topics disponibles de la BD para proponer sugerencias coherentes
-        conn = get_db_connection(); cur = conn.cursor()
-        cur.execute("SELECT DISTINCT topic FROM queries WHERE enabled = TRUE AND topic IS NOT NULL AND topic <> ''")
-        available_topics = [row[0] for row in cur.fetchall()]
-        cur.close(); conn.close()
-
-        if not query_text or len(query_text.strip()) < 10:
+        if not query_text or len((query_text or '').strip()) < 10:
             return jsonify({"category": None, "confidence": 0, "suggestion": None})
 
-        best_category = categorize_prompt_with_ai(query_text, available_topics)
-        # si IA responde Inclasificable devolvemos eso; si no, normalizamos con similitud
-        if best_category != "Inclasificable" and best_category not in (available_topics or []):
-            mapped, score = _best_topic_by_similarity(best_category, available_topics)
+        # Determinar catálogo de categorías "generales" para clasificar
+        # 1) Si existe una taxonomía de la marca, usarla
+        # 2) Si no, usar las categorías por defecto (_CATEGORY_KEYWORDS)
+        try:
+            ensure_taxonomy_table()
+            brand = request.args.get('brand') or os.getenv('DEFAULT_BRAND', 'The Core School')
+            conn = get_db_connection(); cur = conn.cursor()
+            cur.execute("SELECT category FROM topic_taxonomy WHERE brand = %s", (brand,))
+            rows = cur.fetchall(); cur.close(); conn.close()
+            catalog = [r[0] for r in rows] if rows else list(_CATEGORY_KEYWORDS.keys())
+        except Exception:
+            catalog = list(_CATEGORY_KEYWORDS.keys())
+
+        # Paso 1: intento con el clasificador LLM acotado al catálogo
+        best_from_ai = categorize_prompt_with_ai(query_text, catalog)
+
+        # Paso 2: si la IA no logra clasificar (Inclasificable), usar heurística detallada
+        detailed = None
+        if best_from_ai == "Inclasificable":
+            try:
+                detailed = categorize_prompt_detailed(None, query_text)
+            except Exception:
+                detailed = None
+
+        # Resolver categoría final y metadatos de respuesta
+        category = None
+        confidence = 0.8
+        alternatives = []
+        suggestion = None
+        suggestion_is_new = False
+        closest_existing = None
+        closest_score = 0.0
+        is_close_match = False
+
+        if detailed:
+            category = detailed.get("category") or "Inclasificable"
+            confidence = float(detailed.get("confidence") or 0.8)
+            alternatives = detailed.get("alternatives") or []
+            suggestion = detailed.get("suggestion") or category
+            suggestion_is_new = bool(detailed.get("suggestion_is_new") or False)
+            closest_existing = detailed.get("closest_existing")
+            closest_score = float(detailed.get("closest_score") or 0.0)
+            is_close_match = bool(detailed.get("is_close_match") or False)
+        else:
+            category = best_from_ai
+            suggestion = best_from_ai
+
+        # Si la categoría propuesta no está en el catálogo, mapear por similitud
+        if category != "Inclasificable" and category not in (catalog or []):
+            mapped, score = _best_topic_by_similarity(category, catalog)
+            closest_existing = mapped
+            closest_score = float(score)
             if score >= 0.7:
-                best_category = mapped
-        is_new = best_category not in (available_topics or []) and best_category != "Inclasificable"
+                category = mapped
+                is_close_match = True
+            else:
+                suggestion_is_new = True
+
+        # Confianza ajustada según si es nueva o mapeada
+        if category == "Inclasificable":
+            confidence = 0.5
+        else:
+            confidence = 0.9 if not suggestion_is_new else max(0.7, confidence)
 
         return jsonify({
-            "category": best_category,
-            "confidence": 0.9 if not is_new and best_category != "Inclasificable" else 0.7,
-            "suggestion": best_category,
-            "suggestion_is_new": is_new,
+            "category": category,
+            "confidence": confidence,
+            "alternatives": alternatives,
+            "suggestion": suggestion or category,
+            "suggestion_is_new": suggestion_is_new,
+            "closest_existing": closest_existing,
+            "closest_score": closest_score,
+            "is_close_match": is_close_match,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/prompts/recategorize', methods=['POST'])
+def recategorize_prompts():
+    """Reclasifica todos los prompts existentes según la taxonomía general.
+    Body JSON (opcional): { brand?: str, limit?: int, dry_run?: bool }
+    Devuelve resumen y lista de cambios.
+    """
+    try:
+        payload = request.get_json(silent=True) or {}
+        brand = payload.get('brand') or request.args.get('brand') or os.getenv('DEFAULT_BRAND', 'The Core School')
+        limit = int(payload.get('limit') or 0) or None
+        dry_run = bool(payload.get('dry_run', False))
+
+        # Catálogo base
+        try:
+            ensure_taxonomy_table()
+            conn = get_db_connection(); cur = conn.cursor()
+            cur.execute("SELECT category FROM topic_taxonomy WHERE brand = %s", (brand,))
+            rows = cur.fetchall(); cur.close(); conn.close()
+            catalog = [r[0] for r in rows] if rows else list(_CATEGORY_KEYWORDS.keys())
+        except Exception:
+            catalog = list(_CATEGORY_KEYWORDS.keys())
+
+        # Cargar prompts a procesar
+        conn = get_db_connection(); cur = conn.cursor()
+        sql = "SELECT id, query, brand, topic FROM queries"
+        params = []
+        if brand:
+            sql += " WHERE (brand = %s OR %s IS NULL)"
+            params.extend([brand, brand])
+        sql += " ORDER BY id ASC"
+        if limit:
+            sql += " LIMIT %s"; params.append(limit)
+        cur.execute(sql, tuple(params))
+        rows = cur.fetchall()
+
+        changes = []
+        updated = 0
+        unchanged = 0
+        inclasificables = 0
+
+        for qid, qtext, qbrand, old_topic in rows:
+            try:
+                best_from_ai = categorize_prompt_with_ai(qtext, catalog)
+            except Exception:
+                best_from_ai = "Inclasificable"
+
+            final_cat = best_from_ai
+            if best_from_ai == "Inclasificable":
+                try:
+                    detailed = categorize_prompt_detailed(None, qtext)
+                    final_cat = detailed.get("category") or "Inclasificable"
+                except Exception:
+                    final_cat = "Inclasificable"
+
+            if final_cat != "Inclasificable" and final_cat not in catalog:
+                mapped, score = _best_topic_by_similarity(final_cat, catalog)
+                if score >= 0.7:
+                    final_cat = mapped
+                else:
+                    # mantener inclasificable para evitar ruido en catálogo
+                    final_cat = "Inclasificable"
+
+            if final_cat == (old_topic or ""):
+                unchanged += 1
+            else:
+                if final_cat == "Inclasificable":
+                    inclasificables += 1
+                if not dry_run:
+                    cur2 = conn.cursor()
+                    cur2.execute("UPDATE queries SET topic = %s WHERE id = %s", (final_cat, qid))
+                    conn.commit(); cur2.close()
+                updated += 1
+                changes.append({"id": qid, "old": old_topic, "new": final_cat})
+
+        cur.close(); conn.close()
+
+        return jsonify({
+            "brand": brand,
+            "catalog_size": len(catalog),
+            "total": len(rows),
+            "updated": updated,
+            "unchanged": unchanged,
+            "inclasificables": inclasificables,
+            "dry_run": dry_run,
+            "changes": changes,
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
