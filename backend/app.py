@@ -238,6 +238,25 @@ _CATEGORY_KEYWORDS = {
     "Events & Community": [
         "eventos", "open day", "jornadas", "ferias", "festival", "comunidad", "networking", "meetup"
     ],
+    # Nuevo: categoría específica para comunicación audiovisual y media
+    "Audiovisual & Media": [
+        "comunicacion audiovisual", "comunicación audiovisual", "audiovisual", "cine", "rodaje",
+        "montaje", "postproduccion", "postproducción", "sonido", "vfx", "fx", "efectos visuales",
+        "animacion", "animación", "guion", "guión", "fotografia", "fotografía", "produccion",
+        "producción", "realizacion", "realización", "edicion", "edición"
+    ],
+    # Más tecnología/ingeniería para evitar solapamientos genéricos
+    "Innovation & Technology": [
+        "innovacion", "innovación", "tecnologia", "tecnología", "ia", "ai", "vr", "ar",
+        "ingenieria", "ingeniería", "software", "desarrollo", "programacion", "programación",
+        "coding", "computer science", "backend", "frontend", "devops"
+    ],
+    # Categoría específica si se desea separar de Innovación
+    "Engineering & Software": [
+        "ingenieria", "ingeniería", "software", "ingenieria de software", "ingeniería de software",
+        "desarrollo de software", "programacion", "programación", "computer science", "algoritmos",
+        "bases de datos", "sistemas", "arquitectura de software"
+    ],
 }
 
 
@@ -247,56 +266,12 @@ def _tokenize(text: str) -> set:
 
 
 def categorize_prompt(topic: str | None, query_text: str | None) -> str:
-    """Asigna una categoría canónica basada en palabras clave del topic y del query, brand-aware."""
-    # Detect brand actual a partir de variable o fallback
-    brand = request.args.get('brand') or os.getenv('DEFAULT_BRAND', 'The Core School')
-
-    # Cargar taxonomía custom si existe
+    """Asigna categoría usando la versión detallada (reglas + scoring)."""
     try:
-        ensure_taxonomy_table()
-        conn = get_db_connection(); cur = conn.cursor()
-        cur.execute("SELECT category, COALESCE(keywords,'[]'::jsonb) FROM topic_taxonomy WHERE brand = %s", (brand,))
-        rows = cur.fetchall()
-        cur.close(); conn.close()
-        if rows:
-            categories_source = { r[0]: list(r[1] or []) }
-        else:
-            categories_source = _CATEGORY_KEYWORDS
+        detailed = categorize_prompt_detailed(topic, query_text)
+        return detailed.get("category") or canonicalize_topic(topic or '')
     except Exception:
-        categories_source = _CATEGORY_KEYWORDS
-
-    tokens = set()
-    tokens |= _tokenize(topic or '')
-    tokens |= _tokenize(query_text or '')
-
-    # puntuación por coincidencia de keywords
-    best_cat = None
-    best_score = 0
-    for cat, keywords in categories_source.items():
-        score = 0
-        for kw in keywords:
-            kw_tokens = set(_tokenize(kw))
-            if kw_tokens & tokens:
-                score += 2
-            else:
-                # fuzzy leve: si alguno de los tokens coincide en prefijo de 5+ caracteres
-                for t in tokens:
-                    if len(t) >= 5 and (t.startswith(next(iter(kw_tokens))) or next(iter(kw_tokens)).startswith(t)):
-                        score += 1
-                        break
-        # bonus por similitud con el topic textual
-        if topic:
-            sim = SequenceMatcher(None, _normalize_topic_key(topic), _normalize_topic_key(cat)).ratio()
-            score += int(sim * 2)
-        if score > best_score:
-            best_score = score
-            best_cat = cat
-
-    if best_cat and best_score >= 2:
-        return best_cat
-
-    # fallback: usa canónico del topic si existe
-    return canonicalize_topic(topic or '')
+        return canonicalize_topic(topic or '')
 
 
 def categorize_prompt_detailed(topic: str | None, query_text: str | None) -> dict:
@@ -318,7 +293,8 @@ def categorize_prompt_detailed(topic: str | None, query_text: str | None) -> dic
     except Exception:
         categories_source = _CATEGORY_KEYWORDS
 
-    tokens = _tokenize((topic or '') + ' ' + (query_text or ''))
+    full_text = (topic or '') + ' ' + (query_text or '')
+    tokens = _tokenize(full_text)
 
     # 2) Patrones complementarios (ES/EN)
     PATTERNS = [
@@ -330,17 +306,54 @@ def categorize_prompt_detailed(topic: str | None, query_text: str | None) -> dic
         (r"marca|reputaci[oó]n|monitor", "Brand & Reputation"),
         (r"tendencias|digital|marketing|redes", "Digital Trends & Marketing"),
         (r"campus|instalaciones|recursos", "Campus & Facilities"),
-        (r"innovaci[oó]n|tecnolog[ií]a|ia|ai|vr|ar", "Innovation & Technology"),
+        (r"innovaci[oó]n|tecnolog[ií]a|ia|ai|vr|ar|programaci[oó]n|software|ingenier[íi]a", "Engineering & Software"),
         (r"estudiantes|experiencia|expectativas", "Students & Experience"),
         (r"padres|familia|preocupaciones", "Parents & Family Concerns"),
+        (r"comunicaci[oó]n\s+audivisual|comunicaci[oó]n\s+aud[ií]visual|cine|rodaje|montaje|postproducci[oó]n|sonido|vfx|animaci[oó]n|gu[ií]on|fotograf[ií]a|realizaci[oó]n|edici[oó]n", "Audiovisual & Media"),
     ]
 
     import re
     bonus_pattern: dict[str, int] = {}
-    q = (query_text or '').lower()
+    q = full_text.lower()
     for rx, cat in PATTERNS:
         if re.search(rx, q):
-            bonus_pattern[cat] = bonus_pattern.get(cat, 0) + 3
+            # Los patrones tienen prioridad fuerte
+            bonus_pattern[cat] = bonus_pattern.get(cat, 0) + 5
+
+    # Desambiguación temprana entre Audiovisual & Media y Engineering & Software
+    audiovisual_terms = [
+        "comunicacion audiovisual", "comunicación audiovisual", "cine", "rodaje", "montaje", "postproduccion",
+        "postproducción", "sonido", "vfx", "animacion", "animación", "guion", "guión", "fotografia",
+        "fotografía", "produccion", "producción", "realizacion", "realización", "edicion", "edición"
+    ]
+    software_terms = [
+        "ingenieria", "ingeniería", "software", "programacion", "programación", "desarrollo", "backend",
+        "frontend", "devops", "algoritmos", "bases de datos", "sistemas", "arquitectura"
+    ]
+    aud_hits = sum(1 for t in audiovisual_terms if t in q)
+    soft_hits = sum(1 for t in software_terms if t in q)
+    if aud_hits >= soft_hits + 2 and aud_hits >= 2:
+        return {
+            "category": "Audiovisual & Media",
+            "confidence": 0.85,
+            "alternatives": [{"category": "Engineering & Software", "score": 0.5}],
+            "suggestion": None,
+            "suggestion_is_new": False,
+            "closest_existing": "Audiovisual & Media",
+            "closest_score": 0.9,
+            "is_close_match": True,
+        }
+    if soft_hits >= aud_hits + 2 and soft_hits >= 2:
+        return {
+            "category": "Engineering & Software",
+            "confidence": 0.85,
+            "alternatives": [{"category": "Audiovisual & Media", "score": 0.5}],
+            "suggestion": None,
+            "suggestion_is_new": False,
+            "closest_existing": "Engineering & Software",
+            "closest_score": 0.9,
+            "is_close_match": True,
+        }
 
     # 3) Scoring por categoría
     from difflib import SequenceMatcher
@@ -353,7 +366,7 @@ def categorize_prompt_detailed(topic: str | None, query_text: str | None) -> dic
             if kwt & tokens:
                 score += 2.0
         # similitud fuzzy con nombre
-        score += SequenceMatcher(None, _normalize_topic_key(' '.join(tokens)), _normalize_topic_key(cat)).ratio() * 2.0
+        score += SequenceMatcher(None, _normalize_topic_key(' '.join(tokens)), _normalize_topic_key(cat)).ratio() * 1.5
         # bonus por patrones
         score += bonus_pattern.get(cat, 0)
         scores.append((cat, score))
@@ -578,8 +591,30 @@ def get_visibility():
             where.append("m.engine = %s"); params.append(filters['model'])
         if filters.get('source') and filters['source'] != 'all':
             where.append("m.source = %s"); params.append(filters['source'])
+        # Filtro por tema (dinámico por categorización)
+        dynamic_topic_ids = None
         if filters.get('topic') and filters['topic'] != 'all':
-            where.append("q.topic = %s"); params.append(filters['topic'])
+            topic_filter = filters['topic']
+            base_where_sql = " AND ".join(where)
+            # 1) Obtener queries candidatas bajo los filtros base
+            cur.execute(f"""
+                SELECT DISTINCT q.id, q.topic, q.query
+                FROM mentions m
+                JOIN queries q ON m.query_id = q.id
+                WHERE {base_where_sql}
+            """, tuple(params))
+            qrows = cur.fetchall()
+            # 2) Categorizar cada query y filtrar por categoría dinámica
+            dyn_ids = []
+            for qid, qtopic, qtext in qrows:
+                cat = categorize_prompt(qtopic, qtext)
+                if cat == topic_filter:
+                    dyn_ids.append(qid)
+            dynamic_topic_ids = dyn_ids
+            if not dynamic_topic_ids:
+                # No hay queries que caigan en ese tema -> retornar vacío rápido
+                return jsonify({"visibility_score": 0.0, "delta": 0.0, "series": []})
+            where.append("q.id = ANY(%s)"); params.append(dynamic_topic_ids)
         where_sql = " AND ".join(where)
 
         # Sinónimos/cadenas para detectar la marca en contenido (key_topics o texto)
@@ -673,20 +708,28 @@ def get_visibility_ranking():
             where.append("m.engine = %s"); params.append(filters['model'])
         if filters.get('source') and filters['source'] != 'all':
             where.append("m.source = %s"); params.append(filters['source'])
+        # Filtro por tema dinámico
         if filters.get('topic') and filters['topic'] != 'all':
-            where.append("q.topic = %s"); params.append(filters['topic'])
+            topic_filter = filters['topic']
+            base_where_sql = " AND ".join(where)
+            cur.execute(f"""
+                SELECT DISTINCT q.id, q.topic, q.query
+                FROM mentions m
+                JOIN queries q ON m.query_id = q.id
+                WHERE {base_where_sql}
+            """, tuple(params))
+            qrows = cur.fetchall()
+            dyn_ids = []
+            for qid, qtopic, qtext in qrows:
+                cat = categorize_prompt(qtopic, qtext)
+                if cat == topic_filter:
+                    dyn_ids.append(qid)
+            if not dyn_ids:
+                return jsonify({"ranking": [], "total_responses": 0})
+            where.append("q.id = ANY(%s)"); params.append(dyn_ids)
         where_sql = " AND ".join(where)
 
-        # Denominador: total de respuestas con filtros
-        cur.execute(f"""
-            SELECT COUNT(*)
-            FROM mentions m
-            JOIN queries q ON m.query_id = q.id
-            WHERE {where_sql}
-        """, tuple(params))
-        total_responses = int(cur.fetchone()[0] or 0)
-
-        # Traer campos necesarios para detectar marcas
+        # Traer campos necesarios para detectar marcas (con filtros y tema dinámico ya aplicados)
         cur.execute(f"""
             SELECT m.id, m.key_topics, LOWER(COALESCE(m.response,'')) AS resp, LOWER(COALESCE(m.source_title,'')) AS title,
                    q.topic, i.payload
@@ -696,6 +739,9 @@ def get_visibility_ranking():
             WHERE {where_sql}
         """, tuple(params))
         rows = cur.fetchall()
+
+        # Denominador: total de respuestas del CONJUNTO FILTRADO (tema incluido)
+        total_responses = len(rows)
 
         # Diccionario de marcas y sinónimos (genérico para cualquier cliente)
         BRAND_SYNONYMS = {
@@ -830,29 +876,25 @@ def get_industry_ranking():
             where.append("m.engine = %s"); params.append(filters['model'])
         if filters.get('source') and filters['source'] != 'all':
             where.append("m.source = %s"); params.append(filters['source'])
-        # APLICAR FILTRO POR TEMA SI SE SOLICITA
+        # Filtro por tema dinámico (usar categorización)
         if filters.get('topic') and filters['topic'] != 'all':
-            # 1) Coincidencia directa por topic de la query
             topic_filter = filters['topic']
-            # 2) Ó por palabras clave de la categoría presentes en key_topics
-            #    (usa taxonomía por brand si existe; si no, mapping por defecto)
-            try:
-                brand = request.args.get('brand') or os.getenv('DEFAULT_BRAND', 'The Core School')
-                ensure_taxonomy_table()
-                conn_kw = get_db_connection(); cur_kw = conn_kw.cursor()
-                cur_kw.execute("SELECT COALESCE(keywords,'[]'::jsonb) FROM topic_taxonomy WHERE brand = %s AND category = %s", (brand, topic_filter))
-                row_kw = cur_kw.fetchone(); cur_kw.close(); conn_kw.close()
-                keywords = (row_kw[0] if row_kw else None) or _CATEGORY_KEYWORDS.get(topic_filter, [])
-            except Exception:
-                keywords = _CATEGORY_KEYWORDS.get(topic_filter, [])
-
-            # normaliza keywords a minúsculas
-            kw_lowers = [k.strip().lower() for k in keywords if isinstance(k, str) and k.strip()]
-            if kw_lowers:
-                where.append("(q.topic = %s OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(to_jsonb(m.key_topics),'[]'::jsonb)) kt WHERE LOWER(TRIM(kt)) = ANY(%s)))")
-                params.extend([topic_filter, kw_lowers])
-            else:
-                where.append("q.topic = %s"); params.append(topic_filter)
+            base_where_sql = " AND ".join(where)
+            cur.execute(f"""
+                SELECT DISTINCT q.id, q.topic, q.query
+                FROM mentions m
+                JOIN queries q ON m.query_id = q.id
+                WHERE {base_where_sql}
+            """, tuple(params))
+            qrows = cur.fetchall()
+            dyn_ids = []
+            for qid, qtopic, qtext in qrows:
+                cat = categorize_prompt(qtopic, qtext)
+                if cat == topic_filter:
+                    dyn_ids.append(qid)
+            if not dyn_ids:
+                return jsonify({"overall_ranking": [], "by_topic": {}})
+            where.append("q.id = ANY(%s)"); params.append(dyn_ids)
         where_sql = " AND ".join(where)
 
         # Obtener menciones con campos suficientes para detectar marcas de forma robusta

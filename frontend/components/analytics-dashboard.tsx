@@ -291,7 +291,7 @@ export function AnalyticsDashboard() {
       <DateRangePicker value={dateRange} onChange={handleCustomDateChange} />
 
       {/* Tema (traducción visible) */}
-      <Select value={selectedTopic} onValueChange={(v) => setSelectedTopic(canonicalizeTopicFromLabel(v))}>
+      <Select value={selectedTopic} onValueChange={(v) => setSelectedTopic(v)}>
         <SelectTrigger className="w-[180px]">
           <SelectValue placeholder="Tema" />
         </SelectTrigger>
@@ -417,6 +417,11 @@ export function AnalyticsDashboard() {
         setSovByTopic((sovResponse as ShareOfVoiceResponse).by_topic || {});
         setMentions(mentionsResponse.mentions);
         setPromptsGrouped(promptsRes.topics);
+        try {
+          const names = (promptsRes.topics || []).map((g: any) => g.topic).filter(Boolean)
+          const unique = Array.from(new Set(names))
+          setTopicOptions(["all", ...unique])
+        } catch {}
         setSentimentApi(sentimentRes);
         setTopicsCloud(topicsCloudRes.topics);
       } catch (err) {
@@ -429,16 +434,14 @@ export function AnalyticsDashboard() {
     loadDashboardData()
   }, [dateRange, selectedModel, selectedTopic, primaryBrandName]);
 
-  // cargar opciones de filtros (model, source, topic)
+  // cargar opciones de filtros (model; los topics ahora se derivan de /api/prompts)
   useEffect(() => {
     const loadFiltersLists = async () => {
       try {
-        const [modelsRes, topicsRes] = await Promise.all([
+        const [modelsRes] = await Promise.all([
           getModels(),
-          getTopics(),
         ])
         setModelOptions(["all", ...modelsRes.models])
-        setTopicOptions(["all", ...topicsRes.topics])
       } catch (e) {
         console.error("No se pudieron cargar los listados de filtros", e)
       }
@@ -553,6 +556,11 @@ export function AnalyticsDashboard() {
       const filters = { model: selectedModel, source: selectedSource, topic: selectedTopic }
       const promptsRes = await getPrompts(dateRange!, filters)
       setPromptsGrouped(promptsRes.topics)
+      try {
+        const names = (promptsRes.topics || []).map((g: any) => g.topic).filter(Boolean)
+        const unique = Array.from(new Set(names))
+        setTopicOptions(["all", ...unique])
+      } catch {}
     } catch (e) {
       console.error("No se pudieron refrescar prompts/topics", e)
     }
@@ -1482,7 +1490,7 @@ export function AnalyticsDashboard() {
                       <div className="flex items-center gap-4">
                         <h2 className="text-xl font-semibold text-gray-900">Prompts</h2>
                         {/* Filtro de Tema igual al de Visibilidad */}
-                        <Select value={selectedTopic} onValueChange={(v) => setSelectedTopic(canonicalizeTopicFromLabel(v))}>
+                        <Select value={selectedTopic} onValueChange={(v) => setSelectedTopic(v)}>
                           <SelectTrigger className="w-[220px]">
                             <SelectValue placeholder="Todos los topics" />
                           </SelectTrigger>
