@@ -25,7 +25,7 @@ import {
 } from "lucide-react"
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, PieChart, Pie, Cell, BarChart, Bar, AreaChart, Area, Brush } from "recharts"
 import Image from "next/image"
-import { getVisibility, getShareOfVoice, getMentions, getModels, getPrompts, getTopics, getPromptDetails, getSentiment, getTopicsCloud, createPrompt, updatePrompt, deletePrompt, getInsights, categorizePromptApi, type PromptsByTopic, type PromptDetails, type InsightRow, type ShareOfVoiceResponse } from "@/services/api"
+import { getVisibility, getShareOfVoice, getVisibilityRanking, getMentions, getModels, getPrompts, getTopics, getPromptDetails, getSentiment, getTopicsCloud, createPrompt, updatePrompt, deletePrompt, getInsights, categorizePromptApi, type PromptsByTopic, type PromptDetails, type InsightRow, type ShareOfVoiceResponse } from "@/services/api"
 import { VisibilityData, Competitor, Mention } from "@/types"
 import { cn } from "@/lib/utils"
 import { DateRange } from "react-day-picker"
@@ -58,8 +58,7 @@ const COLOR_MAP: Record<string, string> = {
 };
 
 // Traducción simple de topics a español (editable/expandible)
-function translateTopicToSpanish(topic: string): string {
-  const map: Record<string, string> = {
+const TOPIC_TRANSLATIONS: Record<string, string> = {
     "Credit cards": "Tarjetas de crédito",
     "Auto loans": "Préstamos de auto",
     "Banking": "Banca",
@@ -118,8 +117,18 @@ function translateTopicToSpanish(topic: string): string {
     "Job Market": "Mercado laboral",
     "Motivation Triggers": "Motivaciones y Disparadores",
     "Uncategorized": "Sin categoría",
-  };
-  return map[topic] || topic;
+};
+
+function translateTopicToSpanish(topic: string): string {
+  return TOPIC_TRANSLATIONS[topic] || topic;
+}
+
+function canonicalizeTopicFromLabel(label: string): string {
+  if (!label || label === 'all') return label
+  for (const [en, es] of Object.entries(TOPIC_TRANSLATIONS)) {
+    if (es === label) return en
+  }
+  return label
 }
 
 // Emoji relacionado con el topic
@@ -181,6 +190,7 @@ export function AnalyticsDashboard() {
   // 2. ESTADOS
   const [visibility, setVisibility] = useState<VisibilityApiResponse | null>(null)
   const [competitorData, setCompetitorData] = useState<Competitor[]>([])
+  const [visibilityRanking, setVisibilityRanking] = useState<Competitor[]>([])
   const [sovByTopic, setSovByTopic] = useState<Record<string, Competitor[]>>({})
   const [selectedSovTopic, setSelectedSovTopic] = useState<string>("All")
   const [mentions, setMentions] = useState<Mention[]>([])
@@ -213,6 +223,8 @@ export function AnalyticsDashboard() {
   const [selectedModel, setSelectedModel] = useState<string>("all")
   // Filtro: source (oculto, siempre 'all')
   const selectedSource = "all"
+  // Marca principal para filtrar sentimiento/SOV (mostrar The Core según entorno)
+  const primaryBrandName = process.env.NEXT_PUBLIC_BRAND || 'The Core School'
   // Visibilidad ya usa 'Índice de Visibilidad' en backend
   const sovTopics = useMemo(() => Object.keys(sovByTopic || {}), [sovByTopic])
 
@@ -279,7 +291,7 @@ export function AnalyticsDashboard() {
       <DateRangePicker value={dateRange} onChange={handleCustomDateChange} />
 
       {/* Tema (traducción visible) */}
-      <Select value={selectedTopic} onValueChange={setSelectedTopic}>
+      <Select value={selectedTopic} onValueChange={(v) => setSelectedTopic(canonicalizeTopicFromLabel(v))}>
         <SelectTrigger className="w-[180px]">
           <SelectValue placeholder="Tema" />
         </SelectTrigger>
@@ -389,9 +401,10 @@ export function AnalyticsDashboard() {
       try {
         setIsLoading(true)
         setError(null)
-        const filters = { model: selectedModel, source: selectedSource, topic: selectedTopic }
-        const [visibilityResponse, sovResponse, mentionsResponse, promptsRes, sentimentRes, topicsCloudRes] = await Promise.all([
+        const filters = { model: selectedModel, source: selectedSource, topic: selectedTopic, brand: primaryBrandName }
+        const [visibilityResponse, visibilityRankingRes, sovResponse, mentionsResponse, promptsRes, sentimentRes, topicsCloudRes] = await Promise.all([
           getVisibility(dateRange, filters),
+          getVisibilityRanking(dateRange, filters),
           getShareOfVoice(dateRange, filters),
           getMentions(dateRange, filters),
           getPrompts(dateRange, filters),
@@ -399,6 +412,7 @@ export function AnalyticsDashboard() {
           getTopicsCloud(dateRange, filters),
         ]);
         setVisibility(visibilityResponse);
+        setVisibilityRanking(visibilityRankingRes.ranking || [])
         setCompetitorData((sovResponse as ShareOfVoiceResponse).overall_ranking);
         setSovByTopic((sovResponse as ShareOfVoiceResponse).by_topic || {});
         setMentions(mentionsResponse.mentions);
@@ -413,7 +427,7 @@ export function AnalyticsDashboard() {
       }
     }
     loadDashboardData()
-  }, [dateRange, selectedModel, selectedTopic]);
+  }, [dateRange, selectedModel, selectedTopic, primaryBrandName]);
 
   // cargar opciones de filtros (model, source, topic)
   useEffect(() => {
@@ -439,7 +453,7 @@ export function AnalyticsDashboard() {
       if (!topicOptions || topicOptions.length <= 1) return
       try {
         setTopicSummariesLoading(true)
-        const baseFilters = { model: selectedModel, source: selectedSource }
+        const baseFilters = { model: selectedModel, source: selectedSource, brand: primaryBrandName }
         const topics = topicOptions.filter(t => t !== 'all')
         const limited = topics.slice(0, 20) // evitar ráfagas grandes
         const results = await Promise.all(limited.map(async (t) => {
@@ -459,7 +473,7 @@ export function AnalyticsDashboard() {
       }
     }
     loadPerTopic()
-  }, [dateRange, selectedModel, selectedSource, topicOptions])
+  }, [dateRange, selectedModel, selectedSource, topicOptions, primaryBrandName])
 
   // Cargar insights reales cuando estemos en "Estrategias y objetivos"
   useEffect(() => {
@@ -613,7 +627,6 @@ export function AnalyticsDashboard() {
   if (error) { return <div className="flex h-screen w-full items-center justify-center bg-red-50 p-4"><p className="text-red-600">{error}</p></div> }
   
   const selectedCompetitor = competitorData.find(c => c.selected);
-  const primaryBrandName = "The Core School";
   const sovBrand = competitorData.find(c => c.name === primaryBrandName) || selectedCompetitor || competitorData[0];
 
   
@@ -1105,7 +1118,7 @@ export function AnalyticsDashboard() {
                                 <span>Activo</span>
                                 <span>Puntuación de visibilidad</span>
                               </div>
-                              {competitorData.map((competitor) => (
+                              {visibilityRanking.map((competitor) => (
                                 <div
                                   key={competitor.rank}
                                   className={`flex items-center justify-between p-2 rounded ${
@@ -1469,7 +1482,7 @@ export function AnalyticsDashboard() {
                       <div className="flex items-center gap-4">
                         <h2 className="text-xl font-semibold text-gray-900">Prompts</h2>
                         {/* Filtro de Tema igual al de Visibilidad */}
-                        <Select value={selectedTopic} onValueChange={setSelectedTopic}>
+                        <Select value={selectedTopic} onValueChange={(v) => setSelectedTopic(canonicalizeTopicFromLabel(v))}>
                           <SelectTrigger className="w-[220px]">
                             <SelectValue placeholder="Todos los topics" />
                           </SelectTrigger>

@@ -655,6 +655,164 @@ def get_visibility():
         print(f"Error en get_visibility: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/visibility/ranking', methods=['GET'])
+def get_visibility_ranking():
+    """Ranking de visibilidad por marca.
+    Para cada marca detectada en respuestas (menciones), calcula
+    porcentaje = (# de respuestas en las que aparece la marca) / (total de respuestas)
+    con los filtros aplicados (fecha, modelo, source, topic). No filtra por brand
+    para que funcione con cualquier cliente/competencia.
+    """
+    try:
+        filters = parse_filters(request)
+        conn = get_db_connection(); cur = conn.cursor()
+
+        where = ["m.created_at >= %s AND m.created_at < %s"]
+        params = [filters['start_date'], filters['end_date']]
+        if filters.get('model') and filters['model'] != 'all':
+            where.append("m.engine = %s"); params.append(filters['model'])
+        if filters.get('source') and filters['source'] != 'all':
+            where.append("m.source = %s"); params.append(filters['source'])
+        if filters.get('topic') and filters['topic'] != 'all':
+            where.append("q.topic = %s"); params.append(filters['topic'])
+        where_sql = " AND ".join(where)
+
+        # Denominador: total de respuestas con filtros
+        cur.execute(f"""
+            SELECT COUNT(*)
+            FROM mentions m
+            JOIN queries q ON m.query_id = q.id
+            WHERE {where_sql}
+        """, tuple(params))
+        total_responses = int(cur.fetchone()[0] or 0)
+
+        # Traer campos necesarios para detectar marcas
+        cur.execute(f"""
+            SELECT m.id, m.key_topics, LOWER(COALESCE(m.response,'')) AS resp, LOWER(COALESCE(m.source_title,'')) AS title,
+                   q.topic, i.payload
+            FROM mentions m
+            JOIN queries q ON m.query_id = q.id
+            LEFT JOIN insights i ON i.id = m.generated_insight_id
+            WHERE {where_sql}
+        """, tuple(params))
+        rows = cur.fetchall()
+
+        # Diccionario de marcas y sinónimos (genérico para cualquier cliente)
+        BRAND_SYNONYMS = {
+            "The Core School": ["the core", "the core school", "thecore"],
+            "U-TAD": ["u-tad", "utad"],
+            "ECAM": ["ecam"],
+            "TAI": ["tai"],
+            "CES": ["ces"],
+            "CEV": ["cev"],
+            "FX Barcelona Film School": ["fx barcelona", "fx barcelona film school", "fx animation"],
+            "Septima Ars": ["septima ars", "séptima ars"],
+        }
+
+        def detect_brands(topics_list, resp_text, title_text, payload):
+            found = []
+            tlist = [str(t or '').lower().strip() for t in (topics_list or [])]
+            # key_topics: igualdad o substring
+            for canon, alts in BRAND_SYNONYMS.items():
+                for a in alts:
+                    if any(a == t or a in t for t in tlist):
+                        found.append(canon)
+                        break
+            # payload.brands: igualdad o substring
+            try:
+                brands_payload = []
+                if isinstance(payload, dict):
+                    brands_payload = payload.get('brands') or []
+                for canon, alts in BRAND_SYNONYMS.items():
+                    for a in alts:
+                        if any(a == str(b or '').lower().strip() or a in str(b or '').lower().strip() for b in brands_payload):
+                            if canon not in found:
+                                found.append(canon)
+                            break
+            except Exception:
+                pass
+            # substrings en texto/título
+            for canon, alts in BRAND_SYNONYMS.items():
+                if any(a in (resp_text or '') or a in (title_text or '') for a in alts):
+                    if canon not in found:
+                        found.append(canon)
+            return found
+
+        # Construir estructura de menciones normalizada
+        def normalize_list(xs):
+            out = []
+            if not xs:
+                return out
+            try:
+                for t in xs:
+                    s = str(t or '').lower().strip()
+                    if s:
+                        out.append(s)
+            except Exception:
+                pass
+            return out
+
+        mentions = []
+        for m_id, key_topics, resp_text, title_text, _topic, payload in rows:
+            topics_norm = normalize_list(key_topics)
+            payload_brands = []
+            try:
+                if isinstance(payload, dict):
+                    payload_brands = normalize_list(payload.get('brands') or [])
+            except Exception:
+                payload_brands = []
+            combined_text = f"{resp_text or ''} {title_text or ''}"
+            mentions.append({
+                "id": m_id,
+                "topics": topics_norm,
+                "pbrands": payload_brands,
+                "text": str(combined_text).lower(),
+            })
+
+        # Contar, para cada competidor, en cuántas respuestas aparece
+        counts = {brand: 0 for brand in BRAND_SYNONYMS.keys()}
+        for m in mentions:
+            for brand, alts in BRAND_SYNONYMS.items():
+                found = False
+                # key_topics (igualdad o substring)
+                for a in alts:
+                    if any(a == t or a in t for t in m["topics"]):
+                        found = True; break
+                # payload.brands
+                if not found:
+                    for a in alts:
+                        if any(a == t or a in t for t in m["pbrands"]):
+                            found = True; break
+                # texto/título
+                if not found:
+                    for a in alts:
+                        if a in m["text"]:
+                            found = True; break
+                if found:
+                    counts[brand] += 1
+
+        colors = ["bg-blue-500", "bg-red-500", "bg-blue-600", "bg-yellow-500", "bg-gray-800"]
+        ranking = []
+        denom = max(total_responses, 1)  # SIEMPRE total global de respuestas
+        pairs = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+        for i, (b, count) in enumerate(pairs):
+            pct = (count / denom) * 100.0
+            ranking.append({
+                "rank": i + 1,
+                "name": b,
+                "score": f"{pct:.1f}%",
+                "change": "+0.0%",
+                "positive": True,
+                "color": colors[i % len(colors)],
+                "selected": False,
+            })
+
+        cur.close(); conn.close()
+        return jsonify({"ranking": ranking, "total_responses": total_responses})
+    except Exception as e:
+        print(f"Error en get_visibility_ranking: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/industry/ranking', methods=['GET'])
 def get_industry_ranking():
     """Share of Voice general y por tema basado en detección por key_topics.
@@ -697,11 +855,14 @@ def get_industry_ranking():
                 where.append("q.topic = %s"); params.append(topic_filter)
         where_sql = " AND ".join(where)
 
-        # Obtener menciones con key_topics
+        # Obtener menciones con campos suficientes para detectar marcas de forma robusta
+        # Incluye: key_topics (lista), texto de respuesta/título y posibles marcas en insights.payload
         cur.execute(f"""
-            SELECT m.key_topics, q.topic
+            SELECT m.key_topics, q.topic, LOWER(COALESCE(m.response,'')) AS resp, LOWER(COALESCE(m.source_title,'')) AS title,
+                   i.payload
             FROM mentions m
             JOIN queries q ON m.query_id = q.id
+            LEFT JOIN insights i ON i.id = m.generated_insight_id
             WHERE {where_sql}
         """, tuple(params))
         rows = cur.fetchall()
@@ -718,22 +879,39 @@ def get_industry_ranking():
             "Septima Ars": ["septima ars", "séptima ars"],
         }
 
-        def detect_brands(topics_list):
+        def detect_brands(topics_list, resp_text, title_text, payload):
             found = []
-            if not topics_list:
-                return found
+            # 1) key_topics exacto
+            tlist = [str(t or '').lower().strip() for t in (topics_list or [])]
             for canon, alts in BRAND_SYNONYMS.items():
-                for a in alts:
-                    if any((str(t or '').lower().strip() == a) for t in topics_list):
+                if any(a in tlist for a in alts):
+                    found.append(canon)
+            # 2) payload.brands (si existe)
+            try:
+                brands_payload = []
+                if isinstance(payload, dict):
+                    brands_payload = payload.get('brands') or []
+                elif payload is not None:
+                    # psycopg2 devuelve JSONB como dict, pero por si acaso
+                    brands_payload = []
+                for canon, alts in BRAND_SYNONYMS.items():
+                    if any(str(b or '').lower().strip() in alts for b in brands_payload):
+                        if canon not in found:
+                            found.append(canon)
+            except Exception:
+                pass
+            # 3) búsqueda por substring en response/título
+            for canon, alts in BRAND_SYNONYMS.items():
+                if any(a in (resp_text or '') or a in (title_text or '') for a in alts):
+                    if canon not in found:
                         found.append(canon)
-                        break
             return found
 
         from collections import defaultdict
         overall_counts = defaultdict(int)
         topic_counts = defaultdict(lambda: defaultdict(int))
-        for key_topics, topic in rows:
-            brands = detect_brands(key_topics or [])
+        for key_topics, topic, resp_text, title_text, payload in rows:
+            brands = detect_brands(key_topics, resp_text, title_text, payload)
             if not brands:
                 continue
             for b in brands:

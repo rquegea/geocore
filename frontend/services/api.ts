@@ -65,6 +65,11 @@ export const getShareOfVoice = (periodOrRange: DateRange | string, filters?: Fil
   return fetchFromAPI<ShareOfVoiceResponse>(`/api/industry/ranking${qs}`);
 };
 
+export const getVisibilityRanking = (periodOrRange: DateRange | string, filters?: FilterParams): Promise<{ ranking: Competitor[]; total_responses: number }> => {
+  const qs = appendFilters(buildDateQuery(periodOrRange), filters);
+  return fetchFromAPI<{ ranking: Competitor[]; total_responses: number }>(`/api/visibility/ranking${qs}`);
+};
+
 export const getMentions = (periodOrRange: DateRange | string, filters?: FilterParams): Promise<{ mentions: Mention[] }> => {
   const qs = appendFilters(buildDateQuery(periodOrRange), filters);
   return fetchFromAPI<{ mentions: Mention[] }>(`/api/mentions${qs}`);
