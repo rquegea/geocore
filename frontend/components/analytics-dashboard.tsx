@@ -3,7 +3,9 @@
 // 1. IMPORTACIONES (sin cambios)
 import { useState, useEffect, useMemo } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardFooter, CardAction } from "@/components/ui/card"
+import React from "react"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -230,8 +232,6 @@ export function AnalyticsDashboard() {
 
   // Prompts data
   const [promptsGrouped, setPromptsGrouped] = useState<PromptsByTopic[]>([])
-  // Métricas reales por topic (visibilidad y SOV de la marca), calculadas como en la pestaña Visibilidad
-  const [topicMetricMap, setTopicMetricMap] = useState<Record<string, { visibility: number; sov: number }>>({})
   const [selectedTopic, setSelectedTopic] = useState<string>("all")
   const [topicOptions, setTopicOptions] = useState<string[]>(["all"]) 
   const [openTopics, setOpenTopics] = useState<Record<string, boolean>>({})
@@ -300,18 +300,6 @@ export function AnalyticsDashboard() {
         <SelectContent>
           {topicOptions.map((t) => (
             <SelectItem key={t} value={t}>{t === 'all' ? 'Todos los temas' : translateTopicToSpanish(t)}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-
-      {/* Modelo */}
-      <Select value={selectedModel} onValueChange={setSelectedModel}>
-        <SelectTrigger className="w-[180px]">
-          <SelectValue placeholder="Modelo" />
-        </SelectTrigger>
-        <SelectContent>
-          {modelOptions.map((m) => (
-            <SelectItem key={m} value={m}>{m === 'all' ? 'Todos los modelos' : m}</SelectItem>
           ))}
         </SelectContent>
       </Select>
@@ -568,34 +556,7 @@ export function AnalyticsDashboard() {
     }
   }
 
-  // Cargar métricas de Visibilidad y SOV por cada topic usando los mismos endpoints del dashboard
-  useEffect(() => {
-    const loadTopicMetrics = async () => {
-      try {
-        const topics = Array.from(new Set((promptsGrouped || []).map((g) => g.topic).filter(Boolean)))
-        if (topics.length === 0) { setTopicMetricMap({}); return }
-        const filtersBase = { model: selectedModel, source: selectedSource, brand: primaryBrandName }
-        const results = await Promise.all(topics.map(async (t) => {
-          try {
-            const vis = await getVisibility(dateRange!, { ...filtersBase, topic: t })
-            const sovRes = await getShareOfVoice(dateRange!, { ...filtersBase, topic: t })
-            const brandRow = (sovRes.overall_ranking || []).find((c) => c.name === primaryBrandName)
-            const sovPct = brandRow ? parseFloat((brandRow.score || '0%').replace('%', '')) : 0
-            return { t, visibility: vis?.visibility_score ?? 0, sov: isFinite(sovPct) ? sovPct : 0 }
-          } catch {
-            return { t, visibility: 0, sov: 0 }
-          }
-        }))
-        const map: Record<string, { visibility: number; sov: number }> = {}
-        results.forEach((r) => { map[r.t] = { visibility: Number(r.visibility) || 0, sov: Number(r.sov) || 0 } })
-        setTopicMetricMap(map)
-      } catch (e) {
-        console.error('No se pudieron cargar métricas por topic', e)
-        setTopicMetricMap({})
-      }
-    }
-    loadTopicMetrics()
-  }, [promptsGrouped, dateRange, selectedModel, selectedSource, primaryBrandName])
+  // eliminado: cálculo remoto de métricas por topic; ahora se resume a partir de prompts
 
   const handleCreatePrompt = async () => {
     try {
@@ -1039,6 +1000,21 @@ export function AnalyticsDashboard() {
                 <Button variant="ghost" className={ activeTab === "Visibility" ? "text-blue-600 border-b-2 border-blue-600 rounded-none hover:bg-gray-100 hover:text-black" : "text-gray-600 hover:text-gray-800 hover:bg-gray-100" } onClick={() => setActiveTab("Visibility")}>Visibilidad</Button>
                 <Button variant="ghost" className={ activeTab === "Prompts" ? "text-blue-600 border-b-2 border-blue-600 rounded-none hover:bg-gray-100 hover:text-black" : "text-gray-600 hover:text-gray-800 hover:bg-gray-100" } onClick={() => setActiveTab("Prompts")}>Prompts</Button>
                 <Button variant="ghost" className={ activeTab === "Sentiment" ? "text-blue-600 border-b-2 border-blue-600 rounded-none hover:bg-gray-100 hover:text-black" : "text-gray-600 hover:text-gray-800 hover:bg-gray-100" } onClick={() => setActiveTab("Sentiment")}>Sentimiento</Button>
+                
+                {/* Filtro de Modelo añadido aquí */}
+                <div className="ml-auto flex items-center gap-2">
+                    <label className="text-sm font-medium text-gray-600">Modelo:</label>
+                    <Select value={selectedModel} onValueChange={setSelectedModel}>
+                        <SelectTrigger className="w-[180px]">
+                            <SelectValue placeholder="Modelo" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {modelOptions.map((m) => (
+                                <SelectItem key={m} value={m}>{m === 'all' ? 'Todos los modelos' : m}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
               </div>
             </div>
             {/* Dashboard Content */}
@@ -1563,97 +1539,110 @@ export function AnalyticsDashboard() {
                               </tr>
                             </thead>
                             <tbody className="bg-white">
-                              {(() => {
-                                const totalMentions = Math.max(promptsGrouped.reduce((acc, g) => acc + (g.topic_total_mentions || 0), 0), 1)
-                                const filtered = promptsGrouped.filter(g => !promptsSearch || g.topic.toLowerCase().includes(promptsSearch.toLowerCase()))
-                                return filtered.map((group, index) => {
-                                  // Mostrar visibilidad real del topic (endpoint /api/visibility con filtro topic)
-                                  const topicVis = topicMetricMap[group.topic]?.visibility ?? (group.prompts.length ? (group.prompts.reduce((sum, p) => sum + (p.visibility_score || 0), 0) / group.prompts.length) : 0)
-                                  // Mostrar SOV real del topic (endpoint /api/industry/ranking con filtro topic)
-                                  const topicShare = topicMetricMap[group.topic]?.sov ?? (((group.topic_total_mentions || 0) / totalMentions) * 100)
-                                  const rank = index + 1
-                                  const isOpen = !!openTopics[group.topic]
-                                  return (
-                                    <>
-                                      <tr
-                                        key={group.topic}
-                                        className="border-b border-gray-100 hover:bg-gray-50 bg-white cursor-pointer"
-                                        onClick={() => {
-                                          setSelectedTopic(group.topic)
-                                          setOpenTopics(prev => ({ ...prev, [group.topic]: !prev[group.topic] }))
-                                        }}
-                                      >
-                                        <td className="p-4">
-                                          <div className="flex items-center gap-3">
-                                            <ChevronRight className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
-                                            <div className="w-8 h-8 bg-blue-50 border border-blue-200 rounded-full flex items-center justify-center">
-                                              <span className="text-base">{emojiForTopic(group.topic)}</span>
-                                            </div>
-                                            <div>
-                                              <div className="font-medium text-gray-900">{translateTopicToSpanish(group.topic)}</div>
-                                              <div className="text-sm text-gray-500">
-                                                <Badge variant="secondary" className="text-xs">Topic</Badge>
-                                                <span className="ml-2">{group.prompts.length} prompts</span>
+                              {isLoading ? (
+                                // --- ESTADO DE CARGA (SKELETON) ---
+                                Array.from({ length: 3 }).map((_, i) => (
+                                  <tr key={`skel-${i}`}>
+                                    <td className="p-4"><Skeleton className="h-8 w-48" /></td>
+                                    <td className="p-4"><Skeleton className="h-4 w-24" /></td>
+                                    <td className="p-4"><Skeleton className="h-4 w-12" /></td>
+                                    <td className="p-4"><Skeleton className="h-4 w-20" /></td>
+                                    <td className="p-4"><Skeleton className="h-4 w-12" /></td>
+                                  </tr>
+                                ))
+                              ) : (
+                                // --- RENDERIZADO DE DATOS REALES ---
+                                (() => {
+                                  const totalMentions = Math.max(promptsGrouped.reduce((acc, g) => acc + (g.topic_total_mentions || 0), 0), 1)
+                                  const filtered = promptsGrouped.filter(g => !promptsSearch || g.topic.toLowerCase().includes(promptsSearch.toLowerCase()))
+                                  return filtered.map((group, index) => {
+                                    // --- LÓGICA DE CÁLCULO UNIFICADA Y CORRECTA ---
+                                    const avgVisibility = group.prompts.length > 0
+                                      ? group.prompts.reduce((sum, p) => sum + (p.visibility_score_individual ?? 0), 0) / group.prompts.length
+                                      : 0
+                                    const topicShare = ((group.topic_total_mentions || 0) / totalMentions) * 100
+                                    const rank = index + 1
+                                    const isOpen = !!openTopics[group.topic]
+                                    return (
+                                      <React.Fragment key={group.topic}>
+                                        <tr
+                                          className="border-b border-gray-100 hover:bg-gray-50 bg-white cursor-pointer"
+                                          onClick={() => {
+                                            setOpenTopics(prev => ({ ...prev, [group.topic]: !prev[group.topic] }))
+                                          }}
+                                        >
+                                          <td className="p-4">
+                                            <div className="flex items-center gap-3">
+                                              <ChevronRight className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+                                              <div className="w-8 h-8 bg-blue-50 border border-blue-200 rounded-full flex items-center justify-center">
+                                                <span className="text-base">{emojiForTopic(group.topic)}</span>
                                               </div>
-                                            </div>
-                                          </div>
-                                        </td>
-                                        <td className="p-4">
-                                          <div className="flex items-center gap-3">
-                                            <span className="font-medium">{topicVis.toFixed(1)}%</span>
-                                            <div className="w-32 h-1.5 bg-gray-200 rounded-full overflow-hidden"><div className="h-1.5 bg-gray-800" style={{ width: `${Math.min(100, Math.max(0, topicVis))}%` }}></div></div>
-                                          </div>
-                                        </td>
-                                        <td className="p-4">
-                                          <div className="flex items-center gap-2">
-                                            <span className="font-medium">#{rank}</span>
-                                          </div>
-                                        </td>
-                                        <td className="p-4">
-                                          <div className="flex items-center gap-2">
-                                            <span className="font-medium">{topicShare.toFixed(1)}%</span>
-                                          </div>
-                                        </td>
-                                        <td className="p-4">
-                                          <span className="font-medium">{group.topic_total_mentions}</span>
-                                        </td>
-                                      </tr>
-                                      {isOpen && (
-                                        <tr className="bg-white">
-                                          <td colSpan={5} className="p-0">
-                                            <div className="px-4 py-2">
-                                              <div className="divide-y">
-                                                {group.prompts.map((p) => (
-                                                  <div
-                                                    key={p.id}
-                                                    className="flex items-center justify-between py-2 rounded px-2 hover:bg-gray-50"
-                                                    role="button"
-                                                    tabIndex={0}
-                                                  >
-                                                    <div className="text-sm text-gray-900 line-clamp-2 max-w-[50%]" onClick={() => openPrompt(p.id)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { openPrompt(p.id); } }}>
-                                                      {p.query}
-                                                    </div>
-                                                    <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                                                      <div className="w-48 text-right">Visibilidad (prompt): <span className="font-medium text-gray-900">{(p.visibility_score_individual ?? 0).toFixed(1)}%</span></div>
-                                                      <div className="w-40 text-right">SOV (prompt): <span className="font-medium text-gray-900">{(p.share_of_voice_individual ?? 0).toFixed(1)}%</span></div>
-                                                      <div className="w-28 text-right">Ranking: <span className="font-medium text-gray-900">#{p.rank}</span></div>
-                                                      <div className="w-32 text-right">Ejecuciones: <span className="font-medium text-gray-900">{p.executions}</span></div>
-                                                      <div className="flex items-center gap-2">
-                                                        <Button size="sm" variant="outline" onClick={() => openEditPrompt(p.id, p.query as string, group.topic, undefined)}>Editar</Button>
-                                                        <Button size="sm" variant="destructive" onClick={() => handleDeletePrompt(p.id)}>Eliminar</Button>
-                                                      </div>
-                                                    </div>
-                                                  </div>
-                                                ))}
+                                              <div>
+                                                <div className="font-medium text-gray-900">{translateTopicToSpanish(group.topic)}</div>
+                                                <div className="text-sm text-gray-500">
+                                                  <Badge variant="secondary" className="text-xs">Topic</Badge>
+                                                  <span className="ml-2">{group.prompts.length} prompts</span>
+                                                </div>
                                               </div>
                                             </div>
                                           </td>
+                                          <td className="p-4">
+                                            <div className="flex items-center gap-3">
+                                              <span className="font-medium">{avgVisibility.toFixed(1)}%</span>
+                                              <div className="w-32 h-1.5 bg-gray-200 rounded-full overflow-hidden"><div className="h-1.5 bg-gray-800" style={{ width: `${Math.min(100, Math.max(0, avgVisibility))}%` }}></div></div>
+                                            </div>
+                                          </td>
+                                          <td className="p-4">
+                                            <div className="flex items-center gap-2">
+                                              <span className="font-medium">#{rank}</span>
+                                            </div>
+                                          </td>
+                                          <td className="p-4">
+                                            <div className="flex items-center gap-2">
+                                              <span className="font-medium">{topicShare.toFixed(1)}%</span>
+                                            </div>
+                                          </td>
+                                          <td className="p-4">
+                                            <span className="font-medium">{group.topic_total_mentions}</span>
+                                          </td>
                                         </tr>
-                                      )}
-                                    </>
-                                  )
-                                })
-                              })()}
+                                        {isOpen && (
+                                          <tr className="bg-white">
+                                            <td colSpan={5} className="p-0">
+                                              <div className="px-4 py-2">
+                                                <div className="divide-y">
+                                                  {group.prompts.map((p) => (
+                                                    <div
+                                                      key={p.id}
+                                                      className="flex items-center justify-between py-2 rounded px-2 hover:bg-gray-50"
+                                                      role="button"
+                                                      tabIndex={0}
+                                                    >
+                                                      <div className="text-sm text-gray-900 line-clamp-2 max-w-[50%]" onClick={() => openPrompt(p.id)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { openPrompt(p.id); } }}>
+                                                        {p.query}
+                                                      </div>
+                                                      <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                                                        <div className="w-48 text-right">Visibilidad (prompt): <span className="font-medium text-gray-900">{(p.visibility_score_individual ?? 0).toFixed(1)}%</span></div>
+                                                        <div className="w-40 text-right">SOV (prompt): <span className="font-medium text-gray-900">{(p.share_of_voice_individual ?? 0).toFixed(1)}%</span></div>
+                                                        <div className="w-28 text-right">Ranking: <span className="font-medium text-gray-900">#{p.rank}</span></div>
+                                                        <div className="w-32 text-right">Ejecuciones: <span className="font-medium text-gray-900">{p.executions}</span></div>
+                                                        <div className="flex items-center gap-2">
+                                                          <Button size="sm" variant="outline" onClick={() => openEditPrompt(p.id, p.query as string, group.topic, undefined)}>Editar</Button>
+                                                          <Button size="sm" variant="destructive" onClick={() => handleDeletePrompt(p.id)}>Eliminar</Button>
+                                                        </div>
+                                                      </div>
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                              </div>
+                                            </td>
+                                          </tr>
+                                        )}
+                                      </React.Fragment>
+                                    )
+                                  })
+                                })()
+                              )}
                             </tbody>
                           </table>
                         </div>

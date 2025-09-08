@@ -1502,6 +1502,9 @@ def get_prompts_grouped():
                 "visibility_score": it["visibility_score"],
                 "share_of_voice": share_of_voice,
                 "executions": it["executions"],
+                # --- métricas individuales por prompt ---
+                "visibility_score_individual": it["visibility_score_individual"],
+                "share_of_voice_individual": it["share_of_voice_individual"],
             })
 
         topics = []
