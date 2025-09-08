@@ -242,6 +242,10 @@ export function AnalyticsDashboard() {
   const [promptModalOpen, setPromptModalOpen] = useState(false)
   const [promptDetails, setPromptDetails] = useState<PromptDetails | null>(null)
   const [promptLoading, setPromptLoading] = useState(false)
+  // Estado del modal de ejecuciones (detalle de respuesta)
+  const [execDialogOpen, setExecDialogOpen] = useState(false)
+  const [execActiveIndex, setExecActiveIndex] = useState(0)
+  const [execFilterEngine, setExecFilterEngine] = useState<string>('all')
   // Crear Prompt
   const [addPromptOpen, setAddPromptOpen] = useState(false)
   const [newPromptQuery, setNewPromptQuery] = useState("")
@@ -262,6 +266,8 @@ export function AnalyticsDashboard() {
   // Sentiment API-backed state
   const [sentimentApi, setSentimentApi] = useState<{ timeseries: { date: string; avg: number }[]; distribution: { negative: number; neutral: number; positive: number }; negatives: { id: number; summary: string | null; key_topics: string[]; source_title: string | null; source_url: string | null; sentiment: number; created_at: string | null }[]; positives?: { id: number; summary: string | null; key_topics: string[]; source_title: string | null; source_url: string | null; sentiment: number; created_at: string | null }[] } | null>(null)
   const [topicsCloud, setTopicsCloud] = useState<{ topic: string; count: number; avg_sentiment?: number }[]>([])
+  const [topicGroups, setTopicGroups] = useState<any[]>([])
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
   // Resumen por tema aplicando filtros globales a cada tema individualmente
   // eliminado: topicSummaries (ahora usamos datos de API directamente)
 
@@ -435,6 +441,7 @@ export function AnalyticsDashboard() {
         } catch {}
         setSentimentApi(sentimentRes);
         setTopicsCloud(topicsCloudRes.topics);
+        setTopicGroups((topicsCloudRes as any).groups || []);
       } catch (err) {
         setError("No se pudieron cargar los datos. Por favor, revisa la consola o el estado del backend.")
         console.error(err)
@@ -654,7 +661,6 @@ export function AnalyticsDashboard() {
             />
           </div>
           <nav className="space-y-1">
-            <Button variant="ghost" className={`w-full justify-start text-black hover:text-black hover:bg-gradient-to-r hover:from-gray-100 hover:to-gray-50 rounded-md ${ activeSidebarSection === "Overview" ? "bg-gray-100" : "" }`} onClick={() => setActiveSidebarSection("Overview")}> <BarChart3 className="w-4 h-4 mr-3" /> Resumen </Button>
             <Button variant="ghost" className={`w-full justify-start text-black rounded-md hover:bg-gradient-to-r hover:from-gray-200 hover:to-gray-100 ${ activeSidebarSection === "Answer Engine Insights" ? "bg-gray-100" : "" }`} onClick={() => setActiveSidebarSection("Answer Engine Insights")}> <Zap className="w-4 h-4 mr-3" /> Insights del Answer Engine </Button>
             <Button variant="ghost" className={`w-full justify-start text-black hover:text-black hover:bg-gradient-to-r hover:from-gray-100 hover:to-gray-50 rounded-md text-left ${ activeSidebarSection === "Estrategias y objetivos" ? "bg-gray-100" : "" }`} onClick={() => setActiveSidebarSection("Estrategias y objetivos")}> <Target className="w-4 h-4 mr-3 flex-shrink-0" /> <span className="truncate">Estrategias y objetivos </span> </Button>
           </nav>
@@ -671,14 +677,7 @@ export function AnalyticsDashboard() {
       </div>
       {/* Main Content */}
       <div className="flex-1 overflow-auto bg-white">
-        {activeSidebarSection === "Overview" ? (
-          <div className="p-6">
-            <div className="text-center py-20">
-              <h2 className="text-2xl font-semibold text-gray-900 mb-4">Resumen</h2>
-              <p className="text-gray-600"> Esta página está en construcción. Aquí podrás agregar más datos y métricas generales. </p>
-            </div>
-          </div>
-        ) : activeSidebarSection === "Estrategias y objetivos" ? (
+        {activeSidebarSection === "Estrategias y objetivos" ? (
           <>
             <div className="border-b border-gray-200 bg-white shadow-sm">
               <div className="flex items-center justify-between p-6">
@@ -1448,62 +1447,125 @@ export function AnalyticsDashboard() {
                       </div>
                     </div>
 
-                    {/* Topics cloud */}
+                    {/* Topics cloud (AHORA AGRUPADO) */}
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
-                        <h3 className="text-lg font-semibold">Temas</h3>
+                        <h3 className="text-lg font-semibold">Temas por Categoría</h3>
                       </div>
                       <Card className="shadow-sm bg-white border-gray-200">
                         <CardContent className="p-0">
-                          <div className="overflow-x-auto">
-                            <table className="w-full bg-white">
-                              <thead className="border-b border-gray-200 bg-white">
-                                <tr>
-                                  <th className="text-left p-4 font-medium text-gray-600">Tema</th>
-                                  <th className="text-left p-4 font-medium text-gray-600">Nivel de Sentimiento</th>
-                                  <th className="text-left p-4 font-medium text-gray-600">Ocurrencias</th>
-                                </tr>
-                              </thead>
-                              <tbody className="bg-white">
-                                {(() => {
-                                  const top = topicsCloud.slice(0, 50)
-                                  const maxCount = Math.max(...top.map(t => t.count || 0), 1)
-                                  return top.map((t) => {
-                                    const sentimentScore = ((t.avg_sentiment ?? 0) + 1) / 2 * 100
-                                    return (
-                                      <tr key={t.topic} className="border-b border-gray-100 hover:bg-gray-50">
-                                        <td className="p-4">
-                                          <div className="flex items-center gap-3">
-                                            <div className="w-8 h-8 bg-blue-50 border border-blue-200 rounded-full flex items-center justify-center">
-                                              <span className="text-base">🧩</span>
+                          {topicGroups.length > 0 ? (
+                            (topicGroups.filter((g) => g.group_name !== 'Temas Generales del Sector')).map((group) => {
+                              const totalCount = (group?.topics || []).reduce((sum: number, t: any) => sum + (t.count || 0), 0)
+                              const weightedAvg = totalCount > 0 ? (group.topics.reduce((s: number, t: any) => s + ((t.avg_sentiment ?? 0) * (t.count || 0)), 0) / totalCount) : 0
+                              const groupAvgPercent = ((weightedAvg + 1) / 2) * 100
+                              const isOpen = !!openGroups[group.group_name]
+                              return (
+                                <Collapsible key={group.group_name} open={isOpen} onOpenChange={(v) => setOpenGroups((prev) => ({ ...prev, [group.group_name]: v }))}>
+                                  <div className="border-b last:border-b-0">
+                                    <CollapsibleTrigger className="w-full p-4 flex items-center justify-between hover:bg-gray-50">
+                                      <div className="flex items-center gap-3">
+                                        <div className="font-medium text-gray-900">{group.group_name}</div>
+                                        <Badge variant="secondary">{group.total_occurrences} menciones</Badge>
+                                      </div>
+                                      <div className="flex items-center gap-4">
+                                        <div className="text-sm">Sentimiento Medio: <span className={`font-semibold ${weightedAvg > 0.1 ? 'text-green-600' : weightedAvg < -0.1 ? 'text-red-600' : 'text-gray-600'}`}>{groupAvgPercent.toFixed(0)}%</span></div>
+                                        <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                                      </div>
+                                    </CollapsibleTrigger>
+                                    <CollapsibleContent>
+                                      <div className="bg-gray-50/50 p-4">
+                                        <table className="w-full table-fixed">
+                                          <colgroup>
+                                            <col className="w-[60%]" />
+                                            <col className="w-[240px]" />
+                                            <col className="w-[140px]" />
+                                          </colgroup>
+                                          <tbody>
+                                            {group.topics.map((t: any) => {
+                                              const sentimentScore = ((t.avg_sentiment ?? 0) + 1) / 2 * 100;
+                                              return (
+                                                <tr key={t.topic} className="hover:bg-gray-100">
+                                                  <td className="p-2 font-medium text-gray-800">{translateTopicToSpanish(t.topic)}</td>
+                                                  <td className="p-2 w-[240px]">
+                                                    <div className="flex items-center justify-center gap-2">
+                                                      <div className="w-32 h-2 bg-gray-200 rounded-full">
+                                                        <div
+                                                          className={`h-2 rounded-full ${sentimentScore > 60 ? 'bg-green-500' : sentimentScore < 40 ? 'bg-red-500' : 'bg-yellow-500'}`}
+                                                          style={{ width: `${sentimentScore}%` }}
+                                                        />
+                                                      </div>
+                                                      <span className="text-sm font-medium">{sentimentScore.toFixed(0)}%</span>
+                                                    </div>
+                                                  </td>
+                                                  <td className="p-2 text-right">{t.count} ocurrencias</td>
+                                                </tr>
+                                              );
+                                            })}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    </CollapsibleContent>
+                                  </div>
+                                </Collapsible>
+                              )
+                            })
+                          ) : (
+                            <div className="overflow-x-auto">
+                              <table className="w-full bg-white table-fixed">
+                                <colgroup>
+                                  <col className="w-[60%]" />
+                                  <col className="w-[240px]" />
+                                  <col className="w-[140px]" />
+                                </colgroup>
+                                <thead className="border-b border-gray-200 bg-white">
+                                  <tr>
+                                    <th className="text-left p-4 font-medium text-gray-600">Tema</th>
+                                    <th className="text-left p-4 font-medium text-gray-600">Nivel de Sentimiento</th>
+                                    <th className="text-left p-4 font-medium text-gray-600">Ocurrencias</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="bg-white">
+                                  {(() => {
+                                    const top = topicsCloud.slice(0, 50)
+                                    const maxCount = Math.max(...top.map(t => t.count || 0), 1)
+                                    return top.map((t) => {
+                                      const sentimentScore = ((t.avg_sentiment ?? 0) + 1) / 2 * 100
+                                      return (
+                                        <tr key={t.topic} className="border-b border-gray-100 hover:bg-gray-50">
+                                          <td className="p-4">
+                                            <div className="flex items-center gap-3">
+                                              <div className="w-8 h-8 bg-blue-50 border border-blue-200 rounded-full flex items-center justify-center">
+                                                <span className="text-base">🧩</span>
+                                              </div>
+                                              <div className="font-medium text-gray-900">{translateTopicToSpanish(t.topic)}</div>
                                             </div>
-                                            <div className="font-medium text-gray-900">{translateTopicToSpanish(t.topic)}</div>
-                                          </div>
-                                        </td>
-                                        <td className="p-4">
-                                          <div className="flex items-center gap-2">
-                                            <div className="w-24 h-2 bg-gray-200 rounded-full">
-                                              <div
-                                                className={`h-2 rounded-full ${sentimentScore > 60 ? 'bg-green-500' : sentimentScore < 40 ? 'bg-red-500' : 'bg-yellow-500'}`}
-                                                style={{ width: `${sentimentScore}%` }}
-                                              />
+                                          </td>
+                                          <td className="p-4 w-[240px]">
+                                            <div className="flex items-center gap-2 justify-center">
+                                              <div className="w-32 h-2 bg-gray-200 rounded-full">
+                                                <div
+                                                  className={`h-2 rounded-full ${sentimentScore > 60 ? 'bg-green-500' : sentimentScore < 40 ? 'bg-red-500' : 'bg-yellow-500'}`}
+                                                  style={{ width: `${sentimentScore}%` }}
+                                                />
+                                              </div>
+                                              <span className="text-sm font-medium">{sentimentScore.toFixed(0)}%</span>
                                             </div>
-                                            <span className="text-sm font-medium">{sentimentScore.toFixed(0)}%</span>
-                                          </div>
-                                        </td>
-                                        <td className="p-4">
-                                          <div className="flex items-center gap-3">
-                                            <span className="font-medium">{t.count}</span>
-                                            <div className="w-32 h-1.5 bg-gray-200 rounded-full overflow-hidden"><div className="h-1.5 bg-gray-800" style={{ width: `${Math.max(0, Math.min(100, (t.count / maxCount) * 100)) }%` }}></div></div>
-                                          </div>
-                                        </td>
-                                      </tr>
-                                    )
-                                  })
-                                })()}
-                              </tbody>
-                            </table>
-                          </div>
+                                          </td>
+                                          <td className="p-4">
+                                            <div className="flex items-center gap-3">
+                                              <span className="font-medium">{t.count}</span>
+                                              <div className="w-32 h-1.5 bg-gray-200 rounded-full overflow-hidden"><div className="h-1.5 bg-gray-800" style={{ width: `${Math.max(0, Math.min(100, (t.count / maxCount) * 100)) }%` }}></div></div>
+                                            </div>
+                                          </td>
+                                        </tr>
+                                      )
+                                    })
+                                  })()}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
                         </CardContent>
                       </Card>
                     </div>
@@ -1558,7 +1620,6 @@ export function AnalyticsDashboard() {
                               ) : (
                                 // --- RENDERIZADO DE DATOS REALES ---
                                 (() => {
-                                  const totalMentions = Math.max(promptsGrouped.reduce((acc, g) => acc + (g.topic_total_mentions || 0), 0), 1)
                                   // Sin buscador: usar todos los grupos
                                   const filtered = promptsGrouped
                                   return filtered.map((group, index) => {
@@ -1566,7 +1627,10 @@ export function AnalyticsDashboard() {
                                     const avgVisibility = group.prompts.length > 0
                                       ? group.prompts.reduce((sum, p) => sum + (p.visibility_score_individual ?? 0), 0) / group.prompts.length
                                       : 0
-                                    const topicShare = ((group.topic_total_mentions || 0) / totalMentions) * 100
+                                    // SOV del topic = media de los SOV de sus prompts
+                                    const avgSov = group.prompts.length > 0
+                                      ? group.prompts.reduce((sum, p) => sum + (p.share_of_voice_individual ?? 0), 0) / group.prompts.length
+                                      : 0
                                     const rank = index + 1
                                     const isOpen = !!openTopics[group.topic]
                                     return (
@@ -1605,7 +1669,7 @@ export function AnalyticsDashboard() {
                                           </td>
                                           <td className="p-4">
                                             <div className="flex items-center gap-2">
-                                              <span className="font-medium">{topicShare.toFixed(1)}%</span>
+                                              <span className="font-medium">{avgSov.toFixed(1)}%</span>
                                             </div>
                                           </td>
                                           <td className="p-4">
@@ -1662,85 +1726,119 @@ export function AnalyticsDashboard() {
                 )}
                 {/* Modal de detalle de prompt */}
                 <Dialog open={promptModalOpen} onOpenChange={setPromptModalOpen}>
-                  <DialogContent className="w-[98vw] max-w-[1400px] lg:max-w-[1500px] 2xl:max-w-[1600px] max-h-[90vh] overflow-y-auto">
+                  <DialogContent className="w-[95vw] max-w-6xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                       <DialogTitle className="text-lg">{promptDetails?.query || "Prompt"}</DialogTitle>
+                      <p className="text-sm text-muted-foreground pt-1">
+                        Mostrando métricas para el prompt seleccionado en el rango de fechas y modelo actual.
+                      </p>
                     </DialogHeader>
                     {promptLoading ? (
-                      <div className="p-6">Cargando...</div>
+                      <div className="p-6 text-center">Cargando detalles del prompt...</div>
                     ) : promptDetails ? (
-                      <div className="space-y-6 p-2">
-                        <div className="flex items-center justify-between">
-                          <div className="text-sm text-muted-foreground">Tema: {translateTopicToSpanish(promptDetails.topic || "")}</div>
-                          {/* Controles de periodo simplificados (usan el mismo rango actual) */}
-                          <div className="text-xs text-muted-foreground">Rango aplicado al dashboard</div>
-                        </div>
-
-                        {/* --- INICIO DE LA CORRECCIÓN DE LAYOUT --- */}
-                        <div className="flex flex-col lg:flex-row gap-6">
-                          
-                          {/* COLUMNA IZQUIERDA: GRÁFICOS */}
-                          <div className="flex-1 flex flex-col gap-6">
-                            <Card className="shadow-sm bg-white">
-                              <CardHeader>
-                                <CardTitle className="text-sm">Puntuación de visibilidad</CardTitle>
-                              </CardHeader>
-                              <CardContent>
-                                <div className="h-[250px]">
-                                  <ResponsiveContainer width="100%" height="100%">
-                                    <LineChart data={promptDetails.timeseries}>
-                                      <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
-                                      <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
-                                      <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }} />
-                                      <Line type="monotone" dataKey="count" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={false} />
-                                    </LineChart>
-                                  </ResponsiveContainer>
-                                </div>
-                              </CardContent>
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-4">
+                        {/* Columna Izquierda: Métricas + Tendencias */}
+                        <div className="flex flex-col gap-6">
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                            <Card>
+                              <CardHeader><CardTitle className="text-sm font-medium">Visibilidad</CardTitle></CardHeader>
+                              <CardContent><p className="text-3xl font-bold">{promptDetails.visibility_score?.toFixed(1) ?? '0.0'}%</p></CardContent>
                             </Card>
-                            <Card className="shadow-sm bg-white">
-                              <CardHeader>
-                                <CardTitle className="text-sm">Visibilidad por plataforma</CardTitle>
-                              </CardHeader>
-                              <CardContent>
-                                <div className="h-[250px]">
-                                  <ResponsiveContainer width="100%" height="100%">
-                                    <BarChart data={promptDetails.platforms}>
-                                      <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
-                                      <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
-                                      <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }} />
-                                      <Bar dataKey="value" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-                                    </BarChart>
-                                  </ResponsiveContainer>
-                                </div>
-                              </CardContent>
+                            <Card>
+                              <CardHeader><CardTitle className="text-sm font-medium">Share of Voice</CardTitle></CardHeader>
+                              <CardContent><p className="text-3xl font-bold">{promptDetails.share_of_voice?.toFixed(1) ?? '0.0'}%</p></CardContent>
+                            </Card>
+                            <Card>
+                              <CardHeader><CardTitle className="text-sm font-medium">Ejecuciones</CardTitle></CardHeader>
+                              <CardContent><p className="text-3xl font-bold">{promptDetails.total_executions ?? '0'}</p></CardContent>
                             </Card>
                           </div>
 
-                          {/* COLUMNA DERECHA: EJECUCIONES */}
-                          <div className="lg:w-1/2">
-                            <Card className="shadow-sm bg-white h-full">
-                              <CardHeader>
-                                <CardTitle className="text-sm">Ejecuciones</CardTitle>
-                              </CardHeader>
-                              <CardContent>
-                                <div className="space-y-3 max-h-[520px] overflow-auto">
-                                  {promptDetails.executions.map((e) => (
-                                    <div key={e.id} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-start border rounded p-2 text-xs">
-                                      <div className="text-muted-foreground md:col-span-1">{e.created_at}</div>
-                                      <div className="text-muted-foreground md:col-span-1">{e.engine} · {e.source}</div>
-                                      <div className="text-sm md:col-span-2">{e.response}</div>
+                          {promptDetails.trends && promptDetails.trends.length > 0 && (
+                            <Card>
+                              <CardHeader><CardTitle className="text-sm font-medium">Tendencias Clave</CardTitle></CardHeader>
+                              <CardContent className="flex flex-wrap gap-2">
+                                {promptDetails.trends.map((trend, index) => (
+                                  <Badge key={index} variant="secondary" className="text-sm">{trend}</Badge>
+                                ))}
+                              </CardContent>
+                            </Card>
+                          )}
+
+                          <Card>
+                            <CardHeader><CardTitle className="text-sm">Ejecuciones Recientes</CardTitle></CardHeader>
+                            <CardContent>
+                              <div className="space-y-3 max-h-[260px] overflow-auto border rounded-lg p-3">
+                                {promptDetails.executions?.map((e, idx) => (
+                                  <div key={e.id} className="text-xs border-b pb-2 last:border-b-0">
+                                    <div className="flex justify-between text-muted-foreground mb-1">
+                                      <span>{e.engine}</span>
+                                      <span>{new Date(e.created_at).toLocaleDateString()}</span>
                                     </div>
-                                  ))}
-                                </div>
-                              </CardContent>
-                            </Card>
+                                    <p className="text-sm text-foreground line-clamp-3 cursor-pointer" onClick={() => { setExecActiveIndex(idx); setExecDialogOpen(true); }}>{e.response}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            </CardContent>
+                          </Card>
+                        </div>
+
+                        {/* Columna Derecha: Gráficos */}
+                        <div className="flex flex-col gap-6">
+                          <Card>
+                            <CardHeader><CardTitle className="text-sm">Puntuación de Visibilidad (Evolución)</CardTitle></CardHeader>
+                            <CardContent className="h-[250px] w-full">
+                              <ResponsiveContainer>
+                                <LineChart data={promptDetails.timeseries}>
+                                  <XAxis dataKey="date" stroke="#888888" fontSize={12} />
+                                  <YAxis stroke="#888888" fontSize={12} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+                                  <Tooltip formatter={(value) => [`${value}%`, "Visibilidad"]} />
+                                  <Line type="monotone" dataKey="value" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
+                                </LineChart>
+                              </ResponsiveContainer>
+                            </CardContent>
+                          </Card>
+                          <Card>
+                            <CardHeader><CardTitle className="text-sm">Share of Voice (Evolución)</CardTitle></CardHeader>
+                            <CardContent className="h-[250px] w-full">
+                              <ResponsiveContainer>
+                                <LineChart data={promptDetails.sov_timeseries}>
+                                  <XAxis dataKey="date" stroke="#888888" fontSize={12} />
+                                  <YAxis stroke="#888888" fontSize={12} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+                                  <Tooltip formatter={(value) => [`${value}%`, "Share of Voice"]} />
+                                  <Line type="monotone" dataKey="value" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={false} />
+                                </LineChart>
+                              </ResponsiveContainer>
+                            </CardContent>
+                          </Card>
+                        </div>
+                      </div>
+                    ) : (<div className="p-6 text-center">No se encontraron detalles para este prompt.</div>)}
+                  </DialogContent>
+                </Dialog>
+
+                {/* Dialogo de respuesta completa y navegación entre ejecuciones */}
+                <Dialog open={execDialogOpen} onOpenChange={setExecDialogOpen}>
+                  <DialogContent className="w-[96vw] max-w-3xl max-h-[90vh] overflow-y-auto">
+                    <DialogHeader>
+                      <DialogTitle className="text-base">Respuesta completa</DialogTitle>
+                    </DialogHeader>
+                    {promptDetails && (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+                          <div className="flex items-center gap-2">
+                            <span>Motor:</span>
+                            <Badge variant="secondary">{(promptDetails.executions[execActiveIndex] || {}).engine}</Badge>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button size="sm" variant="outline" onClick={() => setExecActiveIndex((i) => Math.max(0, i - 1))}>Anterior</Button>
+                            <Button size="sm" onClick={() => setExecActiveIndex((i) => Math.min((promptDetails.executions.length - 1), i + 1))}>Siguiente</Button>
                           </div>
                         </div>
-                        {/* --- FIN DE LA CORRECCIÓN DE LAYOUT --- */}
+                        <div className="whitespace-pre-wrap text-sm border rounded-lg p-3 bg-background/80">
+                          {(promptDetails.executions[execActiveIndex] || {}).response}
+                        </div>
                       </div>
-                    ) : (
-                      <div className="p-8 text-sm text-muted-foreground">Este prompt no ha sido analizado todavía.</div>
                     )}
                   </DialogContent>
                 </Dialog>

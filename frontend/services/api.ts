@@ -98,7 +98,8 @@ export const getSentiment = (periodOrRange: DateRange | string, filters?: Filter
   return fetchFromAPI<SentimentApiResponse>(`/api/sentiment${qs}`);
 };
 
-export interface TopicsCloudResponse { topics: { topic: string; count: number; avg_sentiment: number }[] }
+export interface TopicGroup { group_name: string; avg_sentiment: number; total_occurrences: number; topics: { topic: string; count: number; avg_sentiment: number }[] }
+export interface TopicsCloudResponse { topics: { topic: string; count: number; avg_sentiment: number }[]; groups?: TopicGroup[] }
 export const getTopicsCloud = (periodOrRange: DateRange | string, filters?: FilterParams): Promise<TopicsCloudResponse> => {
   const qs = appendFilters(buildDateQuery(periodOrRange), filters);
   return fetchFromAPI<TopicsCloudResponse>(`/api/topics-cloud${qs}`);
@@ -126,9 +127,14 @@ export interface PromptDetails {
   id: number;
   query: string;
   topic: string;
-  timeseries: { date: string; count: number }[];
+  visibility_score: number;
+  share_of_voice: number;
+  total_executions: number;
+  trends: string[];
+  timeseries: { date: string; value: number }[];
+  sov_timeseries: { date: string; value: number }[];
   platforms: { name: string; value: number }[];
-  executions: { id: number; created_at: string | null; engine: string; source: string; response: string; sentiment: number }[];
+  executions: { id: number; created_at: string; engine: string; source: string; response: string; }[];
 }
 
 export const getPromptDetails = (id: number, periodOrRange: DateRange | string, filters?: FilterParams): Promise<PromptDetails> => {

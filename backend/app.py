@@ -345,154 +345,59 @@ def canonicalize_topic(topic: str) -> str:
 def group_topics_with_ai(topics_rows: list[dict]) -> list[dict]:
     try:
         topics_list_str = "\n".join([f"- {t.get('topic','')} | count={t.get('count',0)} | avg_sentiment={t.get('avg_sentiment',0.0):.2f}" for t in topics_rows])
+        
+        # --- INICIO DE LA MODIFICACIÓN ---
+        # El nuevo prompt con categorías más granulares y mejores instrucciones
         prompt = f"""
-Eres un analista de inteligencia de mercado para "The Core School". Tu misión es agrupar una lista de temas en las siguientes categorías estratégicas predefinidas. La lista puede contener nombres de competidores y también el texto de los prompts que se usaron.
+Eres un analista de inteligencia de mercado para "The Core School". Tu misión es agrupar una lista de temas en las siguientes categorías estratégicas predefinidas. Sé muy estricto y preciso.
 
 **Categorías Predefinidas (USA SOLO ESTAS):**
--   **Menciones de Marca Propia:** Solo para temas que se refieren directamente a "The Core School".
--   **Menciones de Competidores:** Para cualquier otra escuela, universidad o centro de formación (ej. U-tad, ECAM, UPM, etc.).
--   **Programas Académicos:** Temas relacionados con grados, másteres o áreas de estudio (ej. "dirección de cine", "ingeniería de software").
--   **Factores de Decisión Clave:** Conceptos que influyen en la elección de una escuela (ej. "enfoque práctico", "conexiones con la industria", "prestigio").
--   **Temas Generales del Sector:** Conversaciones más amplias sobre la industria audiovisual o educativa. Si un tema es el texto completo de un prompt, clasifícalo aquí o en "Programas Académicos" según su contenido.
+- **Menciones de Marca Propia:** Exclusivamente para temas que se refieren a "The Core School".
+- **Menciones de Competidores Directos:** Para otras escuelas de cine y audiovisual (ej. U-tad, ECAM, TAI, ESCAC).
+- **Menciones de Universidades Tradicionales:** Para universidades generalistas que ofrecen grados relacionados (ej. Complutense, Rey Juan Carlos).
+- **Programas y Grados:** Temas sobre áreas de estudio específicas (ej. "dirección de cine", "ingeniería de software", "comunicación audiovisual").
+- **Becas y Admisiones:** Temas sobre el proceso de entrada y costes (ej. "becas", "precio", "admisiones").
+- **Salidas Profesionales:** Temas relacionados con el empleo post-graduación (ej. "salidas laborales", "empleabilidad").
+- **Temas Generales del Sector:** Conversaciones amplias sobre la industria (ej. "sector audiovisual", "tendencias cine").
 
 **Instrucciones:**
-1.  Asigna CADA tema de la lista a una de las 5 categorías predefinidas.
+1.  Asigna CADA tema de la lista a una de las 7 categorías.
 2.  Si un tema no encaja claramente, asígnalo a "Temas Generales del Sector".
 3.  Calcula el sentimiento medio y las ocurrencias totales para cada categoría.
-4.  Devuelve el resultado ÚNICAMENTE en el formato JSON especificado, sin añadir texto adicional.
+4.  Devuelve el resultado ÚNICAMENTE en formato JSON, sin texto adicional.
 
 **Formato de Salida JSON Esperado:**
 ```json
 [
-  {
-    "group_name": "Menciones de Marca Propia",
-    "avg_sentiment": 0.9,
-    "total_occurrences": 10,
-    "topics": [
-      { "topic": "the core school", "count": 10, "avg_sentiment": 0.9 }
-    ]
-  },
-  {
-    "group_name": "Menciones de Competidores",
-    "avg_sentiment": 0.6,
+  {{
+    "group_name": "Menciones de Competidores Directos",
+    "avg_sentiment": 0.65,
     "total_occurrences": 15,
     "topics": [
-      { "topic": "u-tad", "count": 8, "avg_sentiment": 0.7 },
-      { "topic": "ecam", "count": 7, "avg_sentiment": 0.5 }
+      {{ "topic": "u-tad", "count": 8, "avg_sentiment": 0.7 }},
+      {{ "topic": "ecam", "count": 7, "avg_sentiment": 0.5 }}
     ]
-  }
+  }}
 ]
 ```
 Lista de Temas a Analizar:
 {topics_list_str}
 """
+# --- FIN DE LA MODIFICACIÓN ---
 
-        # 1) Intento con IA (robusto a errores)
-        data = None
-        raw = None
-        try:
-            raw = fetch_response(prompt, model="gpt-4o-mini", temperature=0.0)
-        except Exception:
-            raw = None
-        if raw:
-            # Intentar parsear JSON robustamente
-            try:
-                data = json.loads(raw)
-                if isinstance(data, list) and data:
-                    return data
-            except Exception:
-                # Intentar extraer bloque JSON si el modelo añadió texto
-                import re as _re
-                m = _re.search(r"\[\s*\{[\s\S]*\}\s*\]", raw)
-                if m:
-                    try:
-                        data = json.loads(m.group(0))
-                        if isinstance(data, list) and data:
-                            return data
-                    except Exception:
-                        pass
-
-        # 2) Fallback determinista por reglas si la IA no devuelve nada útil
-        try:
-            def _bucket_for_topic(name: str) -> str:
-                n = (_strip_accents((name or '').lower()).strip())
-                # Marca propia
-                own_syns = [s.lower() for s in (BRAND_SYNONYMS.get('The Core School', ['the core school', 'the core', 'thecore']))]
-                if any(s in n for s in own_syns) or n in (['the core school', 'core school']):
-                    return 'Menciones de Marca Propia'
-                # Competidores (cualquier otra marca conocida)
-                for brand, alts in BRAND_SYNONYMS.items():
-                    if brand == 'The Core School':
-                        continue
-                    if any(a.lower() in n for a in alts) or brand.lower() in n:
-                        return 'Menciones de Competidores'
-                # Heurística adicional de competidores por tipo de institución / siglas frecuentes
-                competitor_hints = [
-                    'universidad', 'escuela', 'instituto', 'facultad', 'campus', 'ucm', 'upm', 'urjc', 'ucjc', 'uem',
-                    'ceu', 'europea', 'complutense', 'politecnica', 'politécnica', 'film school', 'school', 'esic', 'eae'
-                ]
-                if any(h in n for h in competitor_hints):
-                    return 'Menciones de Competidores'
-                # Programas Académicos
-                prog_kw = ['grado', 'grados', 'master', 'máster', 'masters', 'másteres', 'programa', 'programas', 'ingenieria', 'ingeniería', 'software', 'videojuegos', 'cine', 'animacion', 'animación', 'vfx', 'sonido', 'guion', 'guión', 'fotografia', 'fotografía', 'comunicacion audiovisual', 'comunicación audiovisual', 'direccion', 'dirección']
-                if any(k in n for k in prog_kw):
-                    return 'Programas Académicos'
-                # Factores de decisión clave
-                decision_kw = ['beca', 'becas', 'precio', 'coste', 'costo', 'financiacion', 'financiación', 'admisiones', 'inscripcion', 'inscripción', 'matricula', 'matrícula', 'empleabilidad', 'salidas', 'salida profesional', 'rankings', 'prestigio']
-                if any(k in n for k in decision_kw):
-                    return 'Factores de Decisión Clave'
-                return 'Temas Generales del Sector'
-
-            # Agregar por bucket
-            buckets: dict[str, list[dict]] = {}
-            for t in topics_rows:
-                topic_name = str(t.get('topic') or '').strip()
-                if not topic_name:
-                    continue
-                b = _bucket_for_topic(topic_name)
-                buckets.setdefault(b, []).append({
-                    'topic': topic_name,
-                    'count': int(t.get('count', 0) or 0),
-                    'avg_sentiment': float(t.get('avg_sentiment', 0.0) or 0.0),
-                })
-            # Construir salida con medias ponderadas
-            out = []
-            for gname, items in buckets.items():
-                total = sum(i['count'] for i in items) or 0
-                if total == 0:
-                    avg = 0.0
-                else:
-                    avg = sum((i['avg_sentiment'] or 0.0) * (i['count'] or 0) for i in items) / max(total, 1)
-                out.append({
-                    'group_name': gname,
-                    'avg_sentiment': float(avg),
-                    'total_occurrences': int(total),
-                    'topics': items,
-                })
-            # Ordenar por ocurrencias desc
-            out.sort(key=lambda x: x.get('total_occurrences', 0), reverse=True)
-            return out
-        except Exception:
-            return []
+        raw = fetch_response(prompt, model="gpt-4o-mini", temperature=0.0)
+        
+        # Extraer el bloque JSON de la respuesta
+        import re as _re
+        match = _re.search(r"\[\s*\{[\s\S]*\}\s*\]", raw)
+        if match:
+            data = json.loads(match.group(0))
+            if isinstance(data, list):
+                return data
+        return []
     except Exception:
-        # Como último recurso, no romper la API
-        try:
-            # Fallback simple: todo a "Temas Generales del Sector"
-            items = [{
-                'topic': str(t.get('topic') or ''),
-                'count': int(t.get('count', 0) or 0),
-                'avg_sentiment': float(t.get('avg_sentiment', 0.0) or 0.0),
-            } for t in topics_rows if t.get('topic')]
-            total = sum(i['count'] for i in items)
-            avg = (sum((i['avg_sentiment'] or 0.0) * (i['count'] or 0) for i in items) / max(total, 1)) if total else 0.0
-            return [{
-                'group_name': 'Temas Generales del Sector',
-                'avg_sentiment': float(avg),
-                'total_occurrences': int(total),
-                'topics': items,
-            }]
-        except Exception:
-            return []
+        # En caso de error, devuelve una estructura vacía para no romper el frontend.
+        return []
 
 # Categorías temáticas para agrupar prompts similares (ES/EN)
 _CATEGORY_KEYWORDS = {
@@ -1949,7 +1854,8 @@ def delete_prompt(query_id: int):
 @app.route('/api/prompts/<int:query_id>', methods=['GET'])
 def get_prompt_details(query_id: int):
     """
-    Detalle de un prompt: devuelve métricas clave (visibilidad, SOV) y sus ejecuciones.
+    Detalle de un prompt: devuelve métricas clave, datos para gráficos 
+    (visibilidad y SOV a lo largo del tiempo) y sus ejecuciones.
     """
     try:
         filters = parse_filters(request)
@@ -1963,94 +1869,105 @@ def get_prompt_details(query_id: int):
             cur.close(); conn.close()
             return jsonify({"error": "Prompt not found"}), 404
         query_text, topic, brand = row
-        
-        # 2. Obtener todas las menciones para este prompt dentro del rango de fechas
+        brand_to_check = brand or os.getenv('DEFAULT_BRAND', 'The Core School')
+
+        # 2. Construir filtros de la consulta
+        where_clauses = ["m.query_id = %s", "m.created_at >= %s", "m.created_at < %s"]
+        params = [query_id, filters['start_date'], filters['end_date']]
+        if filters.get('model') and filters['model'] != 'all':
+            where_clauses.append("m.engine = %s")
+            params.append(filters['model'])
+        where_sql = " AND ".join(where_clauses)
+
+        # 3. Obtener todas las menciones para este prompt con los filtros
         cur.execute(
-            """
-            SELECT m.key_topics, LOWER(COALESCE(m.response,'')) AS resp,
-                   LOWER(COALESCE(m.source_title,'')) AS title, i.payload,
-                   m.id, m.created_at, m.engine, m.source, m.response AS original_response
+            f"""
+            SELECT m.id, m.created_at, m.engine, m.response,
+                   m.key_topics, LOWER(COALESCE(m.response,'')) AS resp,
+                   LOWER(COALESCE(m.source_title,'')) AS title, i.payload
             FROM mentions m
             LEFT JOIN insights i ON i.id = m.generated_insight_id
-            WHERE m.query_id = %s AND m.created_at >= %s AND m.created_at < %s
+            WHERE {where_sql}
             ORDER BY m.created_at DESC
             """,
-            (query_id, filters['start_date'], filters['end_date'])
+            tuple(params)
         )
         mention_rows = cur.fetchall()
-        
-        # 3. Calcular Visibilidad y SOV (lógica extraída del endpoint de la lista de prompts)
-        brand_to_check = brand or os.getenv('DEFAULT_BRAND', 'The Core School')
-        brand_present_responses = 0
-        brand_presence_count = 0
-        all_brands_presence_total = 0
-        
-        executions = []
-        from collections import defaultdict
-        total_by_day = defaultdict(int)
-        brand_present_by_day = defaultdict(int)
-        all_brands_presence_by_day = defaultdict(int)
-        brand_presence_by_day = defaultdict(int)
-        for key_topics, resp, title, payload, mid, created, engine, source, original_response in mention_rows:
-            # Añadir a la lista de ejecuciones
-            executions.append({
-                "id": mid,
-                "created_at": created.isoformat() if created else None,
-                "engine": engine,
-                "source": source,
-                "response": original_response,
-            })
-            
-            # Lógica de detección de marcas
-            present_brands = _detect_brands(key_topics, resp, title, payload)
-            if present_brands:
-                all_brands_presence_total += len(present_brands)
-                if brand_to_check in present_brands:
-                    brand_present_responses += 1
-                    brand_presence_count += 1
-            # Agregación diaria para series
-            if created:
-                d = created.date()
-                total_by_day[d] += 1
-                if present_brands:
-                    all_brands_presence_by_day[d] += len(present_brands)
-                    if brand_to_check in present_brands:
-                        brand_present_by_day[d] += 1
-                        brand_presence_by_day[d] += 1
-        
+
+        # 4. Calcular métricas, tendencias y ejecuciones
         total_responses_prompt = len(mention_rows)
-        visibility_score_individual = round((brand_present_responses / max(total_responses_prompt, 1)) * 100.0, 1)
-        share_of_voice_individual = round((brand_presence_count / max(all_brands_presence_total, 1)) * 100.0, 1)
+        executions = [{"id": r[0], "created_at": r[1].isoformat(), "engine": r[2], "response": r[3]} for r in mention_rows]
 
-        # Serie temporal: visibilidad y SOV diarios para este prompt
-        from datetime import timedelta
-        start_day = filters['start_date'].date()
-        end_day = filters['end_date'].date()
-        series = []
-        day = start_day
-        while day <= end_day:
-            den = max(total_by_day.get(day, 0), 1)
-            vis_pct = round((brand_present_by_day.get(day, 0) / den) * 100.0, 1)
-            sov_den = max(all_brands_presence_by_day.get(day, 0), 1)
-            sov_pct = round((brand_presence_by_day.get(day, 0) / sov_den) * 100.0, 1)
-            series.append({"date": day.strftime('%b %d'), "visibility": vis_pct, "sov": sov_pct, "executions": int(total_by_day.get(day, 0))})
-            day += timedelta(days=1)
+        from collections import defaultdict
+        daily_brand_mentions = defaultdict(int)
+        daily_total_mentions = defaultdict(int)
+        daily_brand_presence = defaultdict(int)
+        daily_all_brands_presence = defaultdict(int)
+        all_trends = set()
 
-        cur.close()
-        conn.close()
+        for mention in mention_rows:
+            _, created_at, _, _, key_topics, resp, title, payload = mention
+            mention_date = created_at.date()
+            daily_total_mentions[mention_date] += 1
+
+            present_brands = _detect_brands(key_topics, resp, title, payload)
+            if brand_to_check in present_brands:
+                daily_brand_mentions[mention_date] += 1
+                daily_brand_presence[mention_date] += 1
+
+            if present_brands:
+                daily_all_brands_presence[mention_date] += len(present_brands)
+
+            if payload and isinstance(payload, dict):
+                trends = payload.get('trends', [])
+                if isinstance(trends, list):
+                    for trend in trends:
+                        if isinstance(trend, str): all_trends.add(trend.strip())
+
+        # Calcular métricas totales
+        total_brand_mentions = sum(daily_brand_mentions.values())
+        total_brand_presence = sum(daily_brand_presence.values())
+        total_all_brands_presence = sum(daily_all_brands_presence.values())
+
+        visibility_score = round((total_brand_mentions / max(total_responses_prompt, 1)) * 100.0, 1)
+        share_of_voice = round((total_brand_presence / max(total_all_brands_presence, 1)) * 100.0, 1)
+
+        # 5. Calcular datos para los gráficos
+        timeseries = []
+        sov_timeseries = []
+        day_iterator = filters['start_date'].date()
+        while day_iterator < filters['end_date'].date():
+            # Visibilidad por día
+            total_day = daily_total_mentions[day_iterator]
+            brand_mentions_day = daily_brand_mentions[day_iterator]
+            visibility_day = (brand_mentions_day / max(total_day, 1)) * 100
+            timeseries.append({"date": day_iterator.strftime('%b %d'), "value": round(visibility_day, 1)})
+
+            # SOV por día
+            brand_presence_day = daily_brand_presence[day_iterator]
+            all_brands_day = daily_all_brands_presence[day_iterator]
+            sov_day = (brand_presence_day / max(all_brands_day, 1)) * 100
+            sov_timeseries.append({"date": day_iterator.strftime('%b %d'), "value": round(sov_day, 1)})
+
+            day_iterator += timedelta(days=1)
+
+        cur.close(); conn.close()
 
         return jsonify({
             "id": query_id,
             "query": query_text,
             "topic": topic,
-            "visibility_score": visibility_score_individual,
-            "share_of_voice": share_of_voice_individual,
+            "visibility_score": visibility_score,
+            "share_of_voice": share_of_voice,
             "total_executions": total_responses_prompt,
-            "executions": executions[:100],  # Limitar a las últimas 100 para no sobrecargar
-            "series": series,
+            "trends": sorted(list(all_trends)),
+            "timeseries": timeseries,
+            "sov_timeseries": sov_timeseries,
+            "executions": executions[:100],
         })
     except Exception as e:
-        print(f"Error en get_prompt_details: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 
