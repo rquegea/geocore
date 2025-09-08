@@ -312,6 +312,18 @@ export function AnalyticsDashboard() {
           ))}
         </SelectContent>
       </Select>
+
+      {/* Modelo a la derecha del selector de temas */}
+      <Select value={selectedModel} onValueChange={setSelectedModel}>
+        <SelectTrigger className="w-[180px]">
+          <SelectValue placeholder="Modelo" />
+        </SelectTrigger>
+        <SelectContent>
+          {modelOptions.map((m) => (
+            <SelectItem key={m} value={m}>{m === 'all' ? 'Todos los modelos' : m}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   )
 
@@ -1003,20 +1015,7 @@ export function AnalyticsDashboard() {
                 <Button variant="ghost" className={ activeTab === "Prompts" ? "text-blue-600 border-b-2 border-blue-600 rounded-none hover:bg-gray-100 hover:text-black" : "text-gray-600 hover:text-gray-800 hover:bg-gray-100" } onClick={() => setActiveTab("Prompts")}>Prompts</Button>
                 <Button variant="ghost" className={ activeTab === "Sentiment" ? "text-blue-600 border-b-2 border-blue-600 rounded-none hover:bg-gray-100 hover:text-black" : "text-gray-600 hover:text-gray-800 hover:bg-gray-100" } onClick={() => setActiveTab("Sentiment")}>Sentimiento</Button>
                 
-                {/* Filtro de Modelo añadido aquí */}
-                <div className="ml-auto flex items-center gap-2">
-                    <label className="text-sm font-medium text-gray-600">Modelo:</label>
-                    <Select value={selectedModel} onValueChange={setSelectedModel}>
-                        <SelectTrigger className="w-[180px]">
-                            <SelectValue placeholder="Modelo" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {modelOptions.map((m) => (
-                                <SelectItem key={m} value={m}>{m === 'all' ? 'Todos los modelos' : m}</SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                </div>
+                {/* Filtro de modelo se movió al toolbar de filtros globales */}
               </div>
             </div>
             {/* Dashboard Content */}
