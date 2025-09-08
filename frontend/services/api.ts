@@ -105,7 +105,17 @@ export const getTopicsCloud = (periodOrRange: DateRange | string, filters?: Filt
 };
 
 // Prompts
-export interface PromptMetrics { id: number; query: string; visibility_score: number; rank: number; share_of_voice: number; executions: number }
+export interface PromptMetrics {
+  id: number;
+  query: string;
+  visibility_score: number;
+  rank: number;
+  share_of_voice: number;
+  executions: number;
+  // Nuevas métricas individuales por prompt (opcionales para compatibilidad)
+  visibility_score_individual?: number;
+  share_of_voice_individual?: number;
+}
 export interface PromptsByTopic { topic: string; topic_total_mentions: number; prompts: PromptMetrics[] }
 export const getPrompts = (periodOrRange: DateRange | string, filters?: FilterParams): Promise<{ topics: PromptsByTopic[] }> => {
   const qs = appendFilters(buildDateQuery(periodOrRange), filters);

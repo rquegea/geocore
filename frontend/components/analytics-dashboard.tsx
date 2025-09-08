@@ -1012,14 +1012,15 @@ export function AnalyticsDashboard() {
             </div>
             {/* Dashboard Content */}
             <div className="p-6 space-y-6 bg-white">
-                {activeTab === 'Visibility' && visibility && (
+                {activeTab === 'Visibility' && (
                   <>
                     <div className="flex items-center justify-between">
                       <GlobalFiltersToolbar />
                       <div className="flex items-center gap-2"></div>
                     </div>
                     
-                    {/* El resto del JSX no necesita cambios */}
+                    {/* Contenido de visibilidad condicionado a que haya datos */}
+                    {visibility ? (
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                       <div className="lg:col-span-2">
                         <Card className="shadow-sm bg-white">
@@ -1161,6 +1162,15 @@ export function AnalyticsDashboard() {
                         </Card>
                       </div>
                     </div>
+                    ) : (
+                      <Card className="shadow-sm bg-white">
+                        <CardContent>
+                          <div className="h-64 flex items-center justify-center text-sm text-muted-foreground">
+                            Sin datos para el rango o filtros seleccionados.
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
 
                     {/* Share of Voice Section - conectado a /api/industry/ranking */}
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -1592,8 +1602,10 @@ export function AnalyticsDashboard() {
                                                     </div>
                                                     <div className="flex items-center gap-4 text-sm text-muted-foreground">
                                                       <div className="w-36">Visibilidad: <span className="text-gray-900">{p.visibility_score}%</span></div>
+                                                      <div className="w-36">Visibilidad (prompt): <span className="text-gray-900">{(p.visibility_score_individual ?? p.visibility_score)?.toFixed?.(1) ?? p.visibility_score}%</span></div>
                                                       <div className="w-24">Ranking: <span className="text-gray-900">#{p.rank}</span></div>
                                                       <div className="w-36">Share of Voice: <span className="text-gray-900">{p.share_of_voice}%</span></div>
+                                                      <div className="w-40">SOV (prompt): <span className="text-gray-900">{(p.share_of_voice_individual ?? 0).toFixed(1)}%</span></div>
                                                       <div className="w-28">Ejecuciones: <span className="text-gray-900">{p.executions}</span></div>
                                                       <div className="flex items-center gap-2">
                                                         <Button size="sm" variant="outline" onClick={() => openEditPrompt(p.id, p.query as string, group.topic, undefined)}>Editar</Button>

@@ -44,7 +44,11 @@ def fetch_response(
             messages=[
                 {
                     "role": "system",
-                    "content": "Eres un asistente útil. Sigue exactamente las instrucciones del usuario.",
+                    "content": (
+                        "Eres un analista especializado en educación superior y captación de alumnos. "
+                        "Conoces a 'The Core School' en Madrid: escuela superior de entretenimiento y artes audiovisuales "
+                        "(cine, videojuegos, animación, producción). Prioriza exactitud, JSON válido y contexto de negocio."
+                    ),
                 },
                 {"role": "user", "content": prompt},
             ],
@@ -64,6 +68,10 @@ def extract_insights(text: str) -> Dict[str, Any]:
     Utiliza un modelo más potente (gpt-4o) para asegurar alta calidad en el análisis.
     """
     prompt = f"""
+Contexto de Negocio: Estás analizando datos para 'The Core School', escuela superior en Madrid, especializada en
+entretenimiento y artes audiovisuales (cine, videojuegos, animación, producción). Interpreta las consultas pensando en
+captación de alumnos, reputación de marca y posicionamiento en el sector educativo.
+
 Eres un **analista senior de inteligencia de mercado**.
 
 1️⃣ Lee atentamente el CONTENIDO.

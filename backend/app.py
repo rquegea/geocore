@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 import re
 import unicodedata
 from difflib import SequenceMatcher
+from src.engines.openai_engine import fetch_response
 
 load_dotenv()
 
@@ -26,6 +27,47 @@ def _env(*names: str, default: str | int | None = None):
         if v is not None and v != "":
             return v
     return default
+
+# --- Nueva Función de Categorización con IA ---
+def categorize_prompt_with_ai(query_text: str, topics: list[str]) -> str:
+    """Usa un LLM para clasificar una query en una lista de topics."""
+    # Preparamos los topics como una lista numerada para la IA
+    topics_list_str = "\n".join([f"{i+1}. {topic}" for i, topic in enumerate(topics)])
+
+    prompt = f"""
+Eres un asistente experto en organización de contenido para una escuela de formación audiovisual llamada "The Core School".
+
+Tu tarea es clasificar la siguiente "Consulta del Usuario" en una de las "Categorías Disponibles". Debes responder únicamente con el nombre exacto de la categoría que mejor se ajuste.
+
+**Categorías Disponibles:**
+{topics_list_str}
+
+**Consulta del Usuario:**
+"{query_text}"
+
+Analiza la consulta y devuelve solo el nombre de la categoría más apropiada de la lista anterior.
+"""
+    try:
+        # Usamos el motor de OpenAI para obtener la respuesta
+        best_category = fetch_response(prompt, model="gpt-4o-mini", temperature=0.1)
+
+        # Limpiamos la respuesta para asegurarnos de que es una de las categorías
+        # A veces la IA añade números o puntos, los quitamos.
+        cleaned_category = best_category.strip().split('.')[-1].strip()
+
+        # Verificamos si la categoría devuelta es válida
+        if cleaned_category in topics:
+            return cleaned_category
+        else:
+            # Si la IA devuelve algo inesperado, buscamos la más parecida
+            # en nuestra lista para evitar errores.
+            best_match = max(topics, key=lambda t: SequenceMatcher(None, cleaned_category, t).ratio())
+            return best_match
+            
+    except Exception as e:
+        print(f"Error en la categorización con IA: {e}")
+        # Si todo falla, volvemos a la lógica antigua como respaldo
+        return categorize_prompt(None, query_text)
 
 DB_CONFIG = {
     # Preferimos variables con prefijo POSTGRES_ (docker compose),
@@ -248,14 +290,15 @@ _CATEGORY_KEYWORDS = {
     # Más tecnología/ingeniería para evitar solapamientos genéricos
     "Innovation & Technology": [
         "innovacion", "innovación", "tecnologia", "tecnología", "ia", "ai", "vr", "ar",
-        "ingenieria", "ingeniería", "software", "desarrollo", "programacion", "programación",
-        "coding", "computer science", "backend", "frontend", "devops"
+        "realidad virtual", "realidad aumentada", "machine learning", "big data", "iot", "ciencia de datos",
+        "transformacion digital", "transformación digital"
     ],
     # Categoría específica si se desea separar de Innovación
     "Engineering & Software": [
-        "ingenieria", "ingeniería", "software", "ingenieria de software", "ingeniería de software",
-        "desarrollo de software", "programacion", "programación", "computer science", "algoritmos",
-        "bases de datos", "sistemas", "arquitectura de software"
+        "ingenieria de software", "ingeniería de software", "desarrollo de software",
+        "programacion", "programación", "programacion de videojuegos", "desarrollo backend",
+        "desarrollo frontend", "devops", "arquitectura de software", "sistemas distribuidos",
+        "bases de datos", "algoritmos", "computer science"
     ],
 }
 
@@ -591,30 +634,28 @@ def get_visibility():
             where.append("m.engine = %s"); params.append(filters['model'])
         if filters.get('source') and filters['source'] != 'all':
             where.append("m.source = %s"); params.append(filters['source'])
-        # Filtro por tema (dinámico por categorización)
-        dynamic_topic_ids = None
+        # Filtro por tema con categorización dinámica por IA (alineado con /api/prompts)
         if filters.get('topic') and filters['topic'] != 'all':
             topic_filter = filters['topic']
-            base_where_sql = " AND ".join(where)
-            # 1) Obtener queries candidatas bajo los filtros base
-            cur.execute(f"""
-                SELECT DISTINCT q.id, q.topic, q.query
-                FROM mentions m
-                JOIN queries q ON m.query_id = q.id
-                WHERE {base_where_sql}
-            """, tuple(params))
+            # 1) Obtener catálogo de topics disponibles y todas las queries activas
+            cur.execute("SELECT DISTINCT topic FROM queries WHERE enabled = TRUE AND topic IS NOT NULL AND topic <> ''")
+            available_topics = [row[0] for row in cur.fetchall()]
+            cur.execute("SELECT id, query FROM queries WHERE enabled = TRUE")
             qrows = cur.fetchall()
-            # 2) Categorizar cada query y filtrar por categoría dinámica
+            # 2) Categorizar con IA cada query y quedarnos con las del tema seleccionado
             dyn_ids = []
-            for qid, qtopic, qtext in qrows:
-                cat = categorize_prompt(qtopic, qtext)
+            for qid, qtext in qrows:
+                try:
+                    cat = categorize_prompt_with_ai(qtext, available_topics)
+                except Exception:
+                    # Respaldo a la heurística clásica si fallase la IA
+                    cat = categorize_prompt(None, qtext)
                 if cat == topic_filter:
                     dyn_ids.append(qid)
-            dynamic_topic_ids = dyn_ids
-            if not dynamic_topic_ids:
+            if not dyn_ids:
                 # No hay queries que caigan en ese tema -> retornar vacío rápido
                 return jsonify({"visibility_score": 0.0, "delta": 0.0, "series": []})
-            where.append("q.id = ANY(%s)"); params.append(dynamic_topic_ids)
+            where.append("q.id = ANY(%s)"); params.append(dyn_ids)
         where_sql = " AND ".join(where)
 
         # Sinónimos/cadenas para detectar la marca en contenido (key_topics o texto)
@@ -708,20 +749,19 @@ def get_visibility_ranking():
             where.append("m.engine = %s"); params.append(filters['model'])
         if filters.get('source') and filters['source'] != 'all':
             where.append("m.source = %s"); params.append(filters['source'])
-        # Filtro por tema dinámico
+        # Filtro por tema con categorización dinámica por IA (alineado con /api/prompts)
         if filters.get('topic') and filters['topic'] != 'all':
             topic_filter = filters['topic']
-            base_where_sql = " AND ".join(where)
-            cur.execute(f"""
-                SELECT DISTINCT q.id, q.topic, q.query
-                FROM mentions m
-                JOIN queries q ON m.query_id = q.id
-                WHERE {base_where_sql}
-            """, tuple(params))
+            cur.execute("SELECT DISTINCT topic FROM queries WHERE enabled = TRUE AND topic IS NOT NULL AND topic <> ''")
+            available_topics = [row[0] for row in cur.fetchall()]
+            cur.execute("SELECT id, query FROM queries WHERE enabled = TRUE")
             qrows = cur.fetchall()
             dyn_ids = []
-            for qid, qtopic, qtext in qrows:
-                cat = categorize_prompt(qtopic, qtext)
+            for qid, qtext in qrows:
+                try:
+                    cat = categorize_prompt_with_ai(qtext, available_topics)
+                except Exception:
+                    cat = categorize_prompt(None, qtext)
                 if cat == topic_filter:
                     dyn_ids.append(qid)
             if not dyn_ids:
@@ -876,20 +916,20 @@ def get_industry_ranking():
             where.append("m.engine = %s"); params.append(filters['model'])
         if filters.get('source') and filters['source'] != 'all':
             where.append("m.source = %s"); params.append(filters['source'])
-        # Filtro por tema dinámico (usar categorización)
+        # Filtro por tema con categorización dinámica por IA (alineado con /api/prompts)
         if filters.get('topic') and filters['topic'] != 'all':
             topic_filter = filters['topic']
-            base_where_sql = " AND ".join(where)
-            cur.execute(f"""
-                SELECT DISTINCT q.id, q.topic, q.query
-                FROM mentions m
-                JOIN queries q ON m.query_id = q.id
-                WHERE {base_where_sql}
-            """, tuple(params))
+            # Obtener lista de topics disponibles y todas las queries activas
+            cur.execute("SELECT DISTINCT topic FROM queries WHERE enabled = TRUE AND topic IS NOT NULL AND topic <> ''")
+            available_topics = [row[0] for row in cur.fetchall()]
+            cur.execute("SELECT id, query FROM queries WHERE enabled = TRUE")
             qrows = cur.fetchall()
             dyn_ids = []
-            for qid, qtopic, qtext in qrows:
-                cat = categorize_prompt(qtopic, qtext)
+            for qid, qtext in qrows:
+                try:
+                    cat = categorize_prompt_with_ai(qtext, available_topics)
+                except Exception:
+                    cat = categorize_prompt(None, qtext)
                 if cat == topic_filter:
                     dyn_ids.append(qid)
             if not dyn_ids:
@@ -1296,76 +1336,162 @@ def get_sources():
 
 @app.route('/api/prompts', methods=['GET'])
 def get_prompts_grouped():
-    """Devuelve prompts agrupados por topic, con métricas básicas.
-    Estructura: { topics: [{ topic, prompts: [{ id, query, visibility_score, rank, share_of_voice, executions }] }] }
-    """
+    """Devuelve prompts agrupados por topic, con métricas básicas."""
     try:
         filters = parse_filters(request)
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Obtenemos los prompts (queries) activos y sus métricas derivadas de menciones
-        # Métricas simplificadas: visibility_score (% de días con al menos 1 mención), rank por topic (orden por score), share_of_voice (% menciones del topic), executions (conteo de menciones)
+        # Primero, obtenemos la lista de todos los topics disponibles de la base de datos
+        cur.execute("SELECT DISTINCT topic FROM queries WHERE enabled = TRUE AND topic IS NOT NULL AND topic <> ''")
+        available_topics = [row[0] for row in cur.fetchall()]
 
-        # Total de menciones por topic (para share of voice relativo por topic)
+        # Obtenemos los prompts (queries) activos y sus métricas
         cur.execute(
             """
-            SELECT q.topic, COUNT(m.id) AS mentions
-            FROM queries q
-            LEFT JOIN mentions m ON m.query_id = q.id
-                 AND m.created_at >= %s AND m.created_at < %s
-            WHERE q.enabled = TRUE
-            GROUP BY q.topic
-            """,
-            (filters['start_date'], filters['end_date'])
-        )
-        raw_totals = { (row[0] or 'Uncategorized'): int(row[1] or 0) for row in cur.fetchall() }
-
-        # Métricas por prompt
-        cur.execute(
-            """
-            SELECT q.id, q.topic, q.query,
+            SELECT q.id, q.query,
                    COUNT(m.id) AS executions,
                    COUNT(DISTINCT DATE(m.created_at)) AS active_days
             FROM queries q
             LEFT JOIN mentions m ON m.query_id = q.id
                  AND m.created_at >= %s AND m.created_at < %s
             WHERE q.enabled = TRUE
-            GROUP BY q.id, q.topic, q.query
+            GROUP BY q.id, q.query
             """,
             (filters['start_date'], filters['end_date'])
         )
 
         rows = cur.fetchall()
-        cur.close()
-        conn.close()
 
-        # Convertimos a estructura agrupada por topic
+        # Cargar menciones por prompt para calcular métricas individuales de marca
+        cur.execute(
+            f"""
+            SELECT m.query_id, m.key_topics,
+                   LOWER(COALESCE(m.response,'')) AS resp,
+                   LOWER(COALESCE(m.source_title,'')) AS title,
+                   i.payload
+            FROM mentions m
+            JOIN queries q ON m.query_id = q.id
+            LEFT JOIN insights i ON i.id = m.generated_insight_id
+            WHERE m.created_at >= %s AND m.created_at < %s
+              AND q.enabled = TRUE
+            """,
+            (filters['start_date'], filters['end_date'])
+        )
+        mention_rows = cur.fetchall()
+        cur.close(); conn.close()
+
+        # Convertimos a estructura agrupada por topic usando la nueva función de IA
         from collections import defaultdict
-        topics_map = defaultdict(list)
+        # Agrupar menciones por query_id
+        mentions_by_qid = defaultdict(list)
 
-        # Duración en días del rango para el visibility score aproximado
+        # Diccionario de marcas y sinónimos (alineado con otros endpoints)
+        BRAND_SYNONYMS = {
+            "The Core School": ["the core", "the core school", "thecore"],
+            "U-TAD": ["u-tad", "utad"],
+            "ECAM": ["ecam"],
+            "TAI": ["tai"],
+            "CES": ["ces"],
+            "CEV": ["cev"],
+            "FX Barcelona Film School": ["fx barcelona", "fx barcelona film school", "fx animation"],
+            "Septima Ars": ["septima ars", "séptima ars"],
+        }
+
+        def _normalize_list(xs):
+            out = []
+            if not xs:
+                return out
+            try:
+                for t in xs:
+                    s = str(t or '').lower().strip()
+                    if s:
+                        out.append(s)
+            except Exception:
+                pass
+            return out
+
+        def _detect_brands(topics_list, resp_text, title_text, payload):
+            found = []
+            tlist = _normalize_list(topics_list)
+            # key_topics: igualdad o substring
+            for canon, alts in BRAND_SYNONYMS.items():
+                for a in alts:
+                    if any(a == t or a in t for t in tlist):
+                        found.append(canon)
+                        break
+            # payload.brands: igualdad o substring
+            try:
+                brands_payload = []
+                if isinstance(payload, dict):
+                    brands_payload = _normalize_list((payload.get('brands') or []))
+                for canon, alts in BRAND_SYNONYMS.items():
+                    for a in alts:
+                        if any(a == b or a in b for b in brands_payload):
+                            if canon not in found:
+                                found.append(canon)
+                            break
+            except Exception:
+                pass
+            # substrings en texto/título
+            txt = (resp_text or '') + ' ' + (title_text or '')
+            for canon, alts in BRAND_SYNONYMS.items():
+                if any(a in txt for a in alts):
+                    if canon not in found:
+                        found.append(canon)
+            return found
+
+        for qid, key_topics, resp, title, payload in mention_rows:
+            mentions_by_qid[qid].append({
+                "topics": key_topics,
+                "resp": resp,
+                "title": title,
+                "payload": payload if isinstance(payload, dict) else {},
+            })
+        topics_map = defaultdict(list)
         total_days = max((filters['end_date'] - filters['start_date']).days, 1)
 
-        # Primero, calcula métricas por prompt y clasifica a una categoría
         prompt_items = []
-        for pid, topic, query, executions, active_days in rows:
-            category = categorize_prompt(topic, query)
+        for pid, query, executions, active_days in rows:
+            # --- ¡AQUÍ ESTÁ EL CAMBIO CLAVE! ---
+            # Usamos la nueva función de IA para obtener la categoría
+            category = categorize_prompt_with_ai(query, available_topics)
+            # ------------------------------------
+
             visibility_score = round((active_days / total_days) * 100, 1)
+
+            # Métricas individuales por prompt
+            brand = request.args.get('brand') or os.getenv('DEFAULT_BRAND', 'The Core School')
+            brand_present_responses = 0
+            total_responses_prompt = 0
+            brand_presence_count = 0  # veces que aparece la marca
+            all_brands_presence_total = 0  # suma de presencias de todas las marcas
+
+            for m in mentions_by_qid.get(pid, []):
+                total_responses_prompt += 1
+                present = _detect_brands(m.get('topics'), m.get('resp'), m.get('title'), m.get('payload'))
+                if present:
+                    all_brands_presence_total += len(present)
+                if brand in present:
+                    brand_present_responses += 1
+                    brand_presence_count += 1
+
+            visibility_score_individual = round((brand_present_responses / max(total_responses_prompt, 1)) * 100.0, 1)
+            share_of_voice_individual = round((brand_presence_count / max(all_brands_presence_total, 1)) * 100.0, 1)
             prompt_items.append({
                 "category": category,
                 "id": pid,
                 "query": query,
                 "visibility_score": visibility_score,
+                "visibility_score_individual": visibility_score_individual,
+                "share_of_voice_individual": share_of_voice_individual,
                 "executions": int(executions or 0),
             })
 
-        # Totales por categoría para calcular share_of_voice dentro del grupo
         group_exec_totals = defaultdict(int)
         for it in prompt_items:
             group_exec_totals[it["category"]] += it["executions"]
 
-        # Construye el mapa de categorías con share_of_voice relativo al grupo
         for it in prompt_items:
             topic_name = it["category"]
             total_mentions_topic = max(group_exec_totals.get(topic_name, 0), 1)
@@ -1378,7 +1504,6 @@ def get_prompts_grouped():
                 "executions": it["executions"],
             })
 
-        # Asignar rank dentro de cada topic por visibility_score
         topics = []
         for topic_name, prompts in topics_map.items():
             prompts_sorted = sorted(prompts, key=lambda p: p["visibility_score"], reverse=True)
@@ -1390,7 +1515,6 @@ def get_prompts_grouped():
                 "topic_total_mentions": int(group_exec_totals.get(topic_name, 0)),
             })
 
-        # Ordenamos los topics por el total de menciones descendente
         topics.sort(key=lambda t: t["topic_total_mentions"], reverse=True)
 
         return jsonify({"topics": topics})
