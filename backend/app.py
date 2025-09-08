@@ -145,6 +145,61 @@ def get_db_connection():
         raise e
 
 
+# --- Detección de marcas reutilizable ---
+BRAND_SYNONYMS = {
+    "The Core School": ["the core", "the core school", "thecore"],
+    "U-TAD": ["u-tad", "utad"],
+    "ECAM": ["ecam"],
+    "TAI": ["tai"],
+    "CES": ["ces"],
+    "CEV": ["cev"],
+    "FX Barcelona Film School": ["fx barcelona", "fx barcelona film school", "fx animation"],
+    "Septima Ars": ["septima ars", "séptima ars"],
+}
+
+def _normalize_list(xs):
+    out = []
+    if not xs:
+        return out
+    try:
+        for t in xs:
+            s = str(t or '').lower().strip()
+            if s:
+                out.append(s)
+    except Exception:
+        pass
+    return out
+
+def _detect_brands(topics_list, resp_text, title_text, payload):
+    found = []
+    tlist = _normalize_list(topics_list)
+    # key_topics: igualdad o substring
+    for canon, alts in BRAND_SYNONYMS.items():
+        for a in alts:
+            if any(a == t or a in t for t in tlist):
+                found.append(canon)
+                break
+    # payload.brands: igualdad o substring
+    try:
+        brands_payload = []
+        if isinstance(payload, dict):
+            brands_payload = _normalize_list((payload.get('brands') or []))
+        for canon, alts in BRAND_SYNONYMS.items():
+            for a in alts:
+                if any(a == b or a in b for b in brands_payload):
+                    if canon not in found:
+                        found.append(canon)
+                    break
+    except Exception:
+        pass
+    # substrings en texto/título
+    txt = f"{resp_text or ''} {title_text or ''}"
+    for canon, alts in BRAND_SYNONYMS.items():
+        if any(a in txt for a in alts):
+            if canon not in found:
+                found.append(canon)
+    return found
+
 def ensure_taxonomy_table():
     """Crea la tabla de taxonomía si no existe."""
     conn = get_db_connection(); cur = conn.cursor()
@@ -332,26 +387,112 @@ Lista de Temas a Analizar:
 {topics_list_str}
 """
 
-        raw = fetch_response(prompt, model="gpt-4o-mini", temperature=0.0)
-        # Intentar parsear JSON robustamente
+        # 1) Intento con IA (robusto a errores)
+        data = None
+        raw = None
         try:
-            data = json.loads(raw)
-            if isinstance(data, list):
-                return data
+            raw = fetch_response(prompt, model="gpt-4o-mini", temperature=0.0)
         except Exception:
-            # Intentar extraer bloque JSON si el modelo añadió texto
-            import re as _re
-            m = _re.search(r"\[\s*\{[\s\S]*\}\s*\]", raw)
-            if m:
-                try:
-                    data = json.loads(m.group(0))
-                    if isinstance(data, list):
-                        return data
-                except Exception:
-                    pass
-        return []
+            raw = None
+        if raw:
+            # Intentar parsear JSON robustamente
+            try:
+                data = json.loads(raw)
+                if isinstance(data, list) and data:
+                    return data
+            except Exception:
+                # Intentar extraer bloque JSON si el modelo añadió texto
+                import re as _re
+                m = _re.search(r"\[\s*\{[\s\S]*\}\s*\]", raw)
+                if m:
+                    try:
+                        data = json.loads(m.group(0))
+                        if isinstance(data, list) and data:
+                            return data
+                    except Exception:
+                        pass
+
+        # 2) Fallback determinista por reglas si la IA no devuelve nada útil
+        try:
+            def _bucket_for_topic(name: str) -> str:
+                n = (_strip_accents((name or '').lower()).strip())
+                # Marca propia
+                own_syns = [s.lower() for s in (BRAND_SYNONYMS.get('The Core School', ['the core school', 'the core', 'thecore']))]
+                if any(s in n for s in own_syns) or n in (['the core school', 'core school']):
+                    return 'Menciones de Marca Propia'
+                # Competidores (cualquier otra marca conocida)
+                for brand, alts in BRAND_SYNONYMS.items():
+                    if brand == 'The Core School':
+                        continue
+                    if any(a.lower() in n for a in alts) or brand.lower() in n:
+                        return 'Menciones de Competidores'
+                # Heurística adicional de competidores por tipo de institución / siglas frecuentes
+                competitor_hints = [
+                    'universidad', 'escuela', 'instituto', 'facultad', 'campus', 'ucm', 'upm', 'urjc', 'ucjc', 'uem',
+                    'ceu', 'europea', 'complutense', 'politecnica', 'politécnica', 'film school', 'school', 'esic', 'eae'
+                ]
+                if any(h in n for h in competitor_hints):
+                    return 'Menciones de Competidores'
+                # Programas Académicos
+                prog_kw = ['grado', 'grados', 'master', 'máster', 'masters', 'másteres', 'programa', 'programas', 'ingenieria', 'ingeniería', 'software', 'videojuegos', 'cine', 'animacion', 'animación', 'vfx', 'sonido', 'guion', 'guión', 'fotografia', 'fotografía', 'comunicacion audiovisual', 'comunicación audiovisual', 'direccion', 'dirección']
+                if any(k in n for k in prog_kw):
+                    return 'Programas Académicos'
+                # Factores de decisión clave
+                decision_kw = ['beca', 'becas', 'precio', 'coste', 'costo', 'financiacion', 'financiación', 'admisiones', 'inscripcion', 'inscripción', 'matricula', 'matrícula', 'empleabilidad', 'salidas', 'salida profesional', 'rankings', 'prestigio']
+                if any(k in n for k in decision_kw):
+                    return 'Factores de Decisión Clave'
+                return 'Temas Generales del Sector'
+
+            # Agregar por bucket
+            buckets: dict[str, list[dict]] = {}
+            for t in topics_rows:
+                topic_name = str(t.get('topic') or '').strip()
+                if not topic_name:
+                    continue
+                b = _bucket_for_topic(topic_name)
+                buckets.setdefault(b, []).append({
+                    'topic': topic_name,
+                    'count': int(t.get('count', 0) or 0),
+                    'avg_sentiment': float(t.get('avg_sentiment', 0.0) or 0.0),
+                })
+            # Construir salida con medias ponderadas
+            out = []
+            for gname, items in buckets.items():
+                total = sum(i['count'] for i in items) or 0
+                if total == 0:
+                    avg = 0.0
+                else:
+                    avg = sum((i['avg_sentiment'] or 0.0) * (i['count'] or 0) for i in items) / max(total, 1)
+                out.append({
+                    'group_name': gname,
+                    'avg_sentiment': float(avg),
+                    'total_occurrences': int(total),
+                    'topics': items,
+                })
+            # Ordenar por ocurrencias desc
+            out.sort(key=lambda x: x.get('total_occurrences', 0), reverse=True)
+            return out
+        except Exception:
+            return []
     except Exception:
-        return []
+        # Como último recurso, no romper la API
+        try:
+            # Fallback simple: todo a "Temas Generales del Sector"
+            items = [{
+                'topic': str(t.get('topic') or ''),
+                'count': int(t.get('count', 0) or 0),
+                'avg_sentiment': float(t.get('avg_sentiment', 0.0) or 0.0),
+            } for t in topics_rows if t.get('topic')]
+            total = sum(i['count'] for i in items)
+            avg = (sum((i['avg_sentiment'] or 0.0) * (i['count'] or 0) for i in items) / max(total, 1)) if total else 0.0
+            return [{
+                'group_name': 'Temas Generales del Sector',
+                'avg_sentiment': float(avg),
+                'total_occurrences': int(total),
+                'topics': items,
+            }]
+        except Exception:
+            return []
 
 # Categorías temáticas para agrupar prompts similares (ES/EN)
 _CATEGORY_KEYWORDS = {
@@ -1056,9 +1197,8 @@ def get_industry_ranking():
         # Filtro por tema con categorización dinámica por IA (alineado con /api/prompts)
         if filters.get('topic') and filters['topic'] != 'all':
             topic_filter = filters['topic']
-            # Obtener lista de topics disponibles y todas las queries activas
-            cur.execute("SELECT DISTINCT topic FROM queries WHERE enabled = TRUE AND topic IS NOT NULL AND topic <> ''")
-            available_topics = [row[0] for row in cur.fetchall()]
+            # Obtener catálogo de categorías (taxonomía o por defecto) y todas las queries activas
+            available_topics = get_category_catalog_for_brand(filters.get('brand'))
             cur.execute("SELECT id, query FROM queries WHERE enabled = TRUE")
             qrows = cur.fetchall()
             dyn_ids = []
@@ -1808,83 +1948,106 @@ def delete_prompt(query_id: int):
 
 @app.route('/api/prompts/<int:query_id>', methods=['GET'])
 def get_prompt_details(query_id: int):
-    """Detalle de un prompt (query): serie temporal, distribución por plataforma y ejecuciones.
-    Responde a filtros de fecha y también acepta model/source opcionales (coherentes con el resto de endpoints).
+    """
+    Detalle de un prompt: devuelve métricas clave (visibilidad, SOV) y sus ejecuciones.
     """
     try:
         filters = parse_filters(request)
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Texto del prompt
-        cur.execute("SELECT query, topic FROM queries WHERE id = %s", (query_id,))
+        # 1. Obtener datos básicos del prompt
+        cur.execute("SELECT query, topic, brand FROM queries WHERE id = %s", (query_id,))
         row = cur.fetchone()
         if not row:
             cur.close(); conn.close()
             return jsonify({"error": "Prompt not found"}), 404
-        query_text, topic = row
-
-        # Construcción de filtros dinámicos
-        where = ["m.query_id = %s", "m.created_at >= %s", "m.created_at < %s"]
-        params = [query_id, filters['start_date'], filters['end_date']]
-        if filters.get('model') and filters['model'] != 'all':
-            where.append("m.engine = %s"); params.append(filters['model'])
-        if filters.get('source') and filters['source'] != 'all':
-            where.append("m.source = %s"); params.append(filters['source'])
-
-        where_sql = " AND ".join(where)
-
-        # Serie temporal (conteo por día)
-        cur.execute(f"""
-            SELECT DATE(m.created_at) AS d, COUNT(*)
+        query_text, topic, brand = row
+        
+        # 2. Obtener todas las menciones para este prompt dentro del rango de fechas
+        cur.execute(
+            """
+            SELECT m.key_topics, LOWER(COALESCE(m.response,'')) AS resp,
+                   LOWER(COALESCE(m.source_title,'')) AS title, i.payload,
+                   m.id, m.created_at, m.engine, m.source, m.response AS original_response
             FROM mentions m
-            WHERE {where_sql}
-            GROUP BY DATE(m.created_at)
-            ORDER BY DATE(m.created_at)
-        """, tuple(params))
-        ts_rows = cur.fetchall()
-        timeseries = [{"date": r[0].strftime('%b %d'), "count": int(r[1] or 0)} for r in ts_rows]
-
-        # Distribución por plataforma (engine)
-        cur.execute(f"""
-            SELECT COALESCE(m.engine, 'unknown') AS engine, COUNT(*)
-            FROM mentions m
-            WHERE {where_sql}
-            GROUP BY COALESCE(m.engine, 'unknown')
-            ORDER BY COUNT(*) DESC
-        """, tuple(params))
-        platform_rows = cur.fetchall()
-        platforms = [{"name": r[0], "value": int(r[1] or 0)} for r in platform_rows]
-
-        # Ejecuciones (últimas 100)
-        cur.execute(f"""
-            SELECT m.id, m.created_at, m.engine, m.source, m.response, m.sentiment
-            FROM mentions m
-            WHERE {where_sql}
+            LEFT JOIN insights i ON i.id = m.generated_insight_id
+            WHERE m.query_id = %s AND m.created_at >= %s AND m.created_at < %s
             ORDER BY m.created_at DESC
-            LIMIT 100
-        """, tuple(params))
-        exec_rows = cur.fetchall()
+            """,
+            (query_id, filters['start_date'], filters['end_date'])
+        )
+        mention_rows = cur.fetchall()
+        
+        # 3. Calcular Visibilidad y SOV (lógica extraída del endpoint de la lista de prompts)
+        brand_to_check = brand or os.getenv('DEFAULT_BRAND', 'The Core School')
+        brand_present_responses = 0
+        brand_presence_count = 0
+        all_brands_presence_total = 0
+        
         executions = []
-        for mid, created, engine, source, response, sentiment in exec_rows:
+        from collections import defaultdict
+        total_by_day = defaultdict(int)
+        brand_present_by_day = defaultdict(int)
+        all_brands_presence_by_day = defaultdict(int)
+        brand_presence_by_day = defaultdict(int)
+        for key_topics, resp, title, payload, mid, created, engine, source, original_response in mention_rows:
+            # Añadir a la lista de ejecuciones
             executions.append({
                 "id": mid,
                 "created_at": created.isoformat() if created else None,
                 "engine": engine,
                 "source": source,
-                "response": response,
-                "sentiment": float(sentiment or 0.0),
+                "response": original_response,
             })
+            
+            # Lógica de detección de marcas
+            present_brands = _detect_brands(key_topics, resp, title, payload)
+            if present_brands:
+                all_brands_presence_total += len(present_brands)
+                if brand_to_check in present_brands:
+                    brand_present_responses += 1
+                    brand_presence_count += 1
+            # Agregación diaria para series
+            if created:
+                d = created.date()
+                total_by_day[d] += 1
+                if present_brands:
+                    all_brands_presence_by_day[d] += len(present_brands)
+                    if brand_to_check in present_brands:
+                        brand_present_by_day[d] += 1
+                        brand_presence_by_day[d] += 1
+        
+        total_responses_prompt = len(mention_rows)
+        visibility_score_individual = round((brand_present_responses / max(total_responses_prompt, 1)) * 100.0, 1)
+        share_of_voice_individual = round((brand_presence_count / max(all_brands_presence_total, 1)) * 100.0, 1)
 
-        cur.close(); conn.close()
+        # Serie temporal: visibilidad y SOV diarios para este prompt
+        from datetime import timedelta
+        start_day = filters['start_date'].date()
+        end_day = filters['end_date'].date()
+        series = []
+        day = start_day
+        while day <= end_day:
+            den = max(total_by_day.get(day, 0), 1)
+            vis_pct = round((brand_present_by_day.get(day, 0) / den) * 100.0, 1)
+            sov_den = max(all_brands_presence_by_day.get(day, 0), 1)
+            sov_pct = round((brand_presence_by_day.get(day, 0) / sov_den) * 100.0, 1)
+            series.append({"date": day.strftime('%b %d'), "visibility": vis_pct, "sov": sov_pct, "executions": int(total_by_day.get(day, 0))})
+            day += timedelta(days=1)
+
+        cur.close()
+        conn.close()
 
         return jsonify({
             "id": query_id,
             "query": query_text,
             "topic": topic,
-            "timeseries": timeseries,
-            "platforms": platforms,
-            "executions": executions,
+            "visibility_score": visibility_score_individual,
+            "share_of_voice": share_of_voice_individual,
+            "total_executions": total_responses_prompt,
+            "executions": executions[:100],  # Limitar a las últimas 100 para no sobrecargar
+            "series": series,
         })
     except Exception as e:
         print(f"Error en get_prompt_details: {e}")
