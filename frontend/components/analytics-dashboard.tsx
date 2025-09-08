@@ -235,7 +235,6 @@ export function AnalyticsDashboard() {
   const [selectedTopic, setSelectedTopic] = useState<string>("all")
   const [topicOptions, setTopicOptions] = useState<string[]>(["all"]) 
   const [openTopics, setOpenTopics] = useState<Record<string, boolean>>({})
-  const [promptsSearch, setPromptsSearch] = useState<string>("")
   const [promptModalOpen, setPromptModalOpen] = useState(false)
   const [promptDetails, setPromptDetails] = useState<PromptDetails | null>(null)
   const [promptLoading, setPromptLoading] = useState(false)
@@ -248,6 +247,7 @@ export function AnalyticsDashboard() {
   const [autoDetectConfidence, setAutoDetectConfidence] = useState<number>(0)
   const [autoDetectSuggestion, setAutoDetectSuggestion] = useState<string>("")
   const [autoDetectSuggestionIsNew, setAutoDetectSuggestionIsNew] = useState<boolean>(false)
+  const [addPromptStep, setAddPromptStep] = React.useState<'input' | 'thinking' | 'suggestion' | 'error'>('input')
   // Editar/Eliminar Prompt
   const [editPromptOpen, setEditPromptOpen] = useState(false)
   const [editPromptId, setEditPromptId] = useState<number | null>(null)
@@ -259,8 +259,7 @@ export function AnalyticsDashboard() {
   const [sentimentApi, setSentimentApi] = useState<{ timeseries: { date: string; avg: number }[]; distribution: { negative: number; neutral: number; positive: number }; negatives: { id: number; summary: string | null; key_topics: string[]; source_title: string | null; source_url: string | null; sentiment: number; created_at: string | null }[]; positives?: { id: number; summary: string | null; key_topics: string[]; source_title: string | null; source_url: string | null; sentiment: number; created_at: string | null }[] } | null>(null)
   const [topicsCloud, setTopicsCloud] = useState<{ topic: string; count: number; avg_sentiment?: number }[]>([])
   // Resumen por tema aplicando filtros globales a cada tema individualmente
-  const [topicSummaries, setTopicSummaries] = useState<Record<string, { positive: number; neutral: number; negative: number; total: number; positivePercent: number }>>({})
-  const [topicSummariesLoading, setTopicSummariesLoading] = useState<boolean>(false)
+  // eliminado: topicSummaries (ahora usamos datos de API directamente)
 
   // Configuración de gráficos (3 opciones): tipo, zoom (brush) y exportar
   const [visibilityChartType, setVisibilityChartType] = useState<"line" | "area">("line")
@@ -332,28 +331,46 @@ export function AnalyticsDashboard() {
 
   // Rankings eliminados por solicitud (solo tabla de topics + prompts)
 
-  // Sentiment derived data from API
+  // Sentiment derived data from API (usar % de menciones positivas)
   const sentimentComputed = useMemo(() => {
-    // Escala simétrica: -1..1 -> 0..100 para representar bajadas y subidas sin aplanar negativos
-    const toPercent = (avg: number) => Math.max(0, Math.min(100, ((avg + 1) / 2) * 100))
-    const timeseries = (sentimentApi?.timeseries || []).map(p => ({ date: p.date, value: toPercent(p.avg) }))
-    const first3 = timeseries.slice(0, 3)
-    const last3 = timeseries.slice(-3)
-    const avg = (arr: { value: number }[]) => arr.length ? arr.reduce((s, x) => s + x.value, 0) / arr.length : 0
-    const delta = Math.round((avg(last3) - avg(first3)) * 10) / 10
-    const total = (sentimentApi ? (sentimentApi.distribution.negative + sentimentApi.distribution.neutral + sentimentApi.distribution.positive) : 0) || 1
-    const positivePercent = sentimentApi ? (sentimentApi.distribution.positive / total) * 100 : 0
-    const neutralPercent = sentimentApi ? (sentimentApi.distribution.neutral / total) * 100 : 0
-    const negativePercent = sentimentApi ? (sentimentApi.distribution.negative / total) * 100 : 0
+    if (!sentimentApi) {
+      return {
+        positivePercent: 0,
+        neutralPercent: 0,
+        negativePercent: 0,
+        delta: 0,
+        timeseries: [],
+        negatives: [],
+        positives: [],
+      } as const
+    }
+
+    const { distribution, timeseries, negatives, positives } = sentimentApi
+    const total = (distribution.negative + distribution.neutral + distribution.positive) || 1
+
+    // Métrica principal: % de menciones positivas
+    const positivePercent = (distribution.positive / total) * 100
+    const neutralPercent = (distribution.neutral / total) * 100
+    const negativePercent = (distribution.negative / total) * 100
+
+    // Mantener delta simple por ahora
+    const delta = 0
+
+    // Escalar serie a 0-100 según promedio de score (opcional)
+    const scaledTimeseries = (timeseries || []).map(p => ({
+      date: p.date,
+      value: Math.max(0, Math.min(100, ((p.avg + 1) / 2) * 100))
+    }))
+
     return {
       positivePercent,
       neutralPercent,
       negativePercent,
       delta,
-      timeseries,
-      negatives: sentimentApi?.negatives || [],
-      positives: sentimentApi?.positives || [],
-    }
+      timeseries: scaledTimeseries,
+      negatives: negatives || [],
+      positives: positives || [],
+    } as const
   }, [sentimentApi])
 
   // Resetear índices cuando cambien las listas
@@ -439,34 +456,7 @@ export function AnalyticsDashboard() {
     loadFiltersLists()
   }, [])
 
-  // Cargar resumen por tema (aplica los filtros de fecha/model/source a cada tema, uno a uno)
-  useEffect(() => {
-    const loadPerTopic = async () => {
-      if (!dateRange?.from || !dateRange?.to) return
-      if (!topicOptions || topicOptions.length <= 1) return
-      try {
-        setTopicSummariesLoading(true)
-        const baseFilters = { model: selectedModel, source: selectedSource, brand: primaryBrandName }
-        const topics = topicOptions.filter(t => t !== 'all')
-        const limited = topics.slice(0, 20) // evitar ráfagas grandes
-        const results = await Promise.all(limited.map(async (t) => {
-          const res = await getSentiment(dateRange, { ...baseFilters, topic: t })
-          const d = res.distribution
-          const total = Math.max((d.negative + d.neutral + d.positive), 0)
-          const positivePercent = total ? (d.positive / total) * 100 : 0
-          return [t, { positive: d.positive, neutral: d.neutral, negative: d.negative, total, positivePercent }] as const
-        }))
-        const map: Record<string, { positive: number; neutral: number; negative: number; total: number; positivePercent: number }> = {}
-        results.forEach(([t, data]) => { map[t] = data })
-        setTopicSummaries(map)
-      } catch (e) {
-        console.error('No se pudo cargar el resumen por tema', e)
-      } finally {
-        setTopicSummariesLoading(false)
-      }
-    }
-    loadPerTopic()
-  }, [dateRange, selectedModel, selectedSource, topicOptions, primaryBrandName])
+  // eliminado: carga de resumen por tema (usamos métricas de API como avg_sentiment)
 
   // Cargar insights reales cuando estemos en "Estrategias y objetivos"
   useEffect(() => {
@@ -1333,7 +1323,7 @@ export function AnalyticsDashboard() {
                                   {sentimentBrush ? "Quitar zoom (Brush)" : "Activar zoom (Brush)"}
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
-                                <DropdownMenuItem onClick={() => downloadCSV("sentimiento.csv", (sentimentComputed.timeseries || []).map((d) => ({ Fecha: d.date, Valor: d.value })))}>
+                                <DropdownMenuItem onClick={() => downloadCSV("sentimiento.csv", [...(sentimentComputed.timeseries || [])].map((d) => ({ Fecha: d.date, Valor: d.value })))}>
                                   Exportar CSV
                                 </DropdownMenuItem>
                               </DropdownMenuContent>
@@ -1343,6 +1333,7 @@ export function AnalyticsDashboard() {
                             <div className="mb-6">
                               <div className="flex items-baseline gap-2">
                                 <span className="text-3xl font-bold">{sentimentComputed.positivePercent.toFixed(1)}%</span>
+                                <span className="text-sm text-muted-foreground">(de menciones positivas)</span>
                                 <span className={sentimentComputed.delta >= 0 ? "text-green-500 flex items-center gap-1" : "text-red-500 flex items-center gap-1"}>
                                   {sentimentComputed.delta >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
                                   {sentimentComputed.delta.toFixed(1)}%
@@ -1352,7 +1343,7 @@ export function AnalyticsDashboard() {
                             <div className="h-64">
                               <ResponsiveContainer width="100%" height="100%">
                                 {sentimentChartType === "line" ? (
-                                  <LineChart data={sentimentComputed.timeseries}>
+                                  <LineChart data={[...(sentimentComputed.timeseries || [])]}>
                                     <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
                                     <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} domain={[0, 100]} />
                                     <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }} formatter={(v) => [`${Number(v).toFixed(1)}%`, 'Positivo']} />
@@ -1360,7 +1351,7 @@ export function AnalyticsDashboard() {
                                     {sentimentBrush && <Brush dataKey="date" height={20} />}
                                   </LineChart>
                                 ) : (
-                                  <AreaChart data={sentimentComputed.timeseries}>
+                                  <AreaChart data={[...(sentimentComputed.timeseries || [])]}>
                                     <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
                                     <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} domain={[0, 100]} />
                                     <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }} formatter={(v) => [`${Number(v).toFixed(1)}%`, 'Positivo']} />
@@ -1448,7 +1439,6 @@ export function AnalyticsDashboard() {
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
                         <h3 className="text-lg font-semibold">Temas</h3>
-                        {topicSummariesLoading && <span className="text-xs text-muted-foreground">Calculando por tema…</span>}
                       </div>
                       <Card className="shadow-sm bg-white border-gray-200">
                         <CardContent className="p-0">
@@ -1457,8 +1447,7 @@ export function AnalyticsDashboard() {
                               <thead className="border-b border-gray-200 bg-white">
                                 <tr>
                                   <th className="text-left p-4 font-medium text-gray-600">Tema</th>
-                                  <th className="text-left p-4 font-medium text-gray-600">Sentimiento medio</th>
-                                  <th className="text-left p-4 font-medium text-gray-600">% positivo (filtros)</th>
+                                  <th className="text-left p-4 font-medium text-gray-600">Nivel de Sentimiento</th>
                                   <th className="text-left p-4 font-medium text-gray-600">Ocurrencias</th>
                                 </tr>
                               </thead>
@@ -1466,32 +1455,38 @@ export function AnalyticsDashboard() {
                                 {(() => {
                                   const top = topicsCloud.slice(0, 50)
                                   const maxCount = Math.max(...top.map(t => t.count || 0), 1)
-                                  return top.map((t) => (
-                                  <tr key={t.topic} className="border-b border-gray-100 hover:bg-gray-50">
-                                    <td className="p-4">
-                                      <div className="flex items-center gap-3">
-                                        <div className="w-8 h-8 bg-blue-50 border border-blue-200 rounded-full flex items-center justify-center">
-                                          <span className="text-base">🧩</span>
-                                        </div>
-                                        <div className="font-medium text-gray-900">{translateTopicToSpanish(t.topic)}</div>
-                                      </div>
-                                    </td>
-                                    <td className="p-4">
-                                      <span className={`px-2 py-1 rounded text-xs ${ (t.avg_sentiment ?? 0) >= 0.1 ? 'bg-green-100 text-green-700' : (t.avg_sentiment ?? 0) <= -0.1 ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700' }`}>
-                                        { (t.avg_sentiment ?? 0).toFixed(2) }
-                                      </span>
-                                    </td>
-                                    <td className="p-4">
-                                      <span className="text-sm text-gray-900">{(topicSummaries[t.topic]?.positivePercent ?? 0).toFixed(1)}%</span>
-                                    </td>
-                                    <td className="p-4">
-                                      <div className="flex items-center gap-3">
-                                        <span className="font-medium">{t.count}</span>
-                                        <div className="w-32 h-1.5 bg-gray-200 rounded-full overflow-hidden"><div className="h-1.5 bg-gray-800" style={{ width: `${Math.max(0, Math.min(100, (t.count / maxCount) * 100)) }%` }}></div></div>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                  ))
+                                  return top.map((t) => {
+                                    const sentimentScore = ((t.avg_sentiment ?? 0) + 1) / 2 * 100
+                                    return (
+                                      <tr key={t.topic} className="border-b border-gray-100 hover:bg-gray-50">
+                                        <td className="p-4">
+                                          <div className="flex items-center gap-3">
+                                            <div className="w-8 h-8 bg-blue-50 border border-blue-200 rounded-full flex items-center justify-center">
+                                              <span className="text-base">🧩</span>
+                                            </div>
+                                            <div className="font-medium text-gray-900">{translateTopicToSpanish(t.topic)}</div>
+                                          </div>
+                                        </td>
+                                        <td className="p-4">
+                                          <div className="flex items-center gap-2">
+                                            <div className="w-24 h-2 bg-gray-200 rounded-full">
+                                              <div
+                                                className={`h-2 rounded-full ${sentimentScore > 60 ? 'bg-green-500' : sentimentScore < 40 ? 'bg-red-500' : 'bg-yellow-500'}`}
+                                                style={{ width: `${sentimentScore}%` }}
+                                              />
+                                            </div>
+                                            <span className="text-sm font-medium">{sentimentScore.toFixed(0)}%</span>
+                                          </div>
+                                        </td>
+                                        <td className="p-4">
+                                          <div className="flex items-center gap-3">
+                                            <span className="font-medium">{t.count}</span>
+                                            <div className="w-32 h-1.5 bg-gray-200 rounded-full overflow-hidden"><div className="h-1.5 bg-gray-800" style={{ width: `${Math.max(0, Math.min(100, (t.count / maxCount) * 100)) }%` }}></div></div>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    )
+                                  })
                                 })()}
                               </tbody>
                             </table>
@@ -1519,10 +1514,7 @@ export function AnalyticsDashboard() {
                         </Select>
                         <Button size="sm" onClick={() => setAddPromptOpen(true)} className="shadow-sm">+ Añadir Prompt</Button>
                       </div>
-                      <div className="relative">
-                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-500" />
-                        <Input value={promptsSearch} onChange={(e) => setPromptsSearch(e.target.value)} placeholder="Buscar temas" className="pl-10 w-56 shadow-sm bg-white" />
-                      </div>
+                      {/* Buscador de temas eliminado por solicitud */}
                     </div>
 
                     <Card className="shadow-sm bg-white border-gray-200">
@@ -1554,7 +1546,8 @@ export function AnalyticsDashboard() {
                                 // --- RENDERIZADO DE DATOS REALES ---
                                 (() => {
                                   const totalMentions = Math.max(promptsGrouped.reduce((acc, g) => acc + (g.topic_total_mentions || 0), 0), 1)
-                                  const filtered = promptsGrouped.filter(g => !promptsSearch || g.topic.toLowerCase().includes(promptsSearch.toLowerCase()))
+                                  // Sin buscador: usar todos los grupos
+                                  const filtered = promptsGrouped
                                   return filtered.map((group, index) => {
                                     // --- LÓGICA DE CÁLCULO UNIFICADA Y CORRECTA ---
                                     const avgVisibility = group.prompts.length > 0
@@ -1728,27 +1721,102 @@ export function AnalyticsDashboard() {
                   </DialogContent>
                 </Dialog>
 
-                {/* Modal para crear nuevo prompt - versión minimalista con círculo animado */}
-                <Dialog open={addPromptOpen} onOpenChange={setAddPromptOpen}>
-                  <DialogContent className="sm:max-w-[640px]">
-                    <div className="flex flex-col items-center gap-4 py-2">
-                      <div className="w-full flex items-center justify-center mt-1">
+                {/* Modal por pasos para crear nuevo prompt */}
+                <Dialog open={addPromptOpen} onOpenChange={(isOpen) => {
+                  setAddPromptOpen(isOpen);
+                  if (!isOpen) {
+                    setAddPromptStep('input');
+                    setNewPromptQuery('');
+                    setAutoDetectedTopic('');
+                  }
+                }}>
+                  <DialogContent className="sm:max-w-[520px]">
+                    {addPromptStep === 'input' && (
+                      <>
+                        <DialogHeader>
+                          <DialogTitle className="text-xl font-semibold text-center">¿Qué prompt quieres monitorizar?</DialogTitle>
+                        </DialogHeader>
+                        <div className="flex items-center gap-2 pt-4">
+                          <Input
+                            id="prompt-input"
+                            value={newPromptQuery}
+                            onChange={(e) => setNewPromptQuery(e.target.value)}
+                            placeholder="Ej: becas y ayudas para estudiar cine..."
+                            className="w-full"
+                            onKeyDown={async (e) => {
+                              if (e.key === 'Enter' && newPromptQuery.trim().length >= 10) {
+                                setAddPromptStep('thinking');
+                                const res = await categorizePromptApi(newPromptQuery);
+                                const suggestion = res.suggestion || 'Inclasificable';
+                                if (suggestion === 'Inclasificable') {
+                                  setAddPromptStep('error');
+                                } else {
+                                  setAutoDetectedTopic(suggestion);
+                                  setAddPromptStep('suggestion');
+                                }
+                              }
+                            }}
+                          />
+                          <Button 
+                            size="icon" 
+                            onClick={async () => {
+                              if (newPromptQuery.trim().length >= 10) {
+                                setAddPromptStep('thinking');
+                                const res = await categorizePromptApi(newPromptQuery);
+                                const suggestion = res.suggestion || 'Inclasificable';
+                                if (suggestion === 'Inclasificable') {
+                                  setAddPromptStep('error');
+                                } else {
+                                  setAutoDetectedTopic(suggestion);
+                                  setAddPromptStep('suggestion');
+                                }
+                              }
+                            }} 
+                            disabled={newPromptQuery.trim().length < 10}
+                          >
+                            <ChevronRight className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </>
+                    )}
+
+                    {addPromptStep === 'thinking' && (
+                      <div className="flex flex-col items-center justify-center gap-4 py-8">
                         <PulsingCircle position="center" size={120} />
+                        <p className="text-sm text-gray-600 animate-pulse">Analizando prompt...</p>
                       </div>
-                      <div className="text-center">
-                        <div className="text-xl font-semibold">¿Qué prompt te gustaría introducir?</div>
-                      </div>
-                      <Input
-                        value={newPromptQuery}
-                        onChange={async (e) => { const v = e.target.value; setNewPromptQuery(v); try { if (v.trim().length >= 6) { const res = await categorizePromptApi(v, newPromptTopic || undefined); setAutoDetectedTopic(res.category || ""); setAutoDetectConfidence(res.confidence || 0); setAutoDetectSuggestion(res.suggestion || ""); setAutoDetectSuggestionIsNew(!!res.suggestion_is_new); } else { setAutoDetectedTopic(""); setAutoDetectConfidence(0); setAutoDetectSuggestion(""); setAutoDetectSuggestionIsNew(false); } } catch {} }}
-                        placeholder="Escribe el prompt..."
-                        className="w-full"
-                      />
-                      <div className="w-full flex items-center justify-between gap-3">
-                        <Button variant="outline" onClick={() => setAddPromptOpen(false)}>Cancelar</Button>
-                        <Button onClick={handleCreatePrompt} disabled={!newPromptQuery.trim()} className="rounded-full px-4 py-2">→</Button>
-                      </div>
-                    </div>
+                    )}
+
+                    {addPromptStep === 'suggestion' && (
+                      <>
+                        <DialogHeader>
+                          <DialogTitle className="text-xl font-semibold text-center">Topic Sugerido</DialogTitle>
+                        </DialogHeader>
+                        <div className="flex flex-col items-center gap-4 py-4">
+                          <Badge variant="secondary" className="text-lg px-4 py-2">
+                            {translateTopicToSpanish(autoDetectedTopic)}
+                          </Badge>
+                          <div className="w-full flex justify-end gap-2 mt-4">
+                            <Button variant="outline" onClick={() => setAddPromptStep('input')}>Corregir</Button>
+                            <Button onClick={handleCreatePrompt}>Aceptar y Añadir</Button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    {addPromptStep === 'error' && (
+                      <>
+                        <DialogHeader>
+                          <DialogTitle className="text-xl font-semibold text-center">No he entendido el prompt</DialogTitle>
+                        </DialogHeader>
+                        <div className="flex flex-col items-center gap-4 py-4 text-center">
+                          <p className="text-sm text-gray-600">
+                            La consulta es demasiado ambigua. Por favor, prueba a reformularla siendo más específico sobre lo que quieres monitorizar.
+                          </p>
+                          <Button onClick={() => setAddPromptStep('input')} className="mt-4">Volver a intentarlo</Button>
+                        </div>
+                      </>
+                    )}
                   </DialogContent>
                 </Dialog>
 

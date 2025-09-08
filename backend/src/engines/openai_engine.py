@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, List
 
 from dotenv import load_dotenv
 from openai import OpenAI, OpenAIError
@@ -170,3 +170,20 @@ def fetch_response_with_metadata(
             "price_usd": None,
             "error_category": "api_error",
         }
+
+
+# ───────────────── Embeddings Helpers (topic matching) ────────────────
+def get_embeddings(texts: List[str], model: str = "text-embedding-3-small") -> List[List[float]]:
+    """
+    Obtiene embeddings para una lista de textos usando el modelo económico
+    de OpenAI. Devuelve una lista de vectores (uno por texto).
+    """
+    if not isinstance(texts, list):
+        texts = [str(texts)]
+    res = client.embeddings.create(model=model, input=texts)
+    return [d.embedding for d in res.data]
+
+
+def get_embedding(text: str, model: str = "text-embedding-3-small") -> List[float]:
+    """Convenience: embedding para un único texto."""
+    return get_embeddings([text], model=model)[0]

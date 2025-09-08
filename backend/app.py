@@ -12,12 +12,15 @@ from dotenv import load_dotenv
 import re
 import unicodedata
 from difflib import SequenceMatcher
-from src.engines.openai_engine import fetch_response
+from src.engines.openai_engine import fetch_response, get_embedding
 
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
+
+# Caché sencilla de embeddings en memoria para reducir llamadas repetidas
+_EMBEDDING_CACHE: dict[str, list[float]] = {}
 
 # --- CONFIGURACIÓN Y HELPERS ---
 
@@ -29,9 +32,36 @@ def _env(*names: str, default: str | int | None = None):
     return default
 
 # --- Nueva Función de Categorización con IA ---
+def _normalize_text_for_match(text: str) -> list[str]:
+    s = (text or "").lower()
+    s = unicodedata.normalize("NFKD", s)
+    s = re.sub(r"[^a-z0-9áéíóúñü\s]", " ", s)
+    tokens = [t for t in s.split() if len(t) >= 2]
+    return tokens
+
+
+def _best_topic_by_similarity(candidate: str, topics: list[str]) -> tuple[str, float]:
+    """Devuelve (mejor_topic, score) usando difflib + similitud por tokens."""
+    if not topics:
+        return candidate, 0.0
+    cand_norm = " ".join(_normalize_text_for_match(candidate))
+    best = None
+    best_score = -1.0
+    for t in topics:
+        s1 = SequenceMatcher(None, cand_norm, t.lower()).ratio()
+        # Jaccard simple de conjuntos de tokens
+        a = set(_normalize_text_for_match(candidate))
+        b = set(_normalize_text_for_match(t))
+        j = (len(a & b) / max(1, len(a | b))) if (a or b) else 0.0
+        score = max(s1, j)
+        if score > best_score:
+            best = t
+            best_score = score
+    return best or candidate, float(best_score)
+
+
 def categorize_prompt_with_ai(query_text: str, topics: list[str]) -> str:
     """Usa un LLM para clasificar una query en una lista de topics."""
-    # Preparamos los topics como una lista numerada para la IA
     topics_list_str = "\n".join([f"{i+1}. {topic}" for i, topic in enumerate(topics)])
 
     prompt = f"""
@@ -48,25 +78,15 @@ Tu tarea es clasificar la siguiente "Consulta del Usuario" en una de las "Catego
 Analiza la consulta y devuelve solo el nombre de la categoría más apropiada de la lista anterior.
 """
     try:
-        # Usamos el motor de OpenAI para obtener la respuesta
         best_category = fetch_response(prompt, model="gpt-4o-mini", temperature=0.1)
-
-        # Limpiamos la respuesta para asegurarnos de que es una de las categorías
-        # A veces la IA añade números o puntos, los quitamos.
-        cleaned_category = best_category.strip().split('.')[-1].strip()
-
-        # Verificamos si la categoría devuelta es válida
+        cleaned_category = (best_category or "").strip().split('.')[-1].strip()
         if cleaned_category in topics:
             return cleaned_category
         else:
-            # Si la IA devuelve algo inesperado, buscamos la más parecida
-            # en nuestra lista para evitar errores.
             best_match = max(topics, key=lambda t: SequenceMatcher(None, cleaned_category, t).ratio())
             return best_match
-            
     except Exception as e:
         print(f"Error en la categorización con IA: {e}")
-        # Si todo falla, volvemos a la lógica antigua como respaldo
         return categorize_prompt(None, query_text)
 
 DB_CONFIG = {
@@ -217,6 +237,73 @@ def canonicalize_topic(topic: str) -> str:
     # Fallback: Title Case of cleaned text
     return ' '.join(w.capitalize() for w in key.split()) or 'Uncategorized'
 
+
+# Nueva función: agrupar topics con IA en categorías estratégicas
+def group_topics_with_ai(topics_rows: list[dict]) -> list[dict]:
+    try:
+        topics_list_str = "\n".join([f"- {t.get('topic','')} | count={t.get('count',0)} | avg_sentiment={t.get('avg_sentiment',0.0):.2f}" for t in topics_rows])
+        prompt = f"""
+Eres un analista de inteligencia de mercado para "The Core School". Tu misión es agrupar una lista de temas en las siguientes categorías estratégicas predefinidas. La lista puede contener nombres de competidores y también el texto de los prompts que se usaron.
+
+**Categorías Predefinidas (USA SOLO ESTAS):**
+-   **Menciones de Marca Propia:** Solo para temas que se refieren directamente a "The Core School".
+-   **Menciones de Competidores:** Para cualquier otra escuela, universidad o centro de formación (ej. U-tad, ECAM, UPM, etc.).
+-   **Programas Académicos:** Temas relacionados con grados, másteres o áreas de estudio (ej. "dirección de cine", "ingeniería de software").
+-   **Factores de Decisión Clave:** Conceptos que influyen en la elección de una escuela (ej. "enfoque práctico", "conexiones con la industria", "prestigio").
+-   **Temas Generales del Sector:** Conversaciones más amplias sobre la industria audiovisual o educativa. Si un tema es el texto completo de un prompt, clasifícalo aquí o en "Programas Académicos" según su contenido.
+
+**Instrucciones:**
+1.  Asigna CADA tema de la lista a una de las 5 categorías predefinidas.
+2.  Si un tema no encaja claramente, asígnalo a "Temas Generales del Sector".
+3.  Calcula el sentimiento medio y las ocurrencias totales para cada categoría.
+4.  Devuelve el resultado ÚNICAMENTE en el formato JSON especificado, sin añadir texto adicional.
+
+**Formato de Salida JSON Esperado:**
+```json
+[
+  {
+    "group_name": "Menciones de Marca Propia",
+    "avg_sentiment": 0.9,
+    "total_occurrences": 10,
+    "topics": [
+      { "topic": "the core school", "count": 10, "avg_sentiment": 0.9 }
+    ]
+  },
+  {
+    "group_name": "Menciones de Competidores",
+    "avg_sentiment": 0.6,
+    "total_occurrences": 15,
+    "topics": [
+      { "topic": "u-tad", "count": 8, "avg_sentiment": 0.7 },
+      { "topic": "ecam", "count": 7, "avg_sentiment": 0.5 }
+    ]
+  }
+]
+```
+Lista de Temas a Analizar:
+{topics_list_str}
+"""
+
+        raw = fetch_response(prompt, model="gpt-4o-mini", temperature=0.0)
+        # Intentar parsear JSON robustamente
+        try:
+            data = json.loads(raw)
+            if isinstance(data, list):
+                return data
+        except Exception:
+            # Intentar extraer bloque JSON si el modelo añadió texto
+            import re as _re
+            m = _re.search(r"\[\s*\{[\s\S]*\}\s*\]", raw)
+            if m:
+                try:
+                    data = json.loads(m.group(0))
+                    if isinstance(data, list):
+                        return data
+                except Exception:
+                    pass
+        return []
+    except Exception:
+        return []
 
 # Categorías temáticas para agrupar prompts similares (ES/EN)
 _CATEGORY_KEYWORDS = {
@@ -1232,8 +1319,15 @@ def get_topics_cloud():
         rows = cur.fetchall()
         topics = [{"topic": r[0], "count": int(r[1] or 0), "avg_sentiment": float(r[2] or 0.0)} for r in rows]
 
+        # Intento opcional de agrupación con IA para uso en Sentiment tab
+        groups = []
+        try:
+            groups = group_topics_with_ai(topics)
+        except Exception as _:
+            groups = []
+
         cur.close(); conn.close()
-        return jsonify({"topics": topics})
+        return jsonify({"topics": topics, "groups": groups})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1342,9 +1436,21 @@ def get_prompts_grouped():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Primero, obtenemos la lista de todos los topics disponibles de la base de datos
-        cur.execute("SELECT DISTINCT topic FROM queries WHERE enabled = TRUE AND topic IS NOT NULL AND topic <> ''")
-        available_topics = [row[0] for row in cur.fetchall()]
+        # Primero, obtenemos la lista de topics permitidos. Preferimos taxonomía por brand.
+        # Si no hay taxonomía, caemos a los topics existentes de queries.
+        available_topics: list[str] = []
+        try:
+            brand = request.args.get('brand') or os.getenv('DEFAULT_BRAND', 'The Core School')
+            ensure_taxonomy_table()
+            cur.execute("SELECT category FROM topic_taxonomy WHERE brand = %s ORDER BY category", (brand,))
+            rows_tax = cur.fetchall()
+            if rows_tax:
+                available_topics = [r[0] for r in rows_tax]
+        except Exception:
+            available_topics = []
+        if not available_topics:
+            cur.execute("SELECT DISTINCT topic FROM queries WHERE enabled = TRUE AND topic IS NOT NULL AND topic <> ''")
+            available_topics = [row[0] for row in cur.fetchall()]
 
         # Obtenemos los prompts (queries) activos y sus métricas
         cur.execute(
@@ -1556,8 +1662,15 @@ def create_prompt():
                 "created_at": row[6].isoformat() if row[6] else None
             }), 200
 
-        # Determinar categoría para almacenar en topic canónico
-        canonical_topic = categorize_prompt(topic, query_text)
+        # Determinar categoría para almacenar en topic canónico (IA + fallback)
+        try:
+            cur.execute("SELECT category FROM topic_taxonomy WHERE brand = %s", (brand,))
+            available_topics = [row[0] for row in cur.fetchall()]
+        except Exception:
+            available_topics = []
+        if not available_topics:
+            available_topics = list(_CATEGORY_KEYWORDS.keys())
+        canonical_topic = categorize_prompt_with_ai(query_text, available_topics)
 
         cur.execute(
             """
@@ -1596,7 +1709,7 @@ def update_prompt(query_id: int):
         language = payload.get('language')
         enabled = payload.get('enabled')
 
-        # Si viene query o topic, recalculamos categoría
+        # Si viene query o topic, recalculamos categoría con IA
         if qtext is not None or tpc is not None:
             # traer valores actuales si faltan
             conn = get_db_connection(); cur = conn.cursor()
@@ -1608,8 +1721,16 @@ def update_prompt(query_id: int):
             current_query, current_topic = row
             cur.close(); conn.close()
             new_query = qtext if qtext is not None else current_query
-            new_topic = tpc if tpc is not None else current_topic
-            cat = categorize_prompt(new_topic, new_query)
+            # determinar topics disponibles
+            try:
+                cur = conn.cursor(); cur.execute("SELECT DISTINCT topic FROM queries WHERE enabled = TRUE AND topic IS NOT NULL AND topic <> ''")
+                available_topics = [r[0] for r in cur.fetchall()]
+                cur.close(); conn.close()
+            except Exception:
+                available_topics = []
+            if not available_topics:
+                available_topics = list(_CATEGORY_KEYWORDS.keys())
+            cat = categorize_prompt_with_ai(new_query, available_topics)
             fields.append('topic = %s'); values.append(cat)
             if qtext is not None:
                 fields.append('query = %s'); values.append(qtext)
@@ -1752,9 +1873,30 @@ def categorize_endpoint():
     try:
         payload = request.get_json(silent=True) or {}
         query_text = payload.get('query')
-        topic = payload.get('topic')
-        detail = categorize_prompt_detailed(topic, query_text)
-        return jsonify(detail)
+
+        # Cargar topics disponibles de la BD para proponer sugerencias coherentes
+        conn = get_db_connection(); cur = conn.cursor()
+        cur.execute("SELECT DISTINCT topic FROM queries WHERE enabled = TRUE AND topic IS NOT NULL AND topic <> ''")
+        available_topics = [row[0] for row in cur.fetchall()]
+        cur.close(); conn.close()
+
+        if not query_text or len(query_text.strip()) < 10:
+            return jsonify({"category": None, "confidence": 0, "suggestion": None})
+
+        best_category = categorize_prompt_with_ai(query_text, available_topics)
+        # si IA responde Inclasificable devolvemos eso; si no, normalizamos con similitud
+        if best_category != "Inclasificable" and best_category not in (available_topics or []):
+            mapped, score = _best_topic_by_similarity(best_category, available_topics)
+            if score >= 0.7:
+                best_category = mapped
+        is_new = best_category not in (available_topics or []) and best_category != "Inclasificable"
+
+        return jsonify({
+            "category": best_category,
+            "confidence": 0.9 if not is_new and best_category != "Inclasificable" else 0.7,
+            "suggestion": best_category,
+            "suggestion_is_new": is_new,
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
