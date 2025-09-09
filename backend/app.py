@@ -819,27 +819,9 @@ def get_visibility():
             where.append("m.engine = %s"); params.append(filters['model'])
         if filters.get('source') and filters['source'] != 'all':
             where.append("m.source = %s"); params.append(filters['source'])
-        # Filtro por tema con categorización dinámica por IA (alineado con /api/prompts)
+        # Filtro directo por topic almacenado en las menciones
         if filters.get('topic') and filters['topic'] != 'all':
-            topic_filter = filters['topic']
-            # 1) Obtener catálogo de categorías (taxonomía o por defecto) y todas las queries activas
-            available_topics = get_category_catalog_for_brand(filters.get('brand'))
-            cur.execute("SELECT id, query FROM queries WHERE enabled = TRUE")
-            qrows = cur.fetchall()
-            # 2) Categorizar con IA cada query y quedarnos con las del tema seleccionado
-            dyn_ids = []
-            for qid, qtext in qrows:
-                try:
-                    cat = categorize_prompt_with_ai(qtext, available_topics)
-                except Exception:
-                    # Respaldo a la heurística clásica si fallase la IA
-                    cat = categorize_prompt(None, qtext)
-                if cat == topic_filter:
-                    dyn_ids.append(qid)
-            if not dyn_ids:
-                # No hay queries que caigan en ese tema -> retornar vacío rápido
-                return jsonify({"visibility_score": 0.0, "delta": 0.0, "series": []})
-            where.append("q.id = ANY(%s)"); params.append(dyn_ids)
+            where.append("m.query_topic = %s"); params.append(filters['topic'])
         where_sql = " AND ".join(where)
 
         # Sinónimos/cadenas para detectar la marca en contenido (key_topics o texto)
@@ -933,23 +915,9 @@ def get_visibility_ranking():
             where.append("m.engine = %s"); params.append(filters['model'])
         if filters.get('source') and filters['source'] != 'all':
             where.append("m.source = %s"); params.append(filters['source'])
-        # Filtro por tema con categorización dinámica por IA (alineado con /api/prompts)
+        # Filtro directo por topic (desde queries)
         if filters.get('topic') and filters['topic'] != 'all':
-            topic_filter = filters['topic']
-            available_topics = get_category_catalog_for_brand(filters.get('brand'))
-            cur.execute("SELECT id, query FROM queries WHERE enabled = TRUE")
-            qrows = cur.fetchall()
-            dyn_ids = []
-            for qid, qtext in qrows:
-                try:
-                    cat = categorize_prompt_with_ai(qtext, available_topics)
-                except Exception:
-                    cat = categorize_prompt(None, qtext)
-                if cat == topic_filter:
-                    dyn_ids.append(qid)
-            if not dyn_ids:
-                return jsonify({"ranking": [], "total_responses": 0})
-            where.append("q.id = ANY(%s)"); params.append(dyn_ids)
+            where.append("q.topic = %s"); params.append(filters['topic'])
         where_sql = " AND ".join(where)
 
         # Traer campos necesarios para detectar marcas (con filtros y tema dinámico ya aplicados)
@@ -1099,24 +1067,9 @@ def get_industry_ranking():
             where.append("m.engine = %s"); params.append(filters['model'])
         if filters.get('source') and filters['source'] != 'all':
             where.append("m.source = %s"); params.append(filters['source'])
-        # Filtro por tema con categorización dinámica por IA (alineado con /api/prompts)
+        # Filtro directo por topic en menciones
         if filters.get('topic') and filters['topic'] != 'all':
-            topic_filter = filters['topic']
-            # Obtener catálogo de categorías (taxonomía o por defecto) y todas las queries activas
-            available_topics = get_category_catalog_for_brand(filters.get('brand'))
-            cur.execute("SELECT id, query FROM queries WHERE enabled = TRUE")
-            qrows = cur.fetchall()
-            dyn_ids = []
-            for qid, qtext in qrows:
-                try:
-                    cat = categorize_prompt_with_ai(qtext, available_topics)
-                except Exception:
-                    cat = categorize_prompt(None, qtext)
-                if cat == topic_filter:
-                    dyn_ids.append(qid)
-            if not dyn_ids:
-                return jsonify({"overall_ranking": [], "by_topic": {}})
-            where.append("q.id = ANY(%s)"); params.append(dyn_ids)
+            where.append("m.query_topic = %s"); params.append(filters['topic'])
         where_sql = " AND ".join(where)
 
         # Obtener menciones con campos suficientes para detectar marcas de forma robusta
@@ -1257,7 +1210,7 @@ def get_insights():
         if filters.get('source') and filters['source'] != 'all':
             where_clauses.append("m.source = %s"); params.append(filters['source'])
         if filters.get('topic') and filters['topic'] != 'all':
-            where_clauses.append("q.topic = %s"); params.append(filters['topic'])
+            where_clauses.append("m.query_topic = %s"); params.append(filters['topic'])
         if filters.get('brand'):
             where_clauses.append("COALESCE(q.brand, '') = %s"); params.append(filters['brand'])
 
@@ -1296,7 +1249,7 @@ def get_sentiment():
         if filters.get('source') and filters['source'] != 'all':
             where_clauses.append("m.source = %s"); params.append(filters['source'])
         if filters.get('topic') and filters['topic'] != 'all':
-            where_clauses.append("q.topic = %s"); params.append(filters['topic'])
+            where_clauses.append("m.query_topic = %s"); params.append(filters['topic'])
         if filters.get('brand'):
             where_clauses.append("COALESCE(q.brand, '') = %s"); params.append(filters['brand'])
 
@@ -1414,15 +1367,8 @@ def get_topics_cloud():
         rows = cur.fetchall()
         topics = [{"topic": r[0], "count": int(r[1] or 0), "avg_sentiment": float(r[2] or 0.0)} for r in rows]
 
-        # Intento opcional de agrupación con IA para uso en Sentiment tab
-        groups = []
-        try:
-            groups = group_topics_with_ai(topics)
-        except Exception as _:
-            groups = []
-
         cur.close(); conn.close()
-        return jsonify({"topics": topics, "groups": groups})
+        return jsonify({"topics": topics})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1459,27 +1405,22 @@ def get_dashboard_kpis():
 def get_topics():
     """Lista de temas (topics) de las queries configuradas."""
     try:
-        # Si hay taxonomía por brand, priorizar esas categorías
-        brand = request.args.get('brand') or os.getenv('DEFAULT_BRAND', 'The Core School')
-        ensure_taxonomy_table()
+        # Siempre derivar los topics a partir de lo que realmente existe en BD (fuente de verdad)
+        # para garantizar que los filtros tengan resultados incluso si hay una taxonomía
+        # diferente (por ejemplo etiquetas en español).
         conn = get_db_connection(); cur = conn.cursor()
-        cur.execute("SELECT category FROM topic_taxonomy WHERE brand = %s ORDER BY category", (brand,))
-        rows = cur.fetchall()
-        if rows:
-            topics = [r[0] for r in rows]
-            cur.close(); conn.close()
-            return jsonify({"topics": topics})
-
-        # Fallback: deducir de queries
-        cur.execute("""
+        cur.execute(
+            """
             SELECT topic
             FROM queries
             WHERE enabled = TRUE AND topic IS NOT NULL AND topic <> ''
-        """)
+            """
+        )
         raw_topics = [row[0] for row in cur.fetchall()]
         cur.close(); conn.close()
+
+        # Canonicalizar para unir variantes (ingles/español/sinónimos) a una sola clave
         canon_set = { canonicalize_topic(t) for t in raw_topics }
-        # Ordenar por nombre traducible pero mantener claves canónicas como fuente de verdad
         topics = sorted(list(canon_set))
         return jsonify({"topics": topics})
     except Exception as e:
@@ -1535,23 +1476,40 @@ def get_prompts_grouped():
         available_topics = get_category_catalog_for_brand(filters.get('brand'))
 
         # Obtenemos los prompts (queries) activos y sus métricas
+        # Aplicamos filtro por modelo en el LEFT JOIN para no convertirlo en INNER JOIN
+        engine_on = " AND m.engine = %s" if (filters.get('model') and filters['model'] != 'all') else ""
+        params_exec = [filters['start_date'], filters['end_date']]
+        if engine_on:
+            params_exec.append(filters['model'])
+        topic_filter_sql = ""
+        if filters.get('topic') and filters['topic'] != 'all':
+            topic_filter_sql = " AND q.topic = %s"
+            params_exec.append(filters['topic'])
         cur.execute(
-            """
-            SELECT q.id, q.query,
+            f"""
+            SELECT q.id, q.query, q.topic,
                    COUNT(m.id) AS executions,
                    COUNT(DISTINCT DATE(m.created_at)) AS active_days
             FROM queries q
             LEFT JOIN mentions m ON m.query_id = q.id
-                 AND m.created_at >= %s AND m.created_at < %s
-            WHERE q.enabled = TRUE
-            GROUP BY q.id, q.query
+                 AND m.created_at >= %s AND m.created_at < %s{engine_on}
+            WHERE q.enabled = TRUE{topic_filter_sql}
+            GROUP BY q.id, q.query, q.topic
             """,
-            (filters['start_date'], filters['end_date'])
+            tuple(params_exec)
         )
 
         rows = cur.fetchall()
 
         # Cargar menciones por prompt para calcular métricas individuales de marca
+        where_engine = " AND m.engine = %s" if (filters.get('model') and filters['model'] != 'all') else ""
+        params_mentions = [filters['start_date'], filters['end_date']]
+        if where_engine:
+            params_mentions.append(filters['model'])
+        topic_filter_sql2 = ""
+        if filters.get('topic') and filters['topic'] != 'all':
+            topic_filter_sql2 = " AND q.topic = %s"
+            params_mentions.append(filters['topic'])
         cur.execute(
             f"""
             SELECT m.query_id, m.key_topics,
@@ -1561,10 +1519,10 @@ def get_prompts_grouped():
             FROM mentions m
             JOIN queries q ON m.query_id = q.id
             LEFT JOIN insights i ON i.id = m.generated_insight_id
-            WHERE m.created_at >= %s AND m.created_at < %s
+            WHERE m.created_at >= %s AND m.created_at < %s{where_engine}{topic_filter_sql2}
               AND q.enabled = TRUE
             """,
-            (filters['start_date'], filters['end_date'])
+            tuple(params_mentions)
         )
         mention_rows = cur.fetchall()
         cur.close(); conn.close()
@@ -1640,11 +1598,9 @@ def get_prompts_grouped():
         total_days = max((filters['end_date'] - filters['start_date']).days, 1)
 
         prompt_items = []
-        for pid, query, executions, active_days in rows:
-            # --- ¡AQUÍ ESTÁ EL CAMBIO CLAVE! ---
-            # Usamos la nueva función de IA para obtener la categoría
-            category = categorize_prompt_with_ai(query, available_topics)
-            # ------------------------------------
+        for pid, query, qtopic, executions, active_days in rows:
+            # Usar el topic almacenado en queries directamente (sin IA)
+            category = canonicalize_topic(qtopic or 'Uncategorized')
 
             visibility_score = round((active_days / total_days) * 100, 1)
 
