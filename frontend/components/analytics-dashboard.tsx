@@ -446,11 +446,6 @@ export function AnalyticsDashboard() {
         setSovByTopic((sovResponse as ShareOfVoiceResponse).by_topic || {});
         setMentions(mentionsResponse.mentions);
         setPromptsGrouped(promptsRes.topics);
-        try {
-          const names = (promptsRes.topics || []).map((g: any) => g.topic).filter(Boolean)
-          const unique = Array.from(new Set(names))
-          setTopicOptions(["all", ...unique])
-        } catch {}
         setSentimentApi(sentimentRes);
         setTopicsCloud(topicsCloudRes.topics);
         setTopicGroups((topicsCloudRes as any).groups || []);
@@ -464,14 +459,17 @@ export function AnalyticsDashboard() {
     loadDashboardData()
   }, [dateRange, selectedModel, selectedTopic, primaryBrandName]);
 
-  // cargar opciones de filtros (model; los topics ahora se derivan de /api/prompts)
+  // cargar opciones de filtros (models y topics independientes del filtro activo)
   useEffect(() => {
     const loadFiltersLists = async () => {
       try {
-        const [modelsRes] = await Promise.all([
+        const [modelsRes, topicsRes] = await Promise.all([
           getModels(),
+          getTopics(),
         ])
         setModelOptions(["all", ...modelsRes.models])
+        // Los topics deben ser globales para poder cambiar entre ellos sin que la lista se bloquee
+        setTopicOptions(["all", ...(topicsRes.topics || [])])
       } catch (e) {
         console.error("No se pudieron cargar los listados de filtros", e)
       }
@@ -501,21 +499,25 @@ export function AnalyticsDashboard() {
     load()
   }, [activeSidebarSection, dateRange, selectedModel, selectedTopic])
 
-  type StrategyItem = { id: string; text: string; impact: "Alto" | "Medio" | "Bajo"; createdAt: string | null }
+  type StrategyItem = { id: string; text: string; impact: "Alto" | "Medio" | "Bajo"; createdAt: string | null; themes?: string[] }
   const aggregatedInsights = useMemo(() => {
     const data: { opportunities: StrategyItem[]; risks: StrategyItem[]; trends: StrategyItem[]; quotes: string[]; ctas: string[] } = { opportunities: [], risks: [], trends: [], quotes: [], ctas: [] }
-    const impactFrom = (rowSent?: number | null): "Alto" | "Medio" | "Bajo" => {
-      const s = typeof rowSent === 'number' ? Math.abs(rowSent) : 0.2
-      if (s >= 0.45) return "Alto"
-      if (s >= 0.25) return "Medio"
+    // Impacto mejorado: combina magnitud de sentimiento y frecuencia de temas del insight
+    const impactFrom = (row: any): "Alto" | "Medio" | "Bajo" => {
+      const s = typeof row?.avg_sentiment === 'number' ? Math.min(1, Math.abs(row.avg_sentiment)) : 0.2
+      const tf = row?.topic_frequency && typeof row.topic_frequency === 'object' ? Math.min(1, (Math.max(0, ...Object.values(row.topic_frequency as any)) as number) / 5) : 0
+      const score = 0.5 * s + 0.5 * tf
+      if (score >= 0.6) return "Alto"
+      if (score >= 0.35) return "Medio"
       return "Bajo"
     }
     insightsRows.forEach((row) => {
       const p = row.payload || ({} as any)
-      const imp = impactFrom(p.avg_sentiment as number | undefined)
-      if (Array.isArray(p.opportunities)) p.opportunities.forEach((t: string, idx: number) => data.opportunities.push({ id: `opp-${row.id}-${idx}-${t}`, text: t, impact: imp, createdAt: row.created_at }))
-      if (Array.isArray(p.risks)) p.risks.forEach((t: string, idx: number) => data.risks.push({ id: `risk-${row.id}-${idx}-${t}`, text: t, impact: imp, createdAt: row.created_at }))
-      if (Array.isArray(p.trends)) p.trends.forEach((t: string, idx: number) => data.trends.push({ id: `trend-${row.id}-${idx}-${t}`, text: t, impact: imp, createdAt: row.created_at }))
+      const imp = impactFrom(p)
+      const themes = Array.isArray(p.top_themes) ? (p.top_themes as string[]) : []
+      if (Array.isArray(p.opportunities)) p.opportunities.forEach((t: string, idx: number) => data.opportunities.push({ id: `opp-${row.id}-${idx}-${t}`, text: t, impact: imp, createdAt: row.created_at, themes }))
+      if (Array.isArray(p.risks)) p.risks.forEach((t: string, idx: number) => data.risks.push({ id: `risk-${row.id}-${idx}-${t}`, text: t, impact: imp, createdAt: row.created_at, themes }))
+      if (Array.isArray(p.trends)) p.trends.forEach((t: string, idx: number) => data.trends.push({ id: `trend-${row.id}-${idx}-${t}`, text: t, impact: imp, createdAt: row.created_at, themes }))
       if (Array.isArray(p.quotes)) data.quotes.push(...p.quotes)
       if (Array.isArray(p.calls_to_action)) data.ctas.push(...p.calls_to_action)
     })
@@ -535,6 +537,26 @@ export function AnalyticsDashboard() {
       ctas: term ? data.ctas.filter(t => t.toLowerCase().includes(term)) : data.ctas,
     }
   }, [insightsRows, strategySearch, strategySort])
+
+  // Agregados por tema y métricas para KPIs y matriz
+  const themeAggregates = useMemo(() => {
+    const themeMap: Record<string, { count: number; impactSum: number }> = {}
+    const allItems: StrategyItem[] = [...aggregatedInsights.opportunities, ...aggregatedInsights.risks, ...aggregatedInsights.trends]
+    const toNum = (imp: "Alto" | "Medio" | "Bajo") => imp === 'Alto' ? 1 : imp === 'Medio' ? 0.5 : 0.2
+    allItems.forEach((it) => {
+      const themes = it.themes && it.themes.length ? it.themes : ['Otros']
+      themes.forEach((th) => {
+        if (!themeMap[th]) themeMap[th] = { count: 0, impactSum: 0 }
+        themeMap[th].count += 1
+        themeMap[th].impactSum += toNum(it.impact)
+      })
+    })
+    const list = Object.entries(themeMap).map(([theme, v]) => ({ theme, freq: v.count, impactAvg: v.impactSum / Math.max(v.count, 1) }))
+    const maxFreq = Math.max(1, ...list.map(l => l.freq))
+    return { list, maxFreq }
+  }, [aggregatedInsights])
+
+  const [matrixSelectedTheme, setMatrixSelectedTheme] = useState<string | null>(null)
 
   // Sugerir CTAs cuando no existan en los insights: derivar de oportunidades/ riesgos/ tendencias
   const suggestedCtas: string[] = useMemo(() => {
@@ -559,10 +581,10 @@ export function AnalyticsDashboard() {
       const filters = { model: selectedModel, source: selectedSource, topic: selectedTopic }
       const promptsRes = await getPrompts(dateRange!, filters)
       setPromptsGrouped(promptsRes.topics)
+      // Refrescar catálogo completo de topics desde la API global
       try {
-        const names = (promptsRes.topics || []).map((g: any) => g.topic).filter(Boolean)
-        const unique = Array.from(new Set(names))
-        setTopicOptions(["all", ...unique])
+        const topicsRes = await getTopics()
+        setTopicOptions(["all", ...(topicsRes.topics || [])])
       } catch {}
     } catch (e) {
       console.error("No se pudieron refrescar prompts/topics", e)
@@ -1270,41 +1292,7 @@ export function AnalyticsDashboard() {
                       </div>
                     </div>
 
-                    {/* Share of Voice por Tema */}
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-lg font-semibold">Share of Voice por Tema</h3>
-                        <Select value={selectedSovTopic} onValueChange={(v) => { setSelectedSovTopic(v); setSelectedTopic(v === 'All' ? 'all' : v); }}>
-                          <SelectTrigger className="w-[240px]"><SelectValue placeholder="Tema" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="All">Todos</SelectItem>
-                            {sovTopics.map(t => (<SelectItem key={t} value={t}>{translateTopicToSpanish(t)}</SelectItem>))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <Card className="shadow-sm bg-white">
-                        <CardContent>
-                          {selectedSovTopic === 'All' ? (
-                            <div className="text-sm text-muted-foreground">Selecciona un tema para ver su ranking específico.</div>
-                          ) : (
-                            <div className="space-y-2">
-                              {(sovByTopic[selectedSovTopic] || []).map((item) => (
-                                <div key={`${selectedSovTopic}-${item.rank}`} className="flex items-center justify-between p-2 rounded border">
-                                  <div className="flex items-center gap-3">
-                                    <span className="text-sm text-muted-foreground">{item.rank}.</span>
-                                    <div className={`w-3 h-3 rounded-full ${item.color}`}></div>
-                                    <span className="text-sm font-medium">{item.name}</span>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-sm font-medium">{item.score}</span>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                    </div>
+                    
                   </>
                 )}
                 {activeTab === 'Sentiment' && (
@@ -1583,6 +1571,17 @@ export function AnalyticsDashboard() {
                           <SelectContent>
                             {topicOptions.map((t) => (
                               <SelectItem key={t} value={t}>{t === 'all' ? 'Todos los topics' : translateTopicToSpanish(t)}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {/* Filtro de modelo (entre topics y añadir) */}
+                        <Select value={selectedModel} onValueChange={setSelectedModel}>
+                          <SelectTrigger className="w-[200px]">
+                            <SelectValue placeholder="Todos los modelos" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {modelOptions.map((m) => (
+                              <SelectItem key={m} value={m}>{m === 'all' ? 'Todos los modelos' : m}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>

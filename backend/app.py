@@ -493,9 +493,9 @@ def categorize_prompt(topic: str | None, query_text: str | None) -> str:
     """Asigna categoría usando la versión detallada (reglas + scoring)."""
     try:
         detailed = categorize_prompt_detailed(topic, query_text)
-        return detailed.get("category") or canonicalize_topic(topic or '')
+        return detailed.get("category") or (topic or '')
     except Exception:
-        return canonicalize_topic(topic or '')
+        return (topic or '')
 
 
 def categorize_prompt_detailed(topic: str | None, query_text: str | None) -> dict:
@@ -600,7 +600,7 @@ def categorize_prompt_detailed(topic: str | None, query_text: str | None) -> dic
         scores.append((cat, score))
 
     scores.sort(key=lambda x: x[1], reverse=True)
-    best_cat, best_score = (scores[0] if scores else (canonicalize_topic(topic or ''), 0.0))
+    best_cat, best_score = (scores[0] if scores else ((topic or ''), 0.0))
     second_score = scores[1][1] if len(scores) > 1 else 0.0
     confidence = 0.0
     if best_score > 0:
@@ -610,7 +610,7 @@ def categorize_prompt_detailed(topic: str | None, query_text: str | None) -> dic
     suggestion = None
     suggestion_is_new = False
     # similitud a categorías existentes a partir del texto del prompt
-    base_text = canonicalize_topic(query_text or topic or '')
+    base_text = (query_text or topic or '')
     known = list(categories_source.keys())
     closest_existing = None
     closest_score = 0.0
@@ -629,7 +629,7 @@ def categorize_prompt_detailed(topic: str | None, query_text: str | None) -> dic
                 break
         if not sug:
             # fallback: usa canónico del topic/consulta
-            sug = canonicalize_topic(topic or query_text or 'Uncategorized')
+            sug = (topic or query_text or 'Uncategorized')
         # si hay un existente muy similar, preferirlo
         if is_close_match:
             suggestion = closest_existing
@@ -821,7 +821,7 @@ def get_visibility():
             where.append("m.source = %s"); params.append(filters['source'])
         # Filtro directo por topic almacenado en las menciones
         if filters.get('topic') and filters['topic'] != 'all':
-            where.append("m.query_topic = %s"); params.append(filters['topic'])
+            where.append("q.topic = %s"); params.append(filters['topic'])
         where_sql = " AND ".join(where)
 
         # Sinónimos/cadenas para detectar la marca en contenido (key_topics o texto)
@@ -1069,7 +1069,7 @@ def get_industry_ranking():
             where.append("m.source = %s"); params.append(filters['source'])
         # Filtro directo por topic en menciones
         if filters.get('topic') and filters['topic'] != 'all':
-            where.append("m.query_topic = %s"); params.append(filters['topic'])
+            where.append("q.topic = %s"); params.append(filters['topic'])
         where_sql = " AND ".join(where)
 
         # Obtener menciones con campos suficientes para detectar marcas de forma robusta
@@ -1210,7 +1210,7 @@ def get_insights():
         if filters.get('source') and filters['source'] != 'all':
             where_clauses.append("m.source = %s"); params.append(filters['source'])
         if filters.get('topic') and filters['topic'] != 'all':
-            where_clauses.append("m.query_topic = %s"); params.append(filters['topic'])
+            where_clauses.append("q.topic = %s"); params.append(filters['topic'])
         if filters.get('brand'):
             where_clauses.append("COALESCE(q.brand, '') = %s"); params.append(filters['brand'])
 
@@ -1249,7 +1249,7 @@ def get_sentiment():
         if filters.get('source') and filters['source'] != 'all':
             where_clauses.append("m.source = %s"); params.append(filters['source'])
         if filters.get('topic') and filters['topic'] != 'all':
-            where_clauses.append("m.query_topic = %s"); params.append(filters['topic'])
+            where_clauses.append("q.topic = %s"); params.append(filters['topic'])
         if filters.get('brand'):
             where_clauses.append("COALESCE(q.brand, '') = %s"); params.append(filters['brand'])
 
@@ -1419,9 +1419,8 @@ def get_topics():
         raw_topics = [row[0] for row in cur.fetchall()]
         cur.close(); conn.close()
 
-        # Canonicalizar para unir variantes (ingles/español/sinónimos) a una sola clave
-        canon_set = { canonicalize_topic(t) for t in raw_topics }
-        topics = sorted(list(canon_set))
+        # Devolver directamente los topics únicos tal y como están en BD
+        topics = sorted(list({t for t in raw_topics}))
         return jsonify({"topics": topics})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1472,8 +1471,7 @@ def get_prompts_grouped():
         conn = get_db_connection()
         cur = conn.cursor()
 
-        # Catálogo de categorías (taxonomía por brand o catálogo por defecto)
-        available_topics = get_category_catalog_for_brand(filters.get('brand'))
+        # Fuente de verdad de topics: lo que está en la tabla queries
 
         # Obtenemos los prompts (queries) activos y sus métricas
         # Aplicamos filtro por modelo en el LEFT JOIN para no convertirlo en INNER JOIN
@@ -1599,8 +1597,8 @@ def get_prompts_grouped():
 
         prompt_items = []
         for pid, query, qtopic, executions, active_days in rows:
-            # Usar el topic almacenado en queries directamente (sin IA)
-            category = canonicalize_topic(qtopic or 'Uncategorized')
+            # Usar el topic almacenado en queries directamente (fuente de verdad)
+            category = (qtopic or 'Uncategorized')
 
             visibility_score = round((active_days / total_days) * 100, 1)
 
