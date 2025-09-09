@@ -920,18 +920,20 @@ def get_visibility_ranking():
             where.append("q.topic = %s"); params.append(filters['topic'])
         where_sql = " AND ".join(where)
 
-        # Traer campos necesarios para detectar marcas (con filtros y tema dinámico ya aplicados)
-        cur.execute(f"""
-            SELECT m.id, m.key_topics, LOWER(COALESCE(m.response,'')) AS resp, LOWER(COALESCE(m.source_title,'')) AS title,
-                   q.topic, i.payload
-            FROM mentions m
-            JOIN queries q ON m.query_id = q.id
-            LEFT JOIN insights i ON i.id = m.generated_insight_id
-            WHERE {where_sql}
-        """, tuple(params))
-        rows = cur.fetchall()
+        # Helper para ejecutar la consulta sobre un rango dado y devolver filas
+        def fetch_rows(p):
+            cur.execute(f"""
+                SELECT m.id, m.key_topics, LOWER(COALESCE(m.response,'')) AS resp, LOWER(COALESCE(m.source_title,'')) AS title,
+                       q.topic, i.payload
+                FROM mentions m
+                JOIN queries q ON m.query_id = q.id
+                LEFT JOIN insights i ON i.id = m.generated_insight_id
+                WHERE {where_sql}
+            """, tuple(p))
+            return cur.fetchall()
 
-        # Denominador: total de respuestas del CONJUNTO FILTRADO (tema incluido)
+        # Traer filas del período actual
+        rows = fetch_rows(params)
         total_responses = len(rows)
 
         # Diccionario de marcas y sinónimos (genérico para cualquier cliente)
@@ -989,57 +991,80 @@ def get_visibility_ranking():
                 pass
             return out
 
-        mentions = []
-        for m_id, key_topics, resp_text, title_text, _topic, payload in rows:
-            topics_norm = normalize_list(key_topics)
-            payload_brands = []
-            try:
-                if isinstance(payload, dict):
-                    payload_brands = normalize_list(payload.get('brands') or [])
-            except Exception:
+        def compute_counts(rows_in):
+            mentions_local = []
+            for m_id, key_topics, resp_text, title_text, _topic, payload in rows_in:
+                topics_norm = normalize_list(key_topics)
                 payload_brands = []
-            combined_text = f"{resp_text or ''} {title_text or ''}"
-            mentions.append({
-                "id": m_id,
-                "topics": topics_norm,
-                "pbrands": payload_brands,
-                "text": str(combined_text).lower(),
-            })
+                try:
+                    if isinstance(payload, dict):
+                        payload_brands = normalize_list(payload.get('brands') or [])
+                except Exception:
+                    payload_brands = []
+                combined_text = f"{resp_text or ''} {title_text or ''}"
+                mentions_local.append({
+                    "id": m_id,
+                    "topics": topics_norm,
+                    "pbrands": payload_brands,
+                    "text": str(combined_text).lower(),
+                })
 
-        # Contar, para cada competidor, en cuántas respuestas aparece
-        counts = {brand: 0 for brand in BRAND_SYNONYMS.keys()}
-        for m in mentions:
-            for brand, alts in BRAND_SYNONYMS.items():
-                found = False
-                # key_topics (igualdad o substring)
-                for a in alts:
-                    if any(a == t or a in t for t in m["topics"]):
-                        found = True; break
-                # payload.brands
-                if not found:
+            counts_local = {brand: 0 for brand in BRAND_SYNONYMS.keys()}
+            for m in mentions_local:
+                for brand, alts in BRAND_SYNONYMS.items():
+                    found = False
                     for a in alts:
-                        if any(a == t or a in t for t in m["pbrands"]):
+                        if any(a == t or a in t for t in m["topics"]):
                             found = True; break
-                # texto/título
-                if not found:
-                    for a in alts:
-                        if a in m["text"]:
-                            found = True; break
-                if found:
-                    counts[brand] += 1
+                    if not found:
+                        for a in alts:
+                            if any(a == t or a in t for t in m["pbrands"]):
+                                found = True; break
+                    if not found:
+                        for a in alts:
+                            if a in m["text"]:
+                                found = True; break
+                    if found:
+                        counts_local[brand] += 1
+            return counts_local
+
+        counts = compute_counts(rows)
 
         colors = ["bg-blue-500", "bg-red-500", "bg-blue-600", "bg-yellow-500", "bg-gray-800"]
+        # Calcular comparativa con el periodo anterior
+        prev_params = list(params)
+        curr_start = params[0]
+        curr_end = params[1]
+        if isinstance(curr_start, datetime) and isinstance(curr_end, datetime):
+            delta_range = curr_end - curr_start
+            prev_start = curr_start - delta_range
+            prev_end = curr_start
+        else:
+            # Fallback conservador: un rango del mismo tamaño hacia atrás
+            from datetime import timedelta
+            prev_end = params[0]
+            prev_start = prev_end - (params[1] - params[0] if isinstance(params[1], type(params[0])) else timedelta(days=30))
+        prev_params[0] = prev_start
+        prev_params[1] = prev_end
+
+        rows_prev = fetch_rows(prev_params)
+        total_prev = len(rows_prev)
+        counts_prev = compute_counts(rows_prev)
+
         ranking = []
-        denom = max(total_responses, 1)  # SIEMPRE total global de respuestas
+        denom = max(total_responses, 1)
+        prev_denom = max(total_prev, 1)
         pairs = sorted(counts.items(), key=lambda x: x[1], reverse=True)
         for i, (b, count) in enumerate(pairs):
-            pct = (count / denom) * 100.0
+            pct_curr = (count / denom) * 100.0
+            prev_pct = (counts_prev.get(b, 0) / prev_denom) * 100.0 if prev_denom else 0.0
+            diff = round(pct_curr - prev_pct, 1)
             ranking.append({
                 "rank": i + 1,
                 "name": b,
-                "score": f"{pct:.1f}%",
-                "change": "+0.0%",
-                "positive": True,
+                "score": f"{pct_curr:.1f}%",
+                "change": f"{diff:+.1f}%",
+                "positive": diff >= 0,
                 "color": colors[i % len(colors)],
                 "selected": False,
             })

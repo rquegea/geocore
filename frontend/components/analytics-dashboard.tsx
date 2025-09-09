@@ -1053,32 +1053,16 @@ export function AnalyticsDashboard() {
                     {visibility ? (
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
                       <div className="lg:col-span-2 h-full">
-                        <Card className="shadow-sm bg-white h-full">
+                        <Card className="shadow-sm bg-white h-full min-h-[420px]">
                           <CardHeader className="flex flex-row items-center justify-between">
                             <div>
                               <CardTitle className="text-lg font-semibold">Puntuación de visibilidad</CardTitle>
                               <p className="text-sm text-muted-foreground"> Frecuencia con la que The Core School aparece en respuestas generadas por IA </p>
                             </div>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="outline" size="sm"> Configurar gráfico <ChevronDown className="w-4 h-4 ml-2" /> </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-56">
-                                <DropdownMenuItem onClick={() => setVisibilityChartType((t) => (t === "line" ? "area" : "line"))}>
-                                  Tipo: {visibilityChartType === "line" ? "Línea" : "Área"} (alternar)
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => setVisibilityBrush((v) => !v)}>
-                                  {visibilityBrush ? "Quitar zoom (Brush)" : "Activar zoom (Brush)"}
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem onClick={() => downloadCSV("visibilidad.csv", (visibility?.series || []).map((d) => ({ Fecha: (d as any).date, Valor: (d as any).value })))}>
-                                  Exportar CSV
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
+                            {/* Controles de configuración removidos por solicitud */}
                           </CardHeader>
-                          <CardContent>
-                            <div className="mb-6">
+                          <CardContent className="flex flex-col h-full">
+                            <div className="mb-4">
                               <div className="flex items-baseline gap-2">
                                 <span className="text-3xl font-bold">{visibility.visibility_score.toFixed(1)}%</span>
                                 <span className={visibility.delta >= 0 ? "text-green-500 flex items-center gap-1" : "text-red-500 flex items-center gap-1"}>
@@ -1087,7 +1071,7 @@ export function AnalyticsDashboard() {
                                 </span>
                               </div>
                             </div>
-                            <div className="h-64">
+                            <div className="flex-1 flex items-center justify-center">
                               <ResponsiveContainer width="100%" height="100%">
                                 {visibilityChartType === "line" ? (
                                   <LineChart data={visibility.series}>
@@ -1101,7 +1085,7 @@ export function AnalyticsDashboard() {
                                       tickFormatter={(v: number) => `${v}%`}
                                     />
                                     <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }} formatter={(v: number) => [`${Number(v).toFixed(1)}%`, 'Índice de Visibilidad']} />
-                                    <Line type="monotone" dataKey="value" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={{ fill: "hsl(var(--chart-2))", strokeWidth: 2, r: 4 }} />
+                                    <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={2} dot={{ fill: "#000", strokeWidth: 2, r: 4 }} />
                                     {visibilityBrush && <Brush dataKey="date" height={20} />}
                                   </LineChart>
                                 ) : (
@@ -1116,28 +1100,18 @@ export function AnalyticsDashboard() {
                                       tickFormatter={(v: number) => `${v}%`}
                                     />
                                     <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }} formatter={(v: number) => [`${Number(v).toFixed(1)}%`, 'Índice de Visibilidad']} />
-                                    <Area type="monotone" dataKey="value" stroke="hsl(var(--chart-2))" fill="hsl(var(--chart-2))" fillOpacity={0.2} />
+                                    <Area type="monotone" dataKey="value" stroke="#000" fill="hsl(var(--chart-2))" fillOpacity={0.2} />
                                     {visibilityBrush && <Brush dataKey="date" height={20} />}
                                   </AreaChart>
                                 )}
                               </ResponsiveContainer>
                             </div>
-                            <div className="flex items-center gap-4 mt-4">
-                              <div className="flex items-center gap-2">
-                                <div className="w-3 h-3 rounded-full bg-chart-2"></div>
-                                <span className="text-sm">Periodo actual</span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <div className="w-3 h-3 rounded-full bg-muted"></div>
-                                <span className="text-sm">Periodo anterior</span>
-                              </div>
-                              <Button variant="link" className="text-sm p-0 h-auto"> Comparar competidores </Button>
-                            </div>
+                            {/* Leyendas y enlaces removidos por solicitud */}
                           </CardContent>
                         </Card>
                       </div>
                       <div className="h-full">
-                        <Card className="shadow-sm bg-white h-full">
+                        <Card className="shadow-sm bg-white h-full min-h-[420px]">
                           <CardHeader>
                             <CardTitle className="text-lg font-semibold">Ranking de visibilidad</CardTitle>
                           </CardHeader>
@@ -1205,33 +1179,17 @@ export function AnalyticsDashboard() {
                     {/* Share of Voice Section - conectado a /api/industry/ranking */}
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
                       <div className="lg:col-span-2 h-full">
-                        <Card className="shadow-sm bg-white h-full">
+                        <Card className="shadow-sm bg-white h-full min-h-[420px]">
                           <CardHeader className="flex flex-row items-center justify-between">
                             <div>
                               <CardTitle className="text-lg font-semibold">Share of Voice</CardTitle>
                               <p className="text-sm text-muted-foreground"> Menciones de {primaryBrandName} en respuestas generadas por IA en relación con competidores </p>
                             </div>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="outline" size="sm"> Configurar gráfico <ChevronDown className="w-4 h-4 ml-2" /> </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-56">
-                                <DropdownMenuItem onClick={() => setSovDonut((v) => !v)}>
-                                  Tipo: {sovDonut ? "Donut" : "Pie"} (alternar)
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => setSovShowLabels((v) => !v)}>
-                                  {sovShowLabels ? "Ocultar etiquetas" : "Mostrar etiquetas"}
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem onClick={() => downloadCSV("share_of_voice.csv", pieData.map((d) => ({ Marca: d.name, Valor: d.value })))}>
-                                  Exportar CSV
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
+                            {/* Controles de configuración removidos por solicitud */}
                           </CardHeader>
-                          <CardContent>
+                          <CardContent className="flex flex-col h-full">
                             {/* Pie chart comparativo de share of voice por marca */}
-                            <div className="h-72">
+                            <div className="flex-1 flex items-center justify-center">
                               <ResponsiveContainer width="100%" height="100%">
                                 <PieChart>
                                   <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} innerRadius={sovDonut ? 50 : 0} paddingAngle={2} label={sovShowLabels}>
@@ -1310,23 +1268,7 @@ export function AnalyticsDashboard() {
                               <CardTitle className="text-lg font-semibold">Análisis de sentimiento</CardTitle>
                               <p className="text-sm text-muted-foreground"> Sentimiento positivo a lo largo del tiempo </p>
                             </div>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="outline" size="sm"> Configurar gráfico <ChevronDown className="w-4 h-4 ml-2" /> </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-56">
-                                <DropdownMenuItem onClick={() => setSentimentChartType((t) => (t === "line" ? "area" : "line"))}>
-                                  Tipo: {sentimentChartType === "line" ? "Línea" : "Área"} (alternar)
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => setSentimentBrush((v) => !v)}>
-                                  {sentimentBrush ? "Quitar zoom (Brush)" : "Activar zoom (Brush)"}
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem onClick={() => downloadCSV("sentimiento.csv", [...(sentimentComputed.timeseries || [])].map((d) => ({ Fecha: d.date, Valor: d.value })))}>
-                                  Exportar CSV
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
+                            {/* Controles de configuración removidos por solicitud */}
                           </CardHeader>
                           <CardContent>
                             <div className="mb-6">
@@ -1339,8 +1281,8 @@ export function AnalyticsDashboard() {
                                 </span>
                               </div>
                             </div>
-                            <div className="h-64">
-                              <ResponsiveContainer width="100%" height="100%">
+                            <div className="h-64 flex items-center justify-center">
+                              <ResponsiveContainer width="95%" height="100%">
                                 {sentimentChartType === "line" ? (
                                   <LineChart data={[...(sentimentComputed.timeseries || [])]}>
                                     <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
@@ -1791,7 +1733,7 @@ export function AnalyticsDashboard() {
                                   <XAxis dataKey="date" stroke="#888888" fontSize={12} />
                                   <YAxis stroke="#888888" fontSize={12} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
                                   <Tooltip formatter={(value) => [`${value}%`, "Visibilidad"]} />
-                                  <Line type="monotone" dataKey="value" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
+                                  <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={2} dot={{ r: 3, fill: "#000" }} />
                                 </LineChart>
                               </ResponsiveContainer>
                             </CardContent>
@@ -1804,7 +1746,7 @@ export function AnalyticsDashboard() {
                                   <XAxis dataKey="date" stroke="#888888" fontSize={12} />
                                   <YAxis stroke="#888888" fontSize={12} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
                                   <Tooltip formatter={(value) => [`${value}%`, "Share of Voice"]} />
-                                  <Line type="monotone" dataKey="value" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={false} />
+                                  <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={2} dot={{ r: 3, fill: "#000" }} />
                                 </LineChart>
                               </ResponsiveContainer>
                             </CardContent>
