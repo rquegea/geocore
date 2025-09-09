@@ -1051,9 +1051,9 @@ export function AnalyticsDashboard() {
                     
                     {/* Contenido de visibilidad condicionado a que haya datos */}
                     {visibility ? (
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                      <div className="lg:col-span-2">
-                        <Card className="shadow-sm bg-white">
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
+                      <div className="lg:col-span-2 h-full">
+                        <Card className="shadow-sm bg-white h-full">
                           <CardHeader className="flex flex-row items-center justify-between">
                             <div>
                               <CardTitle className="text-lg font-semibold">Puntuación de visibilidad</CardTitle>
@@ -1136,8 +1136,8 @@ export function AnalyticsDashboard() {
                           </CardContent>
                         </Card>
                       </div>
-                      <div>
-                        <Card className="shadow-sm bg-white">
+                      <div className="h-full">
+                        <Card className="shadow-sm bg-white h-full">
                           <CardHeader>
                             <CardTitle className="text-lg font-semibold">Ranking de visibilidad</CardTitle>
                           </CardHeader>
@@ -1203,9 +1203,9 @@ export function AnalyticsDashboard() {
                     )}
 
                     {/* Share of Voice Section - conectado a /api/industry/ranking */}
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                      <div className="lg:col-span-2">
-                        <Card className="shadow-sm bg-white">
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
+                      <div className="lg:col-span-2 h-full">
+                        <Card className="shadow-sm bg-white h-full">
                           <CardHeader className="flex flex-row items-center justify-between">
                             <div>
                               <CardTitle className="text-lg font-semibold">Share of Voice</CardTitle>
@@ -1247,8 +1247,8 @@ export function AnalyticsDashboard() {
                         </Card>
                       </div>
 
-                      <div>
-                        <Card className="shadow-sm bg-white">
+                      <div className="h-full">
+                        <Card className="shadow-sm bg-white h-full">
                           <CardHeader>
                             <CardTitle className="text-lg font-semibold">Ranking de Share of Voice</CardTitle>
                           </CardHeader>
