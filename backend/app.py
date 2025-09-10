@@ -510,10 +510,7 @@ def categorize_prompt_detailed(topic: str | None, query_text: str | None) -> dic
         conn = get_db_connection(); cur = conn.cursor()
         cur.execute("SELECT category, COALESCE(keywords,'[]'::jsonb) FROM topic_taxonomy WHERE brand = %s", (brand,))
         rows = cur.fetchall(); cur.close(); conn.close()
-        categories_source = { r[0]: list(r[1] or []) } if rows else _CATEGORY_KEYWORDS
-        if rows:
-            # Si solo hay una fila, ampliar con base por defecto
-            categories_source = { r[0]: list(r[1] or []) for r in rows }
+        categories_source = { r[0]: list(r[1] or []) for r in rows } if rows else _CATEGORY_KEYWORDS
     except Exception:
         categories_source = _CATEGORY_KEYWORDS
 
@@ -806,11 +803,15 @@ def get_mentions():
 @app.route('/api/visibility', methods=['GET'])
 def get_visibility():
     """Visibilidad = menciones de la marca / total de menciones (con filtros aplicados).
-    Devuelve score del periodo, delta y serie diaria en porcentaje (0–100%).
+    Devuelve score del periodo, delta y serie temporal en porcentaje (0–100%).
+
+    Parámetros opcionales:
+      - granularity: 'day' (por defecto) o 'hour'.
     """
     try:
         filters = parse_filters(request)
         brand = request.args.get('brand') or os.getenv('DEFAULT_BRAND', 'The Core School')
+        granularity = request.args.get('granularity', 'day').lower()
         conn = get_db_connection(); cur = conn.cursor()
 
         where = ["m.created_at >= %s AND m.created_at < %s"]
@@ -831,54 +832,107 @@ def get_visibility():
         synonyms = [s.lower() for s in BRAND_SYNONYMS.get(brand, [brand.lower()])]
         like_patterns = [f"%{s}%" for s in synonyms]
 
-        # Conteo total por día (denominador)
-        cur.execute(f"""
-            SELECT DATE(m.created_at) AS d, COUNT(*)
-            FROM mentions m
-            JOIN queries q ON m.query_id = q.id
-            WHERE {where_sql}
-            GROUP BY DATE(m.created_at)
-            ORDER BY DATE(m.created_at)
-        """, tuple(params))
-        total_rows = cur.fetchall()
+        # Seleccionar agrupación por día u hora
+        if granularity == 'hour':
+            cur.execute(f"""
+                SELECT DATE_TRUNC('hour', m.created_at) AS t, COUNT(*)
+                FROM mentions m
+                JOIN queries q ON m.query_id = q.id
+                WHERE {where_sql}
+                GROUP BY DATE_TRUNC('hour', m.created_at)
+                ORDER BY DATE_TRUNC('hour', m.created_at)
+            """, tuple(params))
+            total_rows = cur.fetchall()
 
-        # Conteo de días donde aparece la marca en el contenido (numerador)
-        cur.execute(f"""
-            SELECT DATE(m.created_at) AS d, COUNT(*)
-            FROM mentions m
-            JOIN queries q ON m.query_id = q.id
-            WHERE {where_sql}
-              AND (
-                EXISTS (
-                  SELECT 1 FROM jsonb_array_elements_text(COALESCE(to_jsonb(m.key_topics),'[]'::jsonb)) kt
-                  WHERE LOWER(TRIM(kt)) = ANY(%s)
-                )
-                OR LOWER(COALESCE(m.response,'')) LIKE ANY(%s)
-                OR LOWER(COALESCE(m.source_title,'')) LIKE ANY(%s)
-              )
-            GROUP BY DATE(m.created_at)
-            ORDER BY DATE(m.created_at)
-        """, tuple(params + [synonyms, like_patterns, like_patterns]))
-        core_rows = cur.fetchall()
+            cur.execute(f"""
+                SELECT DATE_TRUNC('hour', m.created_at) AS t, COUNT(*)
+                FROM mentions m
+                JOIN queries q ON m.query_id = q.id
+                WHERE {where_sql}
+                  AND (
+                    EXISTS (
+                      SELECT 1 FROM jsonb_array_elements_text(COALESCE(to_jsonb(m.key_topics),'[]'::jsonb)) kt
+                      WHERE LOWER(TRIM(kt)) = ANY(%s)
+                    )
+                    OR LOWER(COALESCE(m.response,'')) LIKE ANY(%s)
+                    OR LOWER(COALESCE(m.source_title,'')) LIKE ANY(%s)
+                  )
+                GROUP BY DATE_TRUNC('hour', m.created_at)
+                ORDER BY DATE_TRUNC('hour', m.created_at)
+            """, tuple(params + [synonyms, like_patterns, like_patterns]))
+            core_rows = cur.fetchall()
+        else:
+            # Por defecto: agrupación diaria
+            cur.execute(f"""
+                SELECT DATE(m.created_at) AS d, COUNT(*)
+                FROM mentions m
+                JOIN queries q ON m.query_id = q.id
+                WHERE {where_sql}
+                GROUP BY DATE(m.created_at)
+                ORDER BY DATE(m.created_at)
+            """, tuple(params))
+            total_rows = cur.fetchall()
+
+            cur.execute(f"""
+                SELECT DATE(m.created_at) AS d, COUNT(*)
+                FROM mentions m
+                JOIN queries q ON m.query_id = q.id
+                WHERE {where_sql}
+                  AND (
+                    EXISTS (
+                      SELECT 1 FROM jsonb_array_elements_text(COALESCE(to_jsonb(m.key_topics),'[]'::jsonb)) kt
+                      WHERE LOWER(TRIM(kt)) = ANY(%s)
+                    )
+                    OR LOWER(COALESCE(m.response,'')) LIKE ANY(%s)
+                    OR LOWER(COALESCE(m.source_title,'')) LIKE ANY(%s)
+                  )
+                GROUP BY DATE(m.created_at)
+                ORDER BY DATE(m.created_at)
+            """, tuple(params + [synonyms, like_patterns, like_patterns]))
+            core_rows = cur.fetchall()
 
         from datetime import timedelta
-        core_by_day = {d: int(c or 0) for d, c in core_rows}
-        total_by_day = {d: int(c or 0) for d, c in total_rows}
-
-        start_day = filters['start_date'].date()
-        end_day = filters['end_date'].date()
-        day = start_day
+        # Construir series según granularidad
         series = []
         num_sum = 0
         den_sum = 0
-        while day <= end_day:
-            num = int(core_by_day.get(day, 0))
-            den = int(total_by_day.get(day, 0))
-            num_sum += num
-            den_sum += den
-            pct = round((num / max(den, 1)) * 100.0, 1)
-            series.append({"date": day.strftime('%b %d'), "value": pct})
-            day += timedelta(days=1)
+        if granularity == 'hour':
+            core_by_t = {d: int(c or 0) for d, c in core_rows}
+            total_by_t = {d: int(c or 0) for d, c in total_rows}
+            t = filters['start_date'].replace(minute=0, second=0, microsecond=0)
+            # Cap a la hora actual para no mostrar futuro
+            from datetime import datetime as _dt, timezone as _tz
+            now_aware = _dt.now(filters['end_date'].tzinfo or _tz.utc)
+            end_cap = min(filters['end_date'], now_aware)
+            end_t = end_cap.replace(minute=0, second=0, microsecond=0)
+            last_pct = None
+            while t <= end_t:
+                num = int(core_by_t.get(t, 0))
+                den = int(total_by_t.get(t, 0))
+                num_sum += num
+                den_sum += den
+                pct = round((num / max(den, 1)) * 100.0, 1) if den > 0 else (last_pct if last_pct is not None else 0.0)
+                series.append({"date": t.isoformat(), "ts": int(t.timestamp() * 1000), "value": pct})
+                if den > 0:
+                    last_pct = pct
+                t += timedelta(hours=1)
+        else:
+            core_by_day = {d: int(c or 0) for d, c in core_rows}
+            total_by_day = {d: int(c or 0) for d, c in total_rows}
+            start_day = filters['start_date'].date()
+            end_day = filters['end_date'].date()
+            day = start_day
+            from datetime import datetime as _dt
+            while day <= end_day:
+                num = int(core_by_day.get(day, 0))
+                den = int(total_by_day.get(day, 0))
+                num_sum += num
+                den_sum += den
+                pct = round((num / max(den, 1)) * 100.0, 1)
+                # Normalizamos a medianoche para incluir ts
+                ts_dt = _dt.combine(day, _dt.min.time())
+                series.append({"date": ts_dt.isoformat(), "ts": int(ts_dt.timestamp() * 1000), "value": pct})
+                day += timedelta(days=1)
 
         visibility_score = round((num_sum / max(den_sum, 1)) * 100.0, 1)
 
@@ -892,7 +946,7 @@ def get_visibility():
             delta = 0.0
 
         cur.close(); conn.close()
-        return jsonify({"visibility_score": visibility_score, "delta": delta, "series": series})
+        return jsonify({"visibility_score": visibility_score, "delta": delta, "series": series, "granularity": granularity})
     except Exception as e:
         print(f"Error en get_visibility: {e}")
         return jsonify({"error": str(e)}), 500
@@ -920,11 +974,10 @@ def get_visibility_ranking():
             where.append("q.topic = %s"); params.append(filters['topic'])
         where_sql = " AND ".join(where)
 
-        # Helper para ejecutar la consulta sobre un rango dado y devolver filas
+        # Helper: trae payloads de insights para el rango indicado
         def fetch_rows(p):
             cur.execute(f"""
-                SELECT m.id, m.key_topics, LOWER(COALESCE(m.response,'')) AS resp, LOWER(COALESCE(m.source_title,'')) AS title,
-                       q.topic, i.payload
+                SELECT m.id, i.payload
                 FROM mentions m
                 JOIN queries q ON m.query_id = q.id
                 LEFT JOIN insights i ON i.id = m.generated_insight_id
@@ -936,99 +989,42 @@ def get_visibility_ranking():
         rows = fetch_rows(params)
         total_responses = len(rows)
 
-        # Diccionario de marcas y sinónimos (genérico para cualquier cliente)
-        BRAND_SYNONYMS = {
-            "The Core School": ["the core", "the core school", "thecore"],
-            "U-TAD": ["u-tad", "utad"],
-            "ECAM": ["ecam"],
-            "TAI": ["tai"],
-            "CES": ["ces"],
-            "CEV": ["cev"],
-            "FX Barcelona Film School": ["fx barcelona", "fx barcelona film school", "fx animation"],
-            "Septima Ars": ["septima ars", "séptima ars"],
-        }
-
-        def detect_brands(topics_list, resp_text, title_text, payload):
-            found = []
-            tlist = [str(t or '').lower().strip() for t in (topics_list or [])]
-            # key_topics: igualdad o substring
-            for canon, alts in BRAND_SYNONYMS.items():
-                for a in alts:
-                    if any(a == t or a in t for t in tlist):
-                        found.append(canon)
-                        break
-            # payload.brands: igualdad o substring
+        def extract_payload_brands(payload):
+            names = []
             try:
-                brands_payload = []
                 if isinstance(payload, dict):
-                    brands_payload = payload.get('brands') or []
-                for canon, alts in BRAND_SYNONYMS.items():
-                    for a in alts:
-                        if any(a == str(b or '').lower().strip() or a in str(b or '').lower().strip() for b in brands_payload):
-                            if canon not in found:
-                                found.append(canon)
-                            break
+                    brands = payload.get('brands') or []
+                    if isinstance(brands, list):
+                        for item in brands:
+                            if isinstance(item, dict):
+                                name = (item.get('name') or '').strip()
+                                if name:
+                                    names.append(name)
+                            elif isinstance(item, str):
+                                name = item.strip()
+                                if name:
+                                    names.append(name)
             except Exception:
-                pass
-            # substrings en texto/título
-            for canon, alts in BRAND_SYNONYMS.items():
-                if any(a in (resp_text or '') or a in (title_text or '') for a in alts):
-                    if canon not in found:
-                        found.append(canon)
-            return found
-
-        # Construir estructura de menciones normalizada
-        def normalize_list(xs):
-            out = []
-            if not xs:
-                return out
-            try:
-                for t in xs:
-                    s = str(t or '').lower().strip()
-                    if s:
-                        out.append(s)
-            except Exception:
-                pass
-            return out
+                return []
+            return names
 
         def compute_counts(rows_in):
-            mentions_local = []
-            for m_id, key_topics, resp_text, title_text, _topic, payload in rows_in:
-                topics_norm = normalize_list(key_topics)
-                payload_brands = []
-                try:
-                    if isinstance(payload, dict):
-                        payload_brands = normalize_list(payload.get('brands') or [])
-                except Exception:
-                    payload_brands = []
-                combined_text = f"{resp_text or ''} {title_text or ''}"
-                mentions_local.append({
-                    "id": m_id,
-                    "topics": topics_norm,
-                    "pbrands": payload_brands,
-                    "text": str(combined_text).lower(),
-                })
+            from collections import defaultdict
+            counts_local = defaultdict(int)
+            display_by_norm = {}
+            for _id, payload in rows_in:
+                brands = extract_payload_brands(payload)
+                seen = set()
+                for b in brands:
+                    n = b.lower().strip()
+                    if not n or n in seen:
+                        continue
+                    seen.add(n)
+                    display_by_norm.setdefault(n, b)
+                    counts_local[n] += 1
+            return counts_local, display_by_norm
 
-            counts_local = {brand: 0 for brand in BRAND_SYNONYMS.keys()}
-            for m in mentions_local:
-                for brand, alts in BRAND_SYNONYMS.items():
-                    found = False
-                    for a in alts:
-                        if any(a == t or a in t for t in m["topics"]):
-                            found = True; break
-                    if not found:
-                        for a in alts:
-                            if any(a == t or a in t for t in m["pbrands"]):
-                                found = True; break
-                    if not found:
-                        for a in alts:
-                            if a in m["text"]:
-                                found = True; break
-                    if found:
-                        counts_local[brand] += 1
-            return counts_local
-
-        counts = compute_counts(rows)
+        counts, name_map = compute_counts(rows)
 
         colors = ["bg-blue-500", "bg-red-500", "bg-blue-600", "bg-yellow-500", "bg-gray-800"]
         # Calcular comparativa con el periodo anterior
@@ -1049,15 +1045,16 @@ def get_visibility_ranking():
 
         rows_prev = fetch_rows(prev_params)
         total_prev = len(rows_prev)
-        counts_prev = compute_counts(rows_prev)
+        counts_prev, _ = compute_counts(rows_prev)
 
         ranking = []
         denom = max(total_responses, 1)
         prev_denom = max(total_prev, 1)
-        pairs = sorted(counts.items(), key=lambda x: x[1], reverse=True)
-        for i, (b, count) in enumerate(pairs):
+        pairs = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:10]
+        for i, (norm, count) in enumerate(pairs):
+            b = name_map.get(norm, norm)
             pct_curr = (count / denom) * 100.0
-            prev_pct = (counts_prev.get(b, 0) / prev_denom) * 100.0 if prev_denom else 0.0
+            prev_pct = (counts_prev.get(norm, 0) / prev_denom) * 100.0 if prev_denom else 0.0
             diff = round(pct_curr - prev_pct, 1)
             ranking.append({
                 "rank": i + 1,
@@ -1097,11 +1094,10 @@ def get_industry_ranking():
             where.append("q.topic = %s"); params.append(filters['topic'])
         where_sql = " AND ".join(where)
 
-        # Obtener menciones con campos suficientes para detectar marcas de forma robusta
-        # Incluye: key_topics (lista), texto de respuesta/título y posibles marcas en insights.payload
+        # Obtener menciones con su topic y el payload del insight asociado
+        # Usaremos exclusivamente i.payload->brands para detectar marcas de forma dinámica
         cur.execute(f"""
-            SELECT m.key_topics, q.topic, LOWER(COALESCE(m.response,'')) AS resp, LOWER(COALESCE(m.source_title,'')) AS title,
-                   i.payload
+            SELECT q.topic, i.payload
             FROM mentions m
             JOIN queries q ON m.query_id = q.id
             LEFT JOIN insights i ON i.id = m.generated_insight_id
@@ -1109,63 +1105,56 @@ def get_industry_ranking():
         """, tuple(params))
         rows = cur.fetchall()
 
-        # Diccionario de marcas y sinónimos
-        BRAND_SYNONYMS = {
-            "The Core School": ["the core", "the core school", "thecore"],
-            "U-TAD": ["u-tad", "utad"],
-            "ECAM": ["ecam"],
-            "TAI": ["tai"],
-            "CES": ["ces"],
-            "CEV": ["cev"],
-            "FX Barcelona Film School": ["fx barcelona", "fx barcelona film school", "fx animation"],
-            "Septima Ars": ["septima ars", "séptima ars"],
-        }
-
-        def detect_brands(topics_list, resp_text, title_text, payload):
-            found = []
-            # 1) key_topics exacto
-            tlist = [str(t or '').lower().strip() for t in (topics_list or [])]
-            for canon, alts in BRAND_SYNONYMS.items():
-                if any(a in tlist for a in alts):
-                    found.append(canon)
-            # 2) payload.brands (si existe)
-            try:
-                brands_payload = []
-                if isinstance(payload, dict):
-                    brands_payload = payload.get('brands') or []
-                elif payload is not None:
-                    # psycopg2 devuelve JSONB como dict, pero por si acaso
-                    brands_payload = []
-                for canon, alts in BRAND_SYNONYMS.items():
-                    if any(str(b or '').lower().strip() in alts for b in brands_payload):
-                        if canon not in found:
-                            found.append(canon)
-            except Exception:
-                pass
-            # 3) búsqueda por substring en response/título
-            for canon, alts in BRAND_SYNONYMS.items():
-                if any(a in (resp_text or '') or a in (title_text or '') for a in alts):
-                    if canon not in found:
-                        found.append(canon)
-            return found
-
+        # Extraer marcas de forma dinámica a partir de payload.brands
+        # Contaremos presencia por mención (no usamos el campo "mentions" para ponderar)
         from collections import defaultdict
         overall_counts = defaultdict(int)
         topic_counts = defaultdict(lambda: defaultdict(int))
-        for key_topics, topic, resp_text, title_text, payload in rows:
-            brands = detect_brands(key_topics, resp_text, title_text, payload)
+        # Normalización para agrupar por nombre insensible a mayúsculas/minúsculas
+        display_name_by_norm = {}
+
+        def extract_brand_names(payload_obj):
+            names = []
+            try:
+                if isinstance(payload_obj, dict):
+                    brands = payload_obj.get('brands') or []
+                    if isinstance(brands, list):
+                        for item in brands:
+                            if isinstance(item, dict):
+                                name = (item.get('name') or '').strip()
+                                if name:
+                                    names.append(name)
+                            elif isinstance(item, str):
+                                name = item.strip()
+                                if name:
+                                    names.append(name)
+            except Exception:
+                # En caso de payload inválido, devolvemos lista vacía
+                return []
+            return names
+
+        for topic, payload in rows:
+            brands = extract_brand_names(payload)
             if not brands:
                 continue
+            # Contar presencia por mención, normalizando por nombre
+            seen_norms = set()
             for b in brands:
-                overall_counts[b] += 1
-                topic_counts[topic or 'Uncategorized'][b] += 1
+                norm = b.lower().strip()
+                if not norm or norm in seen_norms:
+                    continue
+                seen_norms.add(norm)
+                display_name_by_norm.setdefault(norm, b)
+                overall_counts[norm] += 1
+                topic_counts[topic or 'Uncategorized'][norm] += 1
 
         colors = ["bg-blue-500", "bg-red-500", "bg-blue-600", "bg-yellow-500", "bg-gray-800"]
         # overall ranking
         total_mentions = sum(overall_counts.values()) or 1
-        overall_sorted = sorted(overall_counts.items(), key=lambda x: x[1], reverse=True)
+        overall_sorted = sorted(overall_counts.items(), key=lambda x: x[1], reverse=True)[:10]
         overall = []
-        for i, (b, c) in enumerate(overall_sorted):
+        for i, (norm_name, c) in enumerate(overall_sorted):
+            b = display_name_by_norm.get(norm_name, norm_name)
             overall.append({
                 "rank": i + 1,
                 "name": b,
@@ -1180,9 +1169,10 @@ def get_industry_ranking():
         by_topic = {}
         for t, counts in topic_counts.items():
             tot = sum(counts.values()) or 1
-            pairs = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+            pairs = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:10]
             rk = []
-            for i, (b, c) in enumerate(pairs):
+            for i, (norm_name, c) in enumerate(pairs):
+                b = display_name_by_norm.get(norm_name, norm_name)
                 rk.append({
                     "rank": i + 1,
                     "name": b,
@@ -1265,6 +1255,7 @@ def get_insights():
 def get_sentiment():
     try:
         filters = parse_filters(request)
+        granularity = request.args.get('granularity', 'day').lower()
         conn = get_db_connection(); cur = conn.cursor()
 
         where_clauses = ["m.created_at >= %s AND m.created_at < %s"]
@@ -1281,28 +1272,70 @@ def get_sentiment():
         where_sql = " AND ".join(where_clauses)
         join_sql = "JOIN queries q ON m.query_id = q.id"
 
-        # Promedio por día
-        cur.execute(f"""
-            SELECT DATE(m.created_at) AS d, AVG(COALESCE(m.sentiment,0))
-            FROM mentions m
-            {join_sql}
-            WHERE {where_sql}
-            GROUP BY DATE(m.created_at)
-            ORDER BY DATE(m.created_at)
-        """, tuple(params))
-        ts_rows = cur.fetchall()
-        timeseries = [{"date": r[0].strftime('%b %d'), "avg": float(r[1] or 0.0)} for r in ts_rows]
+        # Serie temporal por día/hora SOLO para la marca (The Core)
+        brand = request.args.get('brand') or os.getenv('DEFAULT_BRAND', 'The Core School')
+        brand_norm = (brand or '').lower().strip()
+        if granularity == 'hour':
+            cur.execute(f"""
+                SELECT DATE_TRUNC('hour', m.created_at) AS t,
+                       SUM(CASE WHEN COALESCE(m.sentiment,0) > 0.3 THEN 1 ELSE 0 END) AS pos,
+                       SUM(CASE WHEN COALESCE(m.sentiment,0) BETWEEN -0.3 AND 0.3 THEN 1 ELSE 0 END) AS neu,
+                       SUM(CASE WHEN COALESCE(m.sentiment,0) < -0.3 THEN 1 ELSE 0 END) AS neg
+                FROM mentions m
+                {join_sql}
+                WHERE {where_sql}
+                  AND EXISTS (
+                    SELECT 1 FROM jsonb_array_elements_text(COALESCE(to_jsonb(m.key_topics),'[]'::jsonb)) kt
+                    WHERE LOWER(TRIM(kt)) = %s
+                  )
+                GROUP BY DATE_TRUNC('hour', m.created_at)
+                ORDER BY DATE_TRUNC('hour', m.created_at)
+            """, tuple(params + [brand_norm]))
+            ts_rows = cur.fetchall()
+            timeseries = []
+            for t_bucket, pos, neu, neg in ts_rows:
+                total = int((pos or 0) + (neu or 0) + (neg or 0))
+                pct_pos = (int(pos or 0) / max(total, 1)) * 100.0
+                timeseries.append({"date": t_bucket.isoformat(), "ts": int(t_bucket.timestamp() * 1000), "value": round(pct_pos, 1)})
+        else:
+            cur.execute(f"""
+                SELECT DATE(m.created_at) AS d,
+                       SUM(CASE WHEN COALESCE(m.sentiment,0) > 0.3 THEN 1 ELSE 0 END) AS pos,
+                       SUM(CASE WHEN COALESCE(m.sentiment,0) BETWEEN -0.3 AND 0.3 THEN 1 ELSE 0 END) AS neu,
+                       SUM(CASE WHEN COALESCE(m.sentiment,0) < -0.3 THEN 1 ELSE 0 END) AS neg
+                FROM mentions m
+                {join_sql}
+                WHERE {where_sql}
+                  AND EXISTS (
+                    SELECT 1 FROM jsonb_array_elements_text(COALESCE(to_jsonb(m.key_topics),'[]'::jsonb)) kt
+                    WHERE LOWER(TRIM(kt)) = %s
+                  )
+                GROUP BY DATE(m.created_at)
+                ORDER BY DATE(m.created_at)
+            """, tuple(params + [brand_norm]))
+            ts_rows = cur.fetchall()
+            from datetime import datetime as _dt
+            timeseries = []
+            for d_bucket, pos, neu, neg in ts_rows:
+                total = int((pos or 0) + (neu or 0) + (neg or 0))
+                pct_pos = (int(pos or 0) / max(total, 1)) * 100.0
+                ts_dt = _dt.combine(d_bucket, _dt.min.time())
+                timeseries.append({"date": ts_dt.isoformat(), "ts": int(ts_dt.timestamp() * 1000), "value": round(pct_pos, 1)})
 
         # Buckets (umbrales afinados)
         cur.execute(f"""
             SELECT 
-                SUM(CASE WHEN m.sentiment < -0.3 THEN 1 ELSE 0 END) AS negative,
-                SUM(CASE WHEN m.sentiment BETWEEN -0.3 AND 0.3 THEN 1 ELSE 0 END) AS neutral,
-                SUM(CASE WHEN m.sentiment > 0.3 THEN 1 ELSE 0 END) AS positive
+                SUM(CASE WHEN COALESCE(m.sentiment,0) < -0.3 THEN 1 ELSE 0 END) AS negative,
+                SUM(CASE WHEN COALESCE(m.sentiment,0) BETWEEN -0.3 AND 0.3 THEN 1 ELSE 0 END) AS neutral,
+                SUM(CASE WHEN COALESCE(m.sentiment,0) > 0.3 THEN 1 ELSE 0 END) AS positive
             FROM mentions m
             {join_sql}
             WHERE {where_sql}
-        """, tuple(params))
+              AND EXISTS (
+                SELECT 1 FROM jsonb_array_elements_text(COALESCE(to_jsonb(m.key_topics),'[]'::jsonb)) kt
+                WHERE LOWER(TRIM(kt)) = %s
+              )
+        """, tuple(params + [brand_norm]))
         bucket_row = cur.fetchone() or (0,0,0)
         distribution = {"negative": int(bucket_row[0] or 0), "neutral": int(bucket_row[1] or 0), "positive": int(bucket_row[2] or 0)}
 
@@ -1353,7 +1386,27 @@ def get_sentiment():
         ]
 
         cur.close(); conn.close()
-        return jsonify({"timeseries": timeseries, "distribution": distribution, "negatives": negatives, "positives": positives})
+        # Forward-fill backend para sentiment en granularidad hora (sobre value)
+        if granularity == 'hour':
+            from datetime import timedelta
+            val_by_t = {r['ts']: r.get('value', 0.0) for r in timeseries}
+            t = int(filters['start_date'].replace(minute=0, second=0, microsecond=0).timestamp()*1000)
+            from datetime import datetime as _dt, timezone as _tz
+            now_aware = _dt.now(filters['end_date'].tzinfo or _tz.utc)
+            end_cap = min(filters['end_date'], now_aware)
+            end_t = int(end_cap.replace(minute=0, second=0, microsecond=0).timestamp()*1000)
+            out = []
+            last = None
+            while t <= end_t:
+                cur_val = val_by_t.get(t, None)
+                if cur_val is None:
+                    cur_val = last if last is not None else 0.0
+                else:
+                    last = cur_val
+                out.append({"date": _dt.fromtimestamp(t/1000).isoformat(), "ts": t, "value": float(cur_val)})
+                t += 3600*1000
+            timeseries = out
+        return jsonify({"timeseries": timeseries, "distribution": distribution, "negatives": negatives, "positives": positives, "granularity": granularity})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1580,35 +1633,24 @@ def get_prompts_grouped():
                 pass
             return out
 
-        def _detect_brands(topics_list, resp_text, title_text, payload):
-            found = []
-            tlist = _normalize_list(topics_list)
-            # key_topics: igualdad o substring
-            for canon, alts in BRAND_SYNONYMS.items():
-                for a in alts:
-                    if any(a == t or a in t for t in tlist):
-                        found.append(canon)
-                        break
-            # payload.brands: igualdad o substring
+        def _extract_brands_from_payload(payload):
+            names = []
             try:
-                brands_payload = []
                 if isinstance(payload, dict):
-                    brands_payload = _normalize_list((payload.get('brands') or []))
-                for canon, alts in BRAND_SYNONYMS.items():
-                    for a in alts:
-                        if any(a == b or a in b for b in brands_payload):
-                            if canon not in found:
-                                found.append(canon)
-                            break
+                    brands = payload.get('brands') or []
+                    if isinstance(brands, list):
+                        for item in brands:
+                            if isinstance(item, dict):
+                                name = (item.get('name') or '').strip()
+                                if name:
+                                    names.append(name)
+                            elif isinstance(item, str):
+                                name = item.strip()
+                                if name:
+                                    names.append(name)
             except Exception:
-                pass
-            # substrings en texto/título
-            txt = (resp_text or '') + ' ' + (title_text or '')
-            for canon, alts in BRAND_SYNONYMS.items():
-                if any(a in txt for a in alts):
-                    if canon not in found:
-                        found.append(canon)
-            return found
+                return []
+            return names
 
         for qid, key_topics, resp, title, payload in mention_rows:
             mentions_by_qid[qid].append({
@@ -1636,10 +1678,17 @@ def get_prompts_grouped():
 
             for m in mentions_by_qid.get(pid, []):
                 total_responses_prompt += 1
-                present = _detect_brands(m.get('topics'), m.get('resp'), m.get('title'), m.get('payload'))
-                if present:
-                    all_brands_presence_total += len(present)
-                if brand in present:
+                present = _extract_brands_from_payload(m.get('payload'))
+                # deduplicar por mención
+                present_norm = []
+                seen = set()
+                for b in present:
+                    n = b.lower().strip()
+                    if n and n not in seen:
+                        seen.add(n); present_norm.append(b)
+                if present_norm:
+                    all_brands_presence_total += len(present_norm)
+                if any((brand or '').lower().strip() == (b or '').lower().strip() for b in present_norm):
                     brand_present_responses += 1
                     brand_presence_count += 1
 
@@ -1882,23 +1931,62 @@ def get_prompt_details(query_id: int):
         daily_total_mentions = defaultdict(int)
         daily_brand_presence = defaultdict(int)
         daily_all_brands_presence = defaultdict(int)
+        # Contadores por hora para series de alta resolución
+        hourly_total_mentions = defaultdict(int)
+        hourly_brand_mentions = defaultdict(int)
+        hourly_brand_presence = defaultdict(int)
+        hourly_all_brands_presence = defaultdict(int)
         brand_distribution = defaultdict(int)
+        display_by_norm = {}
         all_trends = set()
+
+        def _extract_brands_from_payload(payload):
+            names = []
+            try:
+                if isinstance(payload, dict):
+                    brands = payload.get('brands') or []
+                    if isinstance(brands, list):
+                        for item in brands:
+                            if isinstance(item, dict):
+                                name = (item.get('name') or '').strip()
+                                if name:
+                                    names.append(name)
+                            elif isinstance(item, str):
+                                name = item.strip()
+                                if name:
+                                    names.append(name)
+            except Exception:
+                return []
+            return names
 
         for mention in mention_rows:
             _, created_at, _, _, key_topics, resp, title, payload = mention
             mention_date = created_at.date()
             daily_total_mentions[mention_date] += 1
+            hour_key = created_at.replace(minute=0, second=0, microsecond=0)
+            hourly_total_mentions[hour_key] += 1
 
-            present_brands = _detect_brands(key_topics, resp, title, payload)
-            if brand_to_check in present_brands:
+            present_brands = _extract_brands_from_payload(payload)
+            # deduplicación por mención
+            seen = set(); present_norm = []
+            for b in present_brands:
+                n = b.lower().strip()
+                if n and n not in seen:
+                    seen.add(n); present_norm.append(b)
+
+            if any((brand_to_check or '').lower().strip() == (b or '').lower().strip() for b in present_norm):
                 daily_brand_mentions[mention_date] += 1
                 daily_brand_presence[mention_date] += 1
+                hourly_brand_mentions[hour_key] += 1
+                hourly_brand_presence[hour_key] += 1
 
-            if present_brands:
-                daily_all_brands_presence[mention_date] += len(present_brands)
-                for b in present_brands:
-                    brand_distribution[b] += 1
+            if present_norm:
+                daily_all_brands_presence[mention_date] += len(present_norm)
+                hourly_all_brands_presence[hour_key] += len(present_norm)
+                for b in present_norm:
+                    n = b.lower().strip()
+                    display_by_norm.setdefault(n, b)
+                    brand_distribution[n] += 1
 
             if payload and isinstance(payload, dict):
                 trends = payload.get('trends', [])
@@ -1914,26 +2002,55 @@ def get_prompt_details(query_id: int):
         visibility_score = round((total_brand_mentions / max(total_responses_prompt, 1)) * 100.0, 1)
         share_of_voice = round((total_brand_presence / max(total_all_brands_presence, 1)) * 100.0, 1)
 
-        # 5. Calcular datos para los gráficos
+        # 5. Calcular datos para los gráficos (por hora para más precisión)
+        granularity = request.args.get('granularity', 'hour').lower()
         timeseries = []
         sov_timeseries = []
-        day_iterator = filters['start_date'].date()
-        while day_iterator < filters['end_date'].date():
-            # Visibilidad por día
-            total_day = daily_total_mentions[day_iterator]
-            brand_mentions_day = daily_brand_mentions[day_iterator]
-            visibility_day = (brand_mentions_day / max(total_day, 1)) * 100
-            timeseries.append({"date": day_iterator.strftime('%b %d'), "value": round(visibility_day, 1)})
+        if granularity == 'hour':
+            from datetime import datetime as _dt, timezone as _tz
+            t = filters['start_date'].replace(minute=0, second=0, microsecond=0)
+            now_aware = _dt.now(filters['end_date'].tzinfo or _tz.utc)
+            end_cap = min(filters['end_date'], now_aware)
+            end_t = end_cap.replace(minute=0, second=0, microsecond=0)
+            last_vis = None
+            last_sov = None
+            while t <= end_t:
+                total = hourly_total_mentions[t]
+                brand_m = hourly_brand_mentions[t]
+                vis = (brand_m / max(total, 1)) * 100 if total > 0 else (last_vis if last_vis is not None else 0.0)
+                timeseries.append({"date": t.isoformat(), "ts": int(t.timestamp() * 1000), "value": round(vis, 1)})
+                if total > 0:
+                    last_vis = vis
 
-            # SOV por día
-            brand_presence_day = daily_brand_presence[day_iterator]
-            all_brands_day = daily_all_brands_presence[day_iterator]
-            sov_day = (brand_presence_day / max(all_brands_day, 1)) * 100
-            sov_timeseries.append({"date": day_iterator.strftime('%b %d'), "value": round(sov_day, 1)})
+                brand_p = hourly_brand_presence[t]
+                all_p = hourly_all_brands_presence[t]
+                sov = (brand_p / max(all_p, 1)) * 100 if all_p > 0 else (last_sov if last_sov is not None else 0.0)
+                sov_timeseries.append({"date": t.isoformat(), "ts": int(t.timestamp() * 1000), "value": round(sov, 1)})
+                if all_p > 0:
+                    last_sov = sov
+                t += timedelta(hours=1)
+        else:
+            day_iterator = filters['start_date'].date()
+            from datetime import datetime as _dt
+            while day_iterator < filters['end_date'].date():
+                total_day = daily_total_mentions[day_iterator]
+                brand_mentions_day = daily_brand_mentions[day_iterator]
+                visibility_day = (brand_mentions_day / max(total_day, 1)) * 100
+                ts_dt = _dt.combine(day_iterator, _dt.min.time())
+                timeseries.append({"date": ts_dt.isoformat(), "ts": int(ts_dt.timestamp() * 1000), "value": round(visibility_day, 1)})
 
-            day_iterator += timedelta(days=1)
+                brand_presence_day = daily_brand_presence[day_iterator]
+                all_brands_day = daily_all_brands_presence[day_iterator]
+                sov_day = (brand_presence_day / max(all_brands_day, 1)) * 100
+                sov_timeseries.append({"date": ts_dt.isoformat(), "ts": int(ts_dt.timestamp() * 1000), "value": round(sov_day, 1)})
+
+                day_iterator += timedelta(days=1)
 
         cur.close(); conn.close()
+
+        # Limitar brand_distribution a top-10 con nombres display originales
+        dist_pairs = sorted(brand_distribution.items(), key=lambda x: x[1], reverse=True)[:10]
+        dist_out = { display_by_norm.get(k, k): v for k, v in dist_pairs }
 
         return jsonify({
             "id": query_id,
@@ -1945,8 +2062,9 @@ def get_prompt_details(query_id: int):
             "trends": sorted(list(all_trends)),
             "timeseries": timeseries,
             "sov_timeseries": sov_timeseries,
-            "brand_distribution": dict(brand_distribution),
+            "brand_distribution": dist_out,
             "executions": executions[:100],
+            "granularity": granularity,
         })
     except Exception as e:
         import traceback
