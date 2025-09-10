@@ -1882,6 +1882,7 @@ def get_prompt_details(query_id: int):
         daily_total_mentions = defaultdict(int)
         daily_brand_presence = defaultdict(int)
         daily_all_brands_presence = defaultdict(int)
+        brand_distribution = defaultdict(int)
         all_trends = set()
 
         for mention in mention_rows:
@@ -1896,6 +1897,8 @@ def get_prompt_details(query_id: int):
 
             if present_brands:
                 daily_all_brands_presence[mention_date] += len(present_brands)
+                for b in present_brands:
+                    brand_distribution[b] += 1
 
             if payload and isinstance(payload, dict):
                 trends = payload.get('trends', [])
@@ -1942,6 +1945,7 @@ def get_prompt_details(query_id: int):
             "trends": sorted(list(all_trends)),
             "timeseries": timeseries,
             "sov_timeseries": sov_timeseries,
+            "brand_distribution": dict(brand_distribution),
             "executions": executions[:100],
         })
     except Exception as e:

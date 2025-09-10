@@ -7,9 +7,26 @@ load_dotenv()
 
 # --- NUEVAS QUERIES SOLICITADAS ---
 QUERIES = [
-    ("mejor universidad en madrid para estudiar el master en dirección de cine", "The Core School", "Competition & Benchmarking", "es"),
-    ("centros de formacion en madrid para hacer el grado de comunicación audiovisual", "The Core School", "Competition & Benchmarking", "es"),
-    ("donde estudiar grado en ingenieria de software y videojuegos en madrid", "The Core School", "Competition & Benchmarking", "es"),
+    ("¿Que universidades tienen carreras o programas para estudiar si me gusta escribir?", "The Core School", "Curriculum & Programs", "es"),
+    ("¿En que universidad puedo estudiar si me gusta el mundo del entretenimiento?", "The Core School", "Curriculum & Programs", "es"),
+    ("¿Donde puedo estudiar algo relacionado con los videojuegos en españa?", "The Core School", "Curriculum & Programs", "es"),
+    ("¿Donde puedo estudiar cine o algo relacionado con televisión?", "The Core School", "Curriculum & Programs", "es"),
+    ("¿Que estudiar si te gusta el cine y la televisión?", "The Core School", "Curriculum & Programs", "es"),
+    ("¿Donde estudiar carreras creativas con futuro en españa?", "The Core School", "Curriculum & Programs", "es"),
+    ("¿Que universidades ofrecen becas para estudiar algo con el cine?", "The Core School", "Scholarships & Cost", "es"),
+    ("¿Donde ofrecen foracion para la creacion de guiones?", "The Core School", "Curriculum & Programs", "es"),
+    ("¿Que universdiades relacionadas con el mundo audiovisual tienen acuerdos con cadenas o productoras?", "The Core School", "Brand & Reputation", "es"),
+    ("¿Trabajos en el sector audiovisual con buen sueldo?", "The Core School", "Employment & Jobs", "es"),
+    ("¿Mejor máster en dirección de cine en madrid?", "The Core School", "Competition & Benchmarking", "es"),
+    ("¿Donde puedo hacer un master online en creacion de contenido para ser influencer?", "The Core School", "Curriculum & Programs", "es"),
+    ("¿Dónde estudiar guion para series en españa?", "The Core School", "Curriculum & Programs", "es"),
+    ("¿Universidades con mejor precio en el grado en comunicación audiovisual, privadas como publicas?", "The Core School", "Competition & Benchmarking", "es"),
+    ("¿Escuelas de postproducción y vfx?", "The Core School", "Curriculum & Programs", "es"),
+    ("¿Hazme un analisis comparativo entre las mejores escuelas de audiovisuales de españa?", "The Core School", "Competition & Benchmarking", "es"),
+    ("¿Universidades o centros de formación con mejor reputación en formación audiovisual?", "The Core School", "Brand & Reputation", "es"),
+    ("¿Salidas laborales comunicación audiovisual?", "The Core School", "Employment & Jobs", "es"),
+    ("¿Es difícil encontrar trabajo en la industria del cine?", "The Core School", "Employment & Jobs", "es"),
+    ("¿Mejores escuelas para hacer cosas relacionadas con la television?", "The Core School", "Competition & Benchmarking", "es"),
 ]
 
 def insert_thecore_queries():
