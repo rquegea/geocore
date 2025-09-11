@@ -31,7 +31,7 @@ import { getVisibility, getShareOfVoice, getVisibilityRanking, getMentions, getM
 import { VisibilityData, Competitor, Mention } from "@/types"
 import { cn } from "@/lib/utils"
 import { DateRange } from "react-day-picker"
-import { format, subDays } from "date-fns"
+import { format, subDays, startOfDay, addDays, addHours, startOfHour } from "date-fns"
 import { es } from "date-fns/locale"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import PulsingCircle from "@/components/ui/pulsing-circle"
@@ -397,6 +397,35 @@ export function AnalyticsDashboard() {
       positives: positives || [],
     } as const
   }, [sentimentApi])
+
+  // Ticks y dominio del eje X según rango seleccionado
+  const isHourlyRange = useMemo(() => activePeriod.includes('h'), [activePeriod])
+  const xDomain = useMemo((): [number, number] => {
+    if (!dateRange?.from || !dateRange?.to) return [0, 0]
+    if (isHourlyRange) {
+      return [dateRange.from.getTime(), dateRange.to.getTime()]
+    }
+    const start = startOfDay(dateRange.from).getTime()
+    const end = startOfDay(dateRange.to).getTime() + 24 * 60 * 60 * 1000
+    return [start, end]
+  }, [dateRange, isHourlyRange])
+  const xTicks = useMemo((): number[] => {
+    if (!dateRange?.from || !dateRange?.to) return []
+    if (isHourlyRange) {
+      const startHour = startOfHour(dateRange.from)
+      const end = dateRange.to.getTime()
+      const ticks: number[] = []
+      for (let d = startHour; d.getTime() <= end; d = addHours(d, 1)) {
+        ticks.push(d.getTime())
+      }
+      return ticks
+    }
+    const ticks: number[] = []
+    for (let d = startOfDay(dateRange.from); d <= startOfDay(dateRange.to); d = addDays(d, 1)) {
+      ticks.push(d.getTime())
+    }
+    return ticks
+  }, [dateRange, isHourlyRange])
 
   // Resetear índices cuando cambien las listas
   useEffect(() => { setNegHighlightIdx(0) }, [sentimentComputed.negatives?.length])
@@ -1060,23 +1089,7 @@ export function AnalyticsDashboard() {
               {/* Navigation Tabs */}
               <div className="flex items-center gap-6 px-6 bg-white">
                 <Button variant="ghost" className={ activeTab === "Visibility" ? "text-blue-600 border-b-2 border-blue-600 rounded-none hover:bg-gray-100 hover:text-black" : "text-gray-600 hover:text-gray-800 hover:bg-gray-100" } onClick={() => setActiveTab("Visibility")}>Visibilidad</Button>
-                <div className="flex items-center gap-3">
-                  <Button variant="ghost" className={ activeTab === "Prompts" ? "text-blue-600 border-b-2 border-blue-600 rounded-none hover:bg-gray-100 hover:text-black" : "text-gray-600 hover:text-gray-800 hover:bg-gray-100" } onClick={() => setActiveTab("Prompts")}>Prompts</Button>
-                  {/* Selector de período para Prompts */}
-                  <div className="hidden md:flex items-center gap-2">
-                    <Select onValueChange={(value: PresetPeriod) => handlePresetChange(value)} value={activePeriod}>
-                      <SelectTrigger className="w-[160px] h-8">
-                        <SelectValue placeholder="Período" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="24h">Últimas 24 horas</SelectItem>
-                        <SelectItem value="7d">Últimos 7 días</SelectItem>
-                        <SelectItem value="30d">Últimos 30 días</SelectItem>
-                        <SelectItem value="90d">Últimos 90 días</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
+                <Button variant="ghost" className={ activeTab === "Prompts" ? "text-blue-600 border-b-2 border-blue-600 rounded-none hover:bg-gray-100 hover:text-black" : "text-gray-600 hover:text-gray-800 hover:bg-gray-100" } onClick={() => setActiveTab("Prompts")}>Prompts</Button>
                 <Button variant="ghost" className={ activeTab === "Sentiment" ? "text-blue-600 border-b-2 border-blue-600 rounded-none hover:bg-gray-100 hover:text-black" : "text-gray-600 hover:text-gray-800 hover:bg-gray-100" } onClick={() => setActiveTab("Sentiment")}>Sentimiento</Button>
                 
                 {/* Filtro de modelo se movió al toolbar de filtros globales */}
@@ -1123,25 +1136,14 @@ export function AnalyticsDashboard() {
                                       tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }}
                                       type="number"
                                       scale="time"
-                                      domain={([dataMin, dataMax]) => {
-                                        const start = dateRange?.from ? dateRange.from.getTime() : dataMin
-                                        const end = dateRange?.to ? dateRange.to.getTime() : dataMax
-                                        return [start, end]
-                                      }}
+                                      domain={xDomain}
+                                      ticks={xTicks}
                                       minTickGap={40}
                                       tickFormatter={(unixTime: number) => {
                                         const date = new Date(unixTime)
-                                        const startMs = dateRange?.from?.getTime() ?? unixTime
-                                        const endMs = dateRange?.to?.getTime() ?? unixTime
-                                        const diffDays = (endMs - startMs) / (1000 * 3600 * 24)
                                         try {
-                                          if (diffDays <= 2) {
-                                            return format(date, 'HH:mm', { locale: es })
-                                          }
-                                          return format(date, 'MMM d', { locale: es })
-                                        } catch {
-                                          return String(unixTime)
-                                        }
+                                          return isHourlyRange ? format(date, 'HH:mm', { locale: es }) : format(date, 'MMM d', { locale: es })
+                                        } catch { return String(unixTime) }
                                       }}
                                     />
                                     <YAxis
@@ -1172,25 +1174,14 @@ export function AnalyticsDashboard() {
                                       tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }}
                                       type="number"
                                       scale="time"
-                                      domain={([dataMin, dataMax]) => {
-                                        const start = dateRange?.from ? dateRange.from.getTime() : dataMin
-                                        const end = dateRange?.to ? dateRange.to.getTime() : dataMax
-                                        return [start, end]
-                                      }}
+                                      domain={xDomain}
+                                      ticks={xTicks}
                                       minTickGap={40}
                                       tickFormatter={(unixTime: number) => {
                                         const date = new Date(unixTime)
-                                        const startMs = dateRange?.from?.getTime() ?? unixTime
-                                        const endMs = dateRange?.to?.getTime() ?? unixTime
-                                        const diffDays = (endMs - startMs) / (1000 * 3600 * 24)
                                         try {
-                                          if (diffDays <= 2) {
-                                            return format(date, 'HH:mm', { locale: es })
-                                          }
-                                          return format(date, 'MMM d', { locale: es })
-                                        } catch {
-                                          return String(unixTime)
-                                        }
+                                          return isHourlyRange ? format(date, 'HH:mm', { locale: es }) : format(date, 'MMM d', { locale: es })
+                                        } catch { return String(unixTime) }
                                       }}
                                     />
                                     <YAxis
@@ -1614,6 +1605,18 @@ export function AnalyticsDashboard() {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-4">
                         <h2 className="text-xl font-semibold text-gray-900">Prompts</h2>
+                        {/* Selector de período movido aquí */}
+                        <Select onValueChange={(value: PresetPeriod) => handlePresetChange(value)} value={activePeriod}>
+                          <SelectTrigger className="w-[200px]">
+                            <SelectValue placeholder="Período" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="24h">Últimas 24 horas</SelectItem>
+                            <SelectItem value="7d">Últimos 7 días</SelectItem>
+                            <SelectItem value="30d">Últimos 30 días</SelectItem>
+                            <SelectItem value="90d">Últimos 90 días</SelectItem>
+                          </SelectContent>
+                        </Select>
                         {/* Filtro de Tema igual al de Visibilidad */}
                         <Select value={selectedTopic} onValueChange={(v) => setSelectedTopic(v)}>
                           <SelectTrigger className="w-[220px]">
@@ -1839,9 +1842,24 @@ export function AnalyticsDashboard() {
                             <CardContent className="h-[250px] w-full">
                               <ResponsiveContainer>
                                 <LineChart data={promptDetails.timeseries}>
-                                  <XAxis dataKey="date" stroke="#888888" fontSize={12} />
+                                  <XAxis
+                                    dataKey={(d: any) => new Date(d.date).getTime()}
+                                    type="number"
+                                    scale="time"
+                                    domain={xDomain}
+                                    ticks={xTicks}
+                                    stroke="#888888"
+                                    fontSize={12}
+                                    tickFormatter={(unixTime: number) => {
+                                      const date = new Date(unixTime)
+                                      try { return isHourlyRange ? format(date, 'HH:mm', { locale: es }) : format(date, 'MMM d', { locale: es }) } catch { return String(unixTime) }
+                                    }}
+                                  />
                                   <YAxis stroke="#888888" fontSize={12} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
-                                  <Tooltip formatter={(value) => [`${value}%`, "Visibilidad"]} />
+                                  <Tooltip formatter={(value) => [`${value}%`, "Visibilidad"]} labelFormatter={(label: number | string) => {
+                                    const ts = typeof label === 'number' ? label : new Date(label).getTime()
+                                    try { return format(new Date(ts), "eeee, d MMM yyyy, HH:mm", { locale: es }) } catch { return String(label) }
+                                  }} />
                                   <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={2} dot={{ r: 3, fill: "#000" }} />
                                 </LineChart>
                               </ResponsiveContainer>
@@ -1852,9 +1870,24 @@ export function AnalyticsDashboard() {
                             <CardContent className="h-[250px] w-full">
                               <ResponsiveContainer>
                                 <LineChart data={promptDetails.sov_timeseries}>
-                                  <XAxis dataKey="date" stroke="#888888" fontSize={12} />
+                                  <XAxis
+                                    dataKey={(d: any) => new Date(d.date).getTime()}
+                                    type="number"
+                                    scale="time"
+                                    domain={xDomain}
+                                    ticks={xTicks}
+                                    stroke="#888888"
+                                    fontSize={12}
+                                    tickFormatter={(unixTime: number) => {
+                                      const date = new Date(unixTime)
+                                      try { return isHourlyRange ? format(date, 'HH:mm', { locale: es }) : format(date, 'MMM d', { locale: es }) } catch { return String(unixTime) }
+                                    }}
+                                  />
                                   <YAxis stroke="#888888" fontSize={12} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
-                                  <Tooltip formatter={(value) => [`${value}%`, "Share of Voice"]} />
+                                  <Tooltip formatter={(value) => [`${value}%`, "Share of Voice"]} labelFormatter={(label: number | string) => {
+                                    const ts = typeof label === 'number' ? label : new Date(label).getTime()
+                                    try { return format(new Date(ts), "eeee, d MMM yyyy, HH:mm", { locale: es }) } catch { return String(label) }
+                                  }} />
                                   <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={2} dot={{ r: 3, fill: "#000" }} />
                                 </LineChart>
                               </ResponsiveContainer>
