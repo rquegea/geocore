@@ -47,7 +47,7 @@ interface VisibilityApiResponse {
 }
 
 // TIPO PARA LOS PERIODOS PREDEFINIDOS
-type PresetPeriod = '7d' | '30d' | '90d' | 'custom';
+type PresetPeriod = '24h' | '7d' | '30d' | '90d' | 'custom';
 // Tipos ya exportados desde services/api
 
 // Colores para el pie chart basados en las clases que vienen del backend
@@ -294,6 +294,7 @@ export function AnalyticsDashboard() {
           <SelectValue placeholder="Seleccionar período" />
         </SelectTrigger>
         <SelectContent>
+          <SelectItem value="24h">Últimas 24 horas</SelectItem>
           <SelectItem value="7d">Últimos 7 días</SelectItem>
           <SelectItem value="30d">Últimos 30 días</SelectItem>
           <SelectItem value="90d">Últimos 90 días</SelectItem>
@@ -677,11 +678,17 @@ export function AnalyticsDashboard() {
   const handlePresetChange = (period: PresetPeriod) => {
     if (period === 'custom') return; // 'custom' se maneja por el calendario
     setActivePeriod(period);
-    const days = parseInt(period.replace('d', ''));
-    setDateRange({
-        from: subDays(new Date(), days - 1),
-        to: new Date(),
-    });
+    const now = new Date();
+    let fromDate: Date;
+    if (period.includes('h')) {
+      const hours = parseInt(period.replace('h', '')) || 24;
+      fromDate = new Date(now.getTime() - hours * 60 * 60 * 1000);
+    } else {
+      const days = parseInt(period.replace('d', '')) || 30;
+      // Incluir el día de hoy en el conteo
+      fromDate = subDays(now, days - 1);
+    }
+    setDateRange({ from: fromDate, to: now });
   };
 
   const handleCustomDateChange = (range: DateRange | undefined) => {
@@ -1098,12 +1105,31 @@ export function AnalyticsDashboard() {
                                 {visibilityChartType === "line" ? (
                                   <LineChart data={visibility.series} key={visibilityChartKey}>
                                     <XAxis
-                                      dataKey="date"
+                                      dataKey={(d: any) => new Date(d.date).getTime()}
                                       axisLine={false}
                                       tickLine={false}
                                       tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }}
-                                      tickFormatter={(v: string) => {
-                                        try { return format(new Date(v), "dd MMM HH:mm", { locale: es }); } catch { return v }
+                                      type="number"
+                                      scale="time"
+                                      domain={([dataMin, dataMax]) => {
+                                        const start = dateRange?.from ? dateRange.from.getTime() : dataMin
+                                        const end = dateRange?.to ? dateRange.to.getTime() : dataMax
+                                        return [start, end]
+                                      }}
+                                      minTickGap={40}
+                                      tickFormatter={(unixTime: number) => {
+                                        const date = new Date(unixTime)
+                                        const startMs = dateRange?.from?.getTime() ?? unixTime
+                                        const endMs = dateRange?.to?.getTime() ?? unixTime
+                                        const diffDays = (endMs - startMs) / (1000 * 3600 * 24)
+                                        try {
+                                          if (diffDays <= 2) {
+                                            return format(date, 'HH:mm', { locale: es })
+                                          }
+                                          return format(date, 'MMM d', { locale: es })
+                                        } catch {
+                                          return String(unixTime)
+                                        }
                                       }}
                                     />
                                     <YAxis
@@ -1117,8 +1143,9 @@ export function AnalyticsDashboard() {
                                     <Tooltip
                                       contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }}
                                       formatter={(v: number) => [`${Number(v).toFixed(1)}%`, 'Puntuación']}
-                                      labelFormatter={(label: string) => {
-                                        try { return format(new Date(label), "dd MMM yyyy HH:mm", { locale: es }); } catch { return label }
+                                      labelFormatter={(label: number | string) => {
+                                        const ts = typeof label === 'number' ? label : new Date(label).getTime()
+                                        try { return format(new Date(ts), "eeee, d MMM yyyy, HH:mm", { locale: es }); } catch { return String(label) }
                                       }}
                                     />
                                     <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={2} dot={{ fill: "#000", strokeWidth: 2, r: 4 }} />
@@ -1144,12 +1171,31 @@ export function AnalyticsDashboard() {
                                 ) : (
                                   <AreaChart data={visibility.series} key={visibilityChartKey}>
                                     <XAxis
-                                      dataKey="date"
+                                      dataKey={(d: any) => new Date(d.date).getTime()}
                                       axisLine={false}
                                       tickLine={false}
                                       tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }}
-                                      tickFormatter={(v: string) => {
-                                        try { return format(new Date(v), "dd MMM HH:mm", { locale: es }); } catch { return v }
+                                      type="number"
+                                      scale="time"
+                                      domain={([dataMin, dataMax]) => {
+                                        const start = dateRange?.from ? dateRange.from.getTime() : dataMin
+                                        const end = dateRange?.to ? dateRange.to.getTime() : dataMax
+                                        return [start, end]
+                                      }}
+                                      minTickGap={40}
+                                      tickFormatter={(unixTime: number) => {
+                                        const date = new Date(unixTime)
+                                        const startMs = dateRange?.from?.getTime() ?? unixTime
+                                        const endMs = dateRange?.to?.getTime() ?? unixTime
+                                        const diffDays = (endMs - startMs) / (1000 * 3600 * 24)
+                                        try {
+                                          if (diffDays <= 2) {
+                                            return format(date, 'HH:mm', { locale: es })
+                                          }
+                                          return format(date, 'MMM d', { locale: es })
+                                        } catch {
+                                          return String(unixTime)
+                                        }
                                       }}
                                     />
                                     <YAxis
@@ -1163,8 +1209,9 @@ export function AnalyticsDashboard() {
                                     <Tooltip
                                       contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }}
                                       formatter={(v: number) => [`${Number(v).toFixed(1)}%`, 'Puntuación']}
-                                      labelFormatter={(label: string) => {
-                                        try { return format(new Date(label), "dd MMM yyyy HH:mm", { locale: es }); } catch { return label }
+                                      labelFormatter={(label: number | string) => {
+                                        const ts = typeof label === 'number' ? label : new Date(label).getTime()
+                                        try { return format(new Date(ts), "eeee, d MMM yyyy, HH:mm", { locale: es }); } catch { return String(label) }
                                       }}
                                     />
                                     <Area type="monotone" dataKey="value" stroke="#000" fill="hsl(var(--chart-2))" fillOpacity={0.2} />
