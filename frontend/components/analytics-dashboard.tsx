@@ -27,7 +27,7 @@ import {
 } from "lucide-react"
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, PieChart, Pie, Cell, BarChart, Bar, AreaChart, Area, Brush } from "recharts"
 import Image from "next/image"
-import { getVisibility, getShareOfVoice, getVisibilityRanking, getMentions, getModels, getPrompts, getTopics, getPromptDetails, getSentiment, getTopicsCloud, createPrompt, updatePrompt, deletePrompt, getInsights, categorizePromptApi, type PromptsByTopic, type PromptDetails, type InsightRow, type ShareOfVoiceResponse } from "@/services/api"
+import { getVisibility, getShareOfVoice, getVisibilityRanking, getMentions, getModels, getPrompts, getTopics, getPromptDetails, getSentiment, getTopicsCloud, createPrompt, updatePrompt, deletePrompt, getInsights, categorizePromptApi, type PromptsByTopic, type PromptDetails, type InsightRow, type ShareOfVoiceResponse, type SentimentApiResponse } from "@/services/api"
 import { VisibilityData, Competitor, Mention } from "@/types"
 import { cn } from "@/lib/utils"
 import { DateRange } from "react-day-picker"
@@ -269,7 +269,7 @@ export function AnalyticsDashboard() {
   const [editPromptBrand, setEditPromptBrand] = useState("")
 
   // Sentiment API-backed state
-  const [sentimentApi, setSentimentApi] = useState<{ timeseries: { date: string; avg: number }[]; distribution: { negative: number; neutral: number; positive: number }; negatives: { id: number; summary: string | null; key_topics: string[]; source_title: string | null; source_url: string | null; sentiment: number; created_at: string | null }[]; positives?: { id: number; summary: string | null; key_topics: string[]; source_title: string | null; source_url: string | null; sentiment: number; created_at: string | null }[] } | null>(null)
+  const [sentimentApi, setSentimentApi] = useState<SentimentApiResponse | null>(null)
   const [topicsCloud, setTopicsCloud] = useState<{ topic: string; count: number; avg_sentiment?: number }[]>([])
   const [topicGroups, setTopicGroups] = useState<any[]>([])
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
@@ -335,7 +335,7 @@ export function AnalyticsDashboard() {
     const { distribution, timeseries, negatives, positives } = sentimentApi
     const total = (distribution.negative + distribution.neutral + distribution.positive) || 1
 
-    // Métrica principal: % de menciones positivas
+    // Métrica principal: % de menciones positivas (de la marca)
     const positivePercent = (distribution.positive / total) * 100
     const neutralPercent = (distribution.neutral / total) * 100
     const negativePercent = (distribution.negative / total) * 100
@@ -343,10 +343,10 @@ export function AnalyticsDashboard() {
     // Mantener delta simple por ahora
     const delta = 0
 
-    // Escalar serie a 0-100 según promedio de score (opcional)
+    // La serie ya viene en porcentaje de positivos
     const scaledTimeseries = (timeseries || []).map(p => ({
       date: p.date,
-      value: Math.max(0, Math.min(100, ((p.avg + 1) / 2) * 100))
+      value: Math.max(0, Math.min(100, Number(p.value) || 0))
     }))
 
     return {
@@ -437,14 +437,14 @@ export function AnalyticsDashboard() {
         setIsLoading(true)
         setError(null)
         const filters = { model: selectedModel, source: selectedSource, topic: selectedTopic, brand: primaryBrandName, granularity: visibilityGranularity }
-        const [visibilityResponse, visibilityRankingRes, sovResponse, mentionsResponse, promptsRes, sentimentRes, topicsCloudRes] = await Promise.all([
+        // Cargar primero lo esencial para mostrar el dashboard
+        const [visibilityResponse, visibilityRankingRes, sovResponse, mentionsResponse, promptsRes, sentimentRes] = await Promise.all([
           getVisibility(dateRange, filters),
           getVisibilityRanking(dateRange, filters),
           getShareOfVoice(dateRange, filters),
           getMentions(dateRange, filters),
           getPrompts(dateRange, filters),
           getSentiment(dateRange, filters),
-          getTopicsCloud(dateRange, filters),
         ]);
         setVisibility(visibilityResponse);
         setVisibilityRanking(visibilityRankingRes.ranking || [])
@@ -453,8 +453,17 @@ export function AnalyticsDashboard() {
         setMentions(mentionsResponse.mentions);
         setPromptsGrouped(promptsRes.topics);
         setSentimentApi(sentimentRes);
-        setTopicsCloud(topicsCloudRes.topics);
-        setTopicGroups((topicsCloudRes as any).groups || []);
+        // Cargar la nube de temas sin bloquear el render del dashboard
+        getTopicsCloud(dateRange, filters)
+          .then((topicsCloudRes) => {
+            setTopicsCloud(topicsCloudRes.topics);
+            setTopicGroups((topicsCloudRes as any).groups || []);
+          })
+          .catch((e) => {
+            console.error("No se pudieron cargar los topics-cloud", e)
+            setTopicsCloud([])
+            setTopicGroups([])
+          })
       } catch (err) {
         setError("No se pudieron cargar los datos. Por favor, revisa la consola o el estado del backend.")
         console.error(err)
@@ -1106,7 +1115,7 @@ export function AnalyticsDashboard() {
                           </CardHeader>
                           <CardContent>
                             <div className="mb-4">
-                              {selectedCompetitor && (
+                               {selectedCompetitor && (
                                 <div className="flex items-baseline gap-2">
                                   <span className="text-3xl font-bold">#{selectedCompetitor.rank}</span>
                                   <span className={`${selectedCompetitor.positive ? "text-green-500" : "text-red-500"} flex items-center gap-1`}>
@@ -1114,7 +1123,7 @@ export function AnalyticsDashboard() {
                                     {selectedCompetitor.change}
                                   </span>
                                 </div>
-                              )}
+                               )}
                             </div>
                             <div className="space-y-3">
                               <div className="flex items-center justify-between text-sm font-medium text-muted-foreground">
@@ -1218,7 +1227,7 @@ export function AnalyticsDashboard() {
                         </Card>
                       </div>
                     </div>
-
+                    
                   </>
                 )}
                 {activeTab === 'Sentiment' && (
@@ -1235,7 +1244,7 @@ export function AnalyticsDashboard() {
                         modelOptions={modelOptions}
                       />
                       <div className="flex items-center gap-2"></div>
-                        </div>
+                    </div>
 
                     <SentimentTab
                       sentimentComputed={sentimentComputed}

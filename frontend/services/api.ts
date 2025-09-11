@@ -88,7 +88,8 @@ export const getSources = (): Promise<{ sources: string[] }> => fetchFromAPI<{ s
 
 // Sentiment
 export interface SentimentApiResponse {
-  timeseries: { date: string; avg: number }[];
+  // value ya es porcentaje (0-100) del % de menciones positivas de la marca
+  timeseries: { date: string; value: number; ts?: number }[];
   distribution: { negative: number; neutral: number; positive: number };
   negatives: { id: number; summary: string | null; key_topics: string[]; source_title: string | null; source_url: string | null; sentiment: number; created_at: string | null }[];
   positives?: { id: number; summary: string | null; key_topics: string[]; source_title: string | null; source_url: string | null; sentiment: number; created_at: string | null }[];

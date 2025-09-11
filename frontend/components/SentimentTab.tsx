@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { TrendingUp, TrendingDown, ChevronDown } from "lucide-react"
-import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, AreaChart, Area, Brush } from "recharts"
+import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, AreaChart, Area, Brush, ReferenceDot } from "recharts"
 import { Badge } from "@/components/ui/badge"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import React from "react"
@@ -34,14 +34,29 @@ export interface SentimentTabProps {
   isHourlyRange: boolean
   xDomain: [number, number]
   xTicks: number[]
+  executionTimestamps?: number[]
 }
 
 export default function SentimentTab(props: SentimentTabProps) {
-  const { sentimentComputed, sentimentChartType, sentimentBrush, posHighlightIdx, negHighlightIdx, topicsCloud, topicGroups, openGroups, setOpenGroups, translateTopicToSpanish, isHourlyRange, xDomain, xTicks } = props
+  const { sentimentComputed, sentimentChartType, sentimentBrush, posHighlightIdx, negHighlightIdx, topicsCloud, topicGroups, openGroups, setOpenGroups, translateTopicToSpanish, isHourlyRange, xDomain, xTicks, executionTimestamps } = props
   const labelFormatter = (label: number | string) => {
     const ts = typeof label === 'number' ? label : new Date(label).getTime()
     try { return format(new Date(ts), isHourlyRange ? 'HH:mm' : 'MMM d', { locale: es }) } catch { return String(label) }
   }
+
+  const CustomTooltip = ({ active, label, payload }: any) => {
+    if (!active) return null
+    const v = payload && payload.length ? payload[0]?.value : undefined
+    const num = typeof v === 'number' && isFinite(v) ? v : Number(v)
+    const safe = isFinite(num) ? num : 0
+    return (
+      <div className="rounded-md border bg-card px-3 py-2 text-sm shadow">
+        <div className="font-medium">{labelFormatter(label)}</div>
+        <div className="text-muted-foreground">Positivo: {safe.toFixed(1)}%</div>
+      </div>
+    )
+  }
+
   return (
     <>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -81,8 +96,11 @@ export default function SentimentTab(props: SentimentTabProps) {
                         tickFormatter={(unixTime: number) => labelFormatter(unixTime)}
                       />
                       <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} domain={[0, 100]} />
-                      <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }} formatter={(v) => [`${Number(v).toFixed(1)}%`, 'Positivo']} labelFormatter={labelFormatter} />
+                      <Tooltip content={<CustomTooltip />} />
                       <Line type="monotone" dataKey="value" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={{ fill: "hsl(var(--chart-1))", strokeWidth: 2, r: 4 }} />
+                      {(executionTimestamps || []).map((ts, i) => (
+                        <ReferenceDot key={`exec-dot-${i}`} x={ts} y={0} r={3} stroke="#6b7280" fill="#6b7280" />
+                      ))}
                       {sentimentBrush && <Brush dataKey={(d: any) => new Date(d.date).getTime()} height={20} />}
                     </LineChart>
                   ) : (
@@ -100,8 +118,11 @@ export default function SentimentTab(props: SentimentTabProps) {
                         tickFormatter={(unixTime: number) => labelFormatter(unixTime)}
                       />
                       <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} domain={[0, 100]} />
-                      <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }} formatter={(v) => [`${Number(v).toFixed(1)}%`, 'Positivo']} labelFormatter={labelFormatter} />
+                      <Tooltip content={<CustomTooltip />} />
                       <Area type="monotone" dataKey="value" stroke="hsl(var(--chart-1))" fill="hsl(var(--chart-1))" fillOpacity={0.2} />
+                      {(executionTimestamps || []).map((ts, i) => (
+                        <ReferenceDot key={`exec-dot-area-${i}`} x={ts} y={0} r={3} stroke="#6b7280" fill="#6b7280" />
+                      ))}
                       {sentimentBrush && <Brush dataKey={(d: any) => new Date(d.date).getTime()} height={20} />}
                     </AreaChart>
                   )}

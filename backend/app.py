@@ -823,9 +823,6 @@ def get_visibility():
             where.append("q.topic = %s"); params.append(filters['topic'])
         where_sql = " AND ".join(where)
 
-        BRAND_SYNONYMS = {
-            "The Core School": ["the core school", "the core", "thecore"],
-        }
         synonyms = [s.lower() for s in BRAND_SYNONYMS.get(brand, [brand.lower()])]
         like_patterns = [f"%{s}%" for s in synonyms]
 
@@ -846,25 +843,36 @@ def get_visibility():
                                 WHERE LOWER(TRIM(kt)) = ANY(%s)
                             ) OR LOWER(COALESCE(m.response,'')) LIKE ANY(%s)
                               OR LOWER(COALESCE(m.source_title,'')) LIKE ANY(%s)
+                              OR EXISTS (
+                                SELECT 1 FROM jsonb_array_elements(COALESCE(i.payload->'brands','[]'::jsonb)) b
+                                WHERE LOWER(TRIM(CASE WHEN jsonb_typeof(b)='object' THEN COALESCE(b->>'name','') ELSE TRIM(BOTH '"' FROM b::text) END)) = ANY(%s)
+                              )
                         THEN 1 END) as brand_mentions
                     FROM mentions m
                     JOIN queries q ON m.query_id = q.id
+                    LEFT JOIN insights i ON i.id = m.generated_insight_id
                     WHERE {where_sql} AND m.poll_id IS NOT NULL
                     GROUP BY poll_id
                 )
                 SELECT
                     poll_start_time,
+                    total_mentions,
+                    brand_mentions,
                     (brand_mentions::float / GREATEST(total_mentions, 1)) * 100.0 as visibility_pct
                 FROM poll_stats
                 ORDER BY poll_start_time;
             """
-            cur.execute(query, tuple([synonyms, like_patterns, like_patterns] + params))
+            cur.execute(query, tuple([synonyms, like_patterns, like_patterns, synonyms] + params))
             rows = cur.fetchall()
-            
-            series = [{"date": row[0].isoformat(), "value": round(row[1], 1)} for row in rows]
-            
-            num_sum = sum(p['value'] for p in series)
-            den_sum = len(series)
+
+            # Serie se queda por hora
+            series = [{"date": row[0].isoformat(), "value": round(row[3], 1)} for row in rows]
+
+            # Score del periodo (ponderado por volumen)
+            pooled_total = sum(int(r[1] or 0) for r in rows)
+            pooled_brand = sum(int(r[2] or 0) for r in rows)
+            num_sum = pooled_brand
+            den_sum = pooled_total
 
         else: # granularidad 'day'
             cur.execute(f"SELECT DATE(m.created_at) AS d, COUNT(*) FROM mentions m JOIN queries q ON m.query_id = q.id WHERE {where_sql} GROUP BY DATE(m.created_at) ORDER BY DATE(m.created_at)", tuple(params))
@@ -874,6 +882,7 @@ def get_visibility():
                 SELECT DATE(m.created_at) AS d, COUNT(*)
                 FROM mentions m
                 JOIN queries q ON m.query_id = q.id
+                LEFT JOIN insights i ON i.id = m.generated_insight_id
                 WHERE {where_sql}
                   AND (
                     EXISTS (
@@ -882,10 +891,14 @@ def get_visibility():
                     )
                     OR LOWER(COALESCE(m.response,'')) LIKE ANY(%s)
                     OR LOWER(COALESCE(m.source_title,'')) LIKE ANY(%s)
+                    OR EXISTS (
+                      SELECT 1 FROM jsonb_array_elements(COALESCE(i.payload->'brands','[]'::jsonb)) b
+                      WHERE LOWER(TRIM(CASE WHEN jsonb_typeof(b)='object' THEN COALESCE(b->>'name','') ELSE TRIM(BOTH '"' FROM b::text) END)) = ANY(%s)
+                    )
                   )
                 GROUP BY DATE(m.created_at)
                 ORDER BY DATE(m.created_at)
-            """, tuple(params + [synonyms, like_patterns, like_patterns]))
+            """, tuple(params + [synonyms, like_patterns, like_patterns, synonyms]))
             core_rows = cur.fetchall()
 
             from datetime import timedelta
@@ -905,7 +918,7 @@ def get_visibility():
                 series.append({"date": ts_dt.isoformat(), "ts": int(ts_dt.timestamp() * 1000), "value": pct})
                 day += timedelta(days=1)
 
-        visibility_score = round((num_sum / max(den_sum, 1)), 1) if granularity == 'hour' else round((num_sum / max(den_sum, 1)) * 100.0, 1)
+        visibility_score = round((num_sum / max(den_sum, 1)) * 100.0, 1)
 
         n = len(series)
         delta = 0.0
@@ -947,7 +960,8 @@ def get_visibility_ranking():
         # Helper: trae payloads de insights para el rango indicado
         def fetch_rows(p):
             cur.execute(f"""
-                SELECT m.id, i.payload
+                SELECT m.id, m.key_topics, LOWER(COALESCE(m.response,'')) AS resp,
+                       LOWER(COALESCE(m.source_title,'')) AS title, i.payload
                 FROM mentions m
                 JOIN queries q ON m.query_id = q.id
                 LEFT JOIN insights i ON i.id = m.generated_insight_id
@@ -959,42 +973,20 @@ def get_visibility_ranking():
         rows = fetch_rows(params)
         total_responses = len(rows)
 
-        def extract_payload_brands(payload):
-            names = []
-            try:
-                if isinstance(payload, dict):
-                    brands = payload.get('brands') or []
-                    if isinstance(brands, list):
-                        for item in brands:
-                            if isinstance(item, dict):
-                                name = (item.get('name') or '').strip()
-                                if name:
-                                    names.append(name)
-                            elif isinstance(item, str):
-                                name = item.strip()
-                                if name:
-                                    names.append(name)
-            except Exception:
-                return []
-            return names
-
         def compute_counts(rows_in):
             from collections import defaultdict
             counts_local = defaultdict(int)
-            display_by_norm = {}
-            for _id, payload in rows_in:
-                brands = extract_payload_brands(payload)
+            for _id, key_topics, resp, title, payload in rows_in:
+                detected = _detect_brands(key_topics, resp, title, payload)
                 seen = set()
-                for b in brands:
-                    n = b.lower().strip()
-                    if not n or n in seen:
+                for brand_name in detected:
+                    if brand_name in seen:
                         continue
-                    seen.add(n)
-                    display_by_norm.setdefault(n, b)
-                    counts_local[n] += 1
-            return counts_local, display_by_norm
+                    seen.add(brand_name)
+                    counts_local[brand_name] += 1
+            return counts_local
 
-        counts, name_map = compute_counts(rows)
+        counts = compute_counts(rows)
 
         colors = ["bg-blue-500", "bg-red-500", "bg-blue-600", "bg-yellow-500", "bg-gray-800"]
         # Calcular comparativa con el periodo anterior
@@ -1015,20 +1007,19 @@ def get_visibility_ranking():
 
         rows_prev = fetch_rows(prev_params)
         total_prev = len(rows_prev)
-        counts_prev, _ = compute_counts(rows_prev)
+        counts_prev = compute_counts(rows_prev)
 
         ranking = []
         denom = max(total_responses, 1)
         prev_denom = max(total_prev, 1)
         pairs = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:10]
-        for i, (norm, count) in enumerate(pairs):
-            b = name_map.get(norm, norm)
+        for i, (brand_name, count) in enumerate(pairs):
             pct_curr = (count / denom) * 100.0
-            prev_pct = (counts_prev.get(norm, 0) / prev_denom) * 100.0 if prev_denom else 0.0
+            prev_pct = (counts_prev.get(brand_name, 0) / prev_denom) * 100.0 if prev_denom else 0.0
             diff = round(pct_curr - prev_pct, 1)
             ranking.append({
                 "rank": i + 1,
-                "name": b,
+                "name": brand_name,
                 "score": f"{pct_curr:.1f}%",
                 "change": f"{diff:+.1f}%",
                 "positive": diff >= 0,
@@ -1064,10 +1055,12 @@ def get_industry_ranking():
             where.append("q.topic = %s"); params.append(filters['topic'])
         where_sql = " AND ".join(where)
 
-        # Obtener menciones con su topic y el payload del insight asociado
-        # Usaremos exclusivamente i.payload->brands para detectar marcas de forma dinámica
+        # Obtener menciones con su topic y los campos necesarios para detección por sinónimos
         cur.execute(f"""
-            SELECT q.topic, i.payload
+            SELECT q.topic, m.key_topics,
+                   LOWER(COALESCE(m.response,'')) AS resp,
+                   LOWER(COALESCE(m.source_title,'')) AS title,
+                   i.payload
             FROM mentions m
             JOIN queries q ON m.query_id = q.id
             LEFT JOIN insights i ON i.id = m.generated_insight_id
@@ -1075,48 +1068,21 @@ def get_industry_ranking():
         """, tuple(params))
         rows = cur.fetchall()
 
-        # Extraer marcas de forma dinámica a partir de payload.brands
-        # Contaremos presencia por mención (no usamos el campo "mentions" para ponderar)
+        # Detectar marcas por sinónimos + payload.brands. Contamos presencia por mención
         from collections import defaultdict
         overall_counts = defaultdict(int)
         topic_counts = defaultdict(lambda: defaultdict(int))
-        # Normalización para agrupar por nombre insensible a mayúsculas/minúsculas
-        display_name_by_norm = {}
-
-        def extract_brand_names(payload_obj):
-            names = []
-            try:
-                if isinstance(payload_obj, dict):
-                    brands = payload_obj.get('brands') or []
-                    if isinstance(brands, list):
-                        for item in brands:
-                            if isinstance(item, dict):
-                                name = (item.get('name') or '').strip()
-                                if name:
-                                    names.append(name)
-                            elif isinstance(item, str):
-                                name = item.strip()
-                                if name:
-                                    names.append(name)
-            except Exception:
-                # En caso de payload inválido, devolvemos lista vacía
-                return []
-            return names
-
-        for topic, payload in rows:
-            brands = extract_brand_names(payload)
-            if not brands:
+        for topic, key_topics, resp, title, payload in rows:
+            detected = _detect_brands(key_topics, resp, title, payload)
+            if not detected:
                 continue
-            # Contar presencia por mención, normalizando por nombre
-            seen_norms = set()
-            for b in brands:
-                norm = b.lower().strip()
-                if not norm or norm in seen_norms:
+            seen = set()
+            for canon in detected:
+                if canon in seen:
                     continue
-                seen_norms.add(norm)
-                display_name_by_norm.setdefault(norm, b)
-                overall_counts[norm] += 1
-                topic_counts[topic or 'Uncategorized'][norm] += 1
+                seen.add(canon)
+                overall_counts[canon] += 1
+                topic_counts[topic or 'Uncategorized'][canon] += 1
 
         colors = ["bg-blue-500", "bg-red-500", "bg-blue-600", "bg-yellow-500", "bg-gray-800"]
         # overall ranking
@@ -1124,15 +1090,14 @@ def get_industry_ranking():
         overall_sorted = sorted(overall_counts.items(), key=lambda x: x[1], reverse=True)[:10]
         overall = []
         for i, (norm_name, c) in enumerate(overall_sorted):
-            b = display_name_by_norm.get(norm_name, norm_name)
             overall.append({
                 "rank": i + 1,
-                "name": b,
+                "name": norm_name,
                 "score": f"{(c/total_mentions)*100:.1f}%",
                 "change": "+0.0%",
                 "positive": True,
                 "color": colors[i % len(colors)],
-                "selected": b == "The Core School"
+                "selected": norm_name == "The Core School"
             })
 
         # by_topic ranking
@@ -1142,15 +1107,14 @@ def get_industry_ranking():
             pairs = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:10]
             rk = []
             for i, (norm_name, c) in enumerate(pairs):
-                b = display_name_by_norm.get(norm_name, norm_name)
                 rk.append({
                     "rank": i + 1,
-                    "name": b,
+                    "name": norm_name,
                     "score": f"{(c/tot)*100:.1f}%",
                     "change": "+0.0%",
                     "positive": True,
                     "color": colors[i % len(colors)],
-                    "selected": b == "The Core School"
+                    "selected": norm_name == "The Core School"
                 })
             by_topic[t] = rk
 
@@ -1242,82 +1206,135 @@ def get_sentiment():
         where_sql = " AND ".join(where_clauses)
         join_sql = "JOIN queries q ON m.query_id = q.id"
 
-        # Serie temporal por día/hora SOLO para la marca (The Core)
+        # Detección robusta de marca (sinónimos + texto + título + payload.brands)
         brand = request.args.get('brand') or os.getenv('DEFAULT_BRAND', 'The Core School')
-        brand_norm = (brand or '').lower().strip()
+        synonyms = [s.lower() for s in BRAND_SYNONYMS.get(brand, [brand.lower()])]
+        like_patterns = [f"%{s}%" for s in synonyms]
+
+        timeseries = []
+        total_neg = 0
+        total_neu = 0
+        total_pos = 0
+
         if granularity == 'hour':
-            cur.execute(f"""
-                SELECT DATE_TRUNC('hour', m.created_at) AS t,
-                       SUM(CASE WHEN COALESCE(m.sentiment,0) > 0.3 THEN 1 ELSE 0 END) AS pos,
-                       SUM(CASE WHEN COALESCE(m.sentiment,0) BETWEEN -0.3 AND 0.3 THEN 1 ELSE 0 END) AS neu,
-                       SUM(CASE WHEN COALESCE(m.sentiment,0) < -0.3 THEN 1 ELSE 0 END) AS neg
-                FROM mentions m
-                {join_sql}
-                WHERE {where_sql}
-                  AND EXISTS (
-                    SELECT 1 FROM jsonb_array_elements_text(COALESCE(to_jsonb(m.key_topics),'[]'::jsonb)) kt
-                    WHERE LOWER(TRIM(kt)) = %s
-                  )
-                GROUP BY DATE_TRUNC('hour', m.created_at)
-                ORDER BY DATE_TRUNC('hour', m.created_at)
-            """, tuple(params + [brand_norm]))
-            ts_rows = cur.fetchall()
-            timeseries = []
-            for t_bucket, pos, neu, neg in ts_rows:
-                total = int((pos or 0) + (neu or 0) + (neg or 0))
-                pct_pos = (int(pos or 0) / max(total, 1)) * 100.0
-                timeseries.append({"date": t_bucket.isoformat(), "ts": int(t_bucket.timestamp() * 1000), "value": round(pct_pos, 1)})
+            # Agregación por ejecución del poll (poll_id) usando hora de inicio del poll
+            query = f"""
+                WITH rows AS (
+                    SELECT 
+                        m.poll_id,
+                        m.created_at,
+                        COALESCE(m.sentiment, 0) AS sent,
+                        (
+                            EXISTS (
+                                SELECT 1 FROM jsonb_array_elements_text(COALESCE(to_jsonb(m.key_topics),'[]'::jsonb)) kt
+                                WHERE LOWER(TRIM(kt)) = ANY(%s)
+                            )
+                            OR LOWER(COALESCE(m.response,'')) LIKE ANY(%s)
+                            OR LOWER(COALESCE(m.source_title,'')) LIKE ANY(%s)
+                            OR EXISTS (
+                                SELECT 1 FROM jsonb_array_elements(COALESCE(i.payload->'brands','[]'::jsonb)) b
+                                WHERE LOWER(TRIM(CASE WHEN jsonb_typeof(b)='object' THEN COALESCE(b->>'name','') ELSE TRIM(BOTH '"' FROM b::text) END)) = ANY(%s)
+                            )
+                        ) AS is_brand
+                    FROM mentions m
+                    {join_sql}
+                    LEFT JOIN insights i ON i.id = m.generated_insight_id
+                    WHERE {where_sql} AND m.poll_id IS NOT NULL
+                )
+                SELECT 
+                    MIN(created_at) AS poll_start_time,
+                    SUM(CASE WHEN is_brand THEN 1 ELSE 0 END) AS total_brand,
+                    SUM(CASE WHEN is_brand AND sent > 0.3 THEN 1 ELSE 0 END) AS pos_brand,
+                    SUM(CASE WHEN is_brand AND sent BETWEEN -0.3 AND 0.3 THEN 1 ELSE 0 END) AS neu_brand,
+                    SUM(CASE WHEN is_brand AND sent < -0.3 THEN 1 ELSE 0 END) AS neg_brand
+                FROM rows
+                GROUP BY poll_id
+                ORDER BY MIN(created_at)
+            """
+            cur.execute(query, tuple([synonyms, like_patterns, like_patterns, synonyms] + params))
+            rows = cur.fetchall()
+            for poll_start_time, total_b, pos_b, neu_b, neg_b in rows:
+                total_b = int(total_b or 0); pos_b = int(pos_b or 0); neu_b = int(neu_b or 0); neg_b = int(neg_b or 0)
+                total_neg += neg_b; total_neu += neu_b; total_pos += pos_b
+                denom = max(total_b, 1)
+                pct = round((pos_b / denom) * 100.0, 1)
+                timeseries.append({
+                    "date": poll_start_time.isoformat(),
+                    "ts": int(poll_start_time.timestamp() * 1000),
+                    "value": pct,
+                })
         else:
-            cur.execute(f"""
-                SELECT DATE(m.created_at) AS d,
-                       SUM(CASE WHEN COALESCE(m.sentiment,0) > 0.3 THEN 1 ELSE 0 END) AS pos,
-                       SUM(CASE WHEN COALESCE(m.sentiment,0) BETWEEN -0.3 AND 0.3 THEN 1 ELSE 0 END) AS neu,
-                       SUM(CASE WHEN COALESCE(m.sentiment,0) < -0.3 THEN 1 ELSE 0 END) AS neg
-                FROM mentions m
-                {join_sql}
-                WHERE {where_sql}
-                  AND EXISTS (
-                    SELECT 1 FROM jsonb_array_elements_text(COALESCE(to_jsonb(m.key_topics),'[]'::jsonb)) kt
-                    WHERE LOWER(TRIM(kt)) = %s
-                  )
-                GROUP BY DATE(m.created_at)
-                ORDER BY DATE(m.created_at)
-            """, tuple(params + [brand_norm]))
-            ts_rows = cur.fetchall()
+            # Serie diaria considerando solo menciones de la marca
+            query = f"""
+                WITH rows AS (
+                    SELECT 
+                        m.created_at,
+                        COALESCE(m.sentiment, 0) AS sent,
+                        (
+                            EXISTS (
+                                SELECT 1 FROM jsonb_array_elements_text(COALESCE(to_jsonb(m.key_topics),'[]'::jsonb)) kt
+                                WHERE LOWER(TRIM(kt)) = ANY(%s)
+                            )
+                            OR LOWER(COALESCE(m.response,'')) LIKE ANY(%s)
+                            OR LOWER(COALESCE(m.source_title,'')) LIKE ANY(%s)
+                            OR EXISTS (
+                                SELECT 1 FROM jsonb_array_elements(COALESCE(i.payload->'brands','[]'::jsonb)) b
+                                WHERE LOWER(TRIM(CASE WHEN jsonb_typeof(b)='object' THEN COALESCE(b->>'name','') ELSE TRIM(BOTH '"' FROM b::text) END)) = ANY(%s)
+                            )
+                        ) AS is_brand
+                    FROM mentions m
+                    {join_sql}
+                    LEFT JOIN insights i ON i.id = m.generated_insight_id
+                    WHERE {where_sql}
+                )
+                SELECT 
+                    DATE(created_at) AS d,
+                    SUM(CASE WHEN is_brand AND sent > 0.3 THEN 1 ELSE 0 END) AS pos,
+                    SUM(CASE WHEN is_brand AND sent BETWEEN -0.3 AND 0.3 THEN 1 ELSE 0 END) AS neu,
+                    SUM(CASE WHEN is_brand AND sent < -0.3 THEN 1 ELSE 0 END) AS neg
+                FROM rows
+                GROUP BY DATE(created_at)
+                ORDER BY DATE(created_at)
+            """
+            cur.execute(query, tuple([synonyms, like_patterns, like_patterns, synonyms] + params))
+            rows = cur.fetchall()
             from datetime import datetime as _dt
-            timeseries = []
-            for d_bucket, pos, neu, neg in ts_rows:
-                total = int((pos or 0) + (neu or 0) + (neg or 0))
-                pct_pos = (int(pos or 0) / max(total, 1)) * 100.0
+            for d_bucket, pos, neu, neg in rows:
+                pos = int(pos or 0); neu = int(neu or 0); neg = int(neg or 0)
+                total = pos + neu + neg
+                total_neg += neg; total_neu += neu; total_pos += pos
+                pct_pos = (pos / max(total, 1)) * 100.0
                 ts_dt = _dt.combine(d_bucket, _dt.min.time())
                 timeseries.append({"date": ts_dt.isoformat(), "ts": int(ts_dt.timestamp() * 1000), "value": round(pct_pos, 1)})
 
-        # Buckets (umbrales afinados)
-        cur.execute(f"""
-            SELECT 
-                SUM(CASE WHEN COALESCE(m.sentiment,0) < -0.3 THEN 1 ELSE 0 END) AS negative,
-                SUM(CASE WHEN COALESCE(m.sentiment,0) BETWEEN -0.3 AND 0.3 THEN 1 ELSE 0 END) AS neutral,
-                SUM(CASE WHEN COALESCE(m.sentiment,0) > 0.3 THEN 1 ELSE 0 END) AS positive
-            FROM mentions m
-            {join_sql}
-            WHERE {where_sql}
-              AND EXISTS (
-                SELECT 1 FROM jsonb_array_elements_text(COALESCE(to_jsonb(m.key_topics),'[]'::jsonb)) kt
-                WHERE LOWER(TRIM(kt)) = %s
-              )
-        """, tuple(params + [brand_norm]))
-        bucket_row = cur.fetchone() or (0,0,0)
-        distribution = {"negative": int(bucket_row[0] or 0), "neutral": int(bucket_row[1] or 0), "positive": int(bucket_row[2] or 0)}
+        distribution = {"negative": int(total_neg), "neutral": int(total_neu), "positive": int(total_pos)}
 
-        # Top negativas recientes (sentimiento < -0.3 y confianza >= 0.6)
-        cur.execute(f"""
+        # Top negativas/positivas de la marca
+        brand_filter_sql = f"""
+            (
+                EXISTS (
+                    SELECT 1 FROM jsonb_array_elements_text(COALESCE(to_jsonb(m.key_topics),'[]'::jsonb)) kt
+                    WHERE LOWER(TRIM(kt)) = ANY(%s)
+                )
+                OR LOWER(COALESCE(m.response,'')) LIKE ANY(%s)
+                OR LOWER(COALESCE(m.source_title,'')) LIKE ANY(%s)
+                OR EXISTS (
+                    SELECT 1 FROM jsonb_array_elements(COALESCE(i.payload->'brands','[]'::jsonb)) b
+                    WHERE LOWER(TRIM(CASE WHEN jsonb_typeof(b)='object' THEN COALESCE(b->>'name','') ELSE TRIM(BOTH '"' FROM b::text) END)) = ANY(%s)
+                )
+            )
+        """
+
+        neg_sql = f"""
             SELECT m.id, m.summary, m.key_topics, m.source_title, m.source_url, m.sentiment, m.created_at
             FROM mentions m
             {join_sql}
-            WHERE {where_sql} AND COALESCE(m.sentiment, 0) < -0.3 AND COALESCE(m.confidence_score, 0) >= 0.6
+            LEFT JOIN insights i ON i.id = m.generated_insight_id
+            WHERE {where_sql} AND {brand_filter_sql} AND COALESCE(m.sentiment, 0) < -0.3 AND COALESCE(m.confidence_score, 0) >= 0.6
             ORDER BY m.sentiment ASC NULLS FIRST, m.created_at DESC
             LIMIT 20
-        """, tuple(params))
+        """
+        cur.execute(neg_sql, tuple(params + [synonyms, like_patterns, like_patterns, synonyms]))
         neg_rows = cur.fetchall()
         negatives = [
             {
@@ -1332,15 +1349,16 @@ def get_sentiment():
             for r in neg_rows
         ]
 
-        # Top positivas recientes (sentimiento > 0.3 y confianza >= 0.6)
-        cur.execute(f"""
+        pos_sql = f"""
             SELECT m.id, m.summary, m.key_topics, m.source_title, m.source_url, m.sentiment, m.created_at
             FROM mentions m
             {join_sql}
-            WHERE {where_sql} AND COALESCE(m.sentiment, 0) > 0.3 AND COALESCE(m.confidence_score, 0) >= 0.6
+            LEFT JOIN insights i ON i.id = m.generated_insight_id
+            WHERE {where_sql} AND {brand_filter_sql} AND COALESCE(m.sentiment, 0) > 0.3 AND COALESCE(m.confidence_score, 0) >= 0.6
             ORDER BY m.sentiment DESC NULLS LAST, m.created_at DESC
             LIMIT 20
-        """, tuple(params))
+        """
+        cur.execute(pos_sql, tuple(params + [synonyms, like_patterns, like_patterns, synonyms]))
         pos_rows = cur.fetchall()
         positives = [
             {
@@ -1356,27 +1374,14 @@ def get_sentiment():
         ]
 
         cur.close(); conn.close()
-        # Forward-fill backend para sentiment en granularidad hora (sobre value)
-        if granularity == 'hour':
-            from datetime import timedelta
-            val_by_t = {r['ts']: r.get('value', 0.0) for r in timeseries}
-            t = int(filters['start_date'].replace(minute=0, second=0, microsecond=0).timestamp()*1000)
-            from datetime import datetime as _dt, timezone as _tz
-            now_aware = _dt.now(filters['end_date'].tzinfo or _tz.utc)
-            end_cap = min(filters['end_date'], now_aware)
-            end_t = int(end_cap.replace(minute=0, second=0, microsecond=0).timestamp()*1000)
-            out = []
-            last = None
-            while t <= end_t:
-                cur_val = val_by_t.get(t, None)
-                if cur_val is None:
-                    cur_val = last if last is not None else 0.0
-                else:
-                    last = cur_val
-                out.append({"date": _dt.fromtimestamp(t/1000).isoformat(), "ts": t, "value": float(cur_val)})
-                t += 3600*1000
-            timeseries = out
-        return jsonify({"timeseries": timeseries, "distribution": distribution, "negatives": negatives, "positives": positives, "granularity": granularity})
+
+        return jsonify({
+            "timeseries": timeseries,
+            "distribution": distribution,
+            "negatives": negatives,
+            "positives": positives,
+            "granularity": granularity,
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1415,8 +1420,15 @@ def get_topics_cloud():
         rows = cur.fetchall()
         topics = [{"topic": r[0], "count": int(r[1] or 0), "avg_sentiment": float(r[2] or 0.0)} for r in rows]
 
+        # Intentar agrupar por categorías estratégicas con IA; si falla, devolver sin groups
+        groups = []
+        try:
+            groups = group_topics_with_ai(topics) or []
+        except Exception:
+            groups = []
+
         cur.close(); conn.close()
-        return jsonify({"topics": topics})
+        return jsonify({"topics": topics, "groups": groups})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

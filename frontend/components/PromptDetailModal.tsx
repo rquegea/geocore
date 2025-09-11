@@ -53,6 +53,32 @@ export default function PromptDetailModal(props: PromptDetailModalProps) {
     } catch { return [] }
   }, [promptDetails])
 
+  // Normalizar series para evitar NaN en tooltips y gráficos
+  const visSeries = React.useMemo(() => {
+    const src = promptDetails?.timeseries || []
+    return src.map((d) => {
+      const ts = (d as any).ts ?? new Date((d as any).date).getTime()
+      const raw = (d as any).value
+      const value = typeof raw === 'number' && isFinite(raw) ? raw : 0
+      return { ts, value }
+    })
+  }, [promptDetails])
+  const sovSeries = React.useMemo(() => {
+    const src = promptDetails?.sov_timeseries || []
+    return src.map((d) => {
+      const ts = (d as any).ts ?? new Date((d as any).date).getTime()
+      const raw = (d as any).value
+      const value = typeof raw === 'number' && isFinite(raw) ? raw : 0
+      return { ts, value }
+    })
+  }, [promptDetails])
+
+  const tooltipValue = (v: unknown) => {
+    const num = typeof v === 'number' && isFinite(v) ? v : Number(v)
+    const safe = isFinite(num) ? num : 0
+    return `${safe.toFixed(1)}%`
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[95vw] max-w-6xl max-h-[90vh] overflow-y-auto">
@@ -116,10 +142,10 @@ export default function PromptDetailModal(props: PromptDetailModalProps) {
                 <CardHeader><CardTitle className="text-sm">Puntuación de Visibilidad (Evolución)</CardTitle></CardHeader>
                 <CardContent className="h-[250px] w-full">
                   <ResponsiveContainer>
-                    <LineChart data={promptDetails.timeseries}>
-                      <XAxis dataKey={(d: any) => (d.ts ?? new Date(d.date).getTime())} type="number" scale="time" domain={xDomain} ticks={xTicks} stroke="#888888" fontSize={12} tickFormatter={(t: number) => labelFormatter(t)} />
+                    <LineChart data={visSeries}>
+                      <XAxis dataKey={(d: any) => d.ts} type="number" scale="time" domain={xDomain} ticks={xTicks} stroke="#888888" fontSize={12} tickFormatter={(t: number) => labelFormatter(t)} />
                       <YAxis stroke="#888888" fontSize={12} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
-                      <Tooltip formatter={(value) => [`${Number(value).toFixed(1)}%`, "Visibilidad"]} labelFormatter={(t) => labelFormatter(t as number)} />
+                      <Tooltip formatter={(value) => [tooltipValue(value), "Visibilidad"]} labelFormatter={(t) => labelFormatter(t as number)} />
                       <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={2} dot={{ r: 3, fill: "#000" }} />
                       {execDots.map((d, i) => (
                         <ReferenceDot key={`vdot-${i}`} x={d.ts} y={0} r={3} stroke="#111827" fill="#111827" />
@@ -132,10 +158,10 @@ export default function PromptDetailModal(props: PromptDetailModalProps) {
                 <CardHeader><CardTitle className="text-sm">Share of Voice (Evolución)</CardTitle></CardHeader>
                 <CardContent className="h-[250px] w-full">
                   <ResponsiveContainer>
-                    <LineChart data={promptDetails.sov_timeseries}>
-                      <XAxis dataKey={(d: any) => (d.ts ?? new Date(d.date).getTime())} type="number" scale="time" domain={xDomain} ticks={xTicks} stroke="#888888" fontSize={12} tickFormatter={(t: number) => labelFormatter(t)} />
+                    <LineChart data={sovSeries}>
+                      <XAxis dataKey={(d: any) => d.ts} type="number" scale="time" domain={xDomain} ticks={xTicks} stroke="#888888" fontSize={12} tickFormatter={(t: number) => labelFormatter(t)} />
                       <YAxis stroke="#888888" fontSize={12} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
-                      <Tooltip formatter={(value) => [`${Number(value).toFixed(1)}%`, "Share of Voice"]} labelFormatter={(t) => labelFormatter(t as number)} />
+                      <Tooltip formatter={(value) => [tooltipValue(value), "Share of Voice"]} labelFormatter={(t) => labelFormatter(t as number)} />
                       <Line type="monotone" dataKey="value" stroke="#888" strokeWidth={2} dot={{ r: 3, fill: "#888" }} />
                       {execDots.map((d, i) => (
                         <ReferenceDot key={`sdot-${i}`} x={d.ts} y={0} r={3} stroke="#6b7280" fill="#6b7280" />
