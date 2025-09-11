@@ -421,6 +421,9 @@ export function AnalyticsDashboard() {
     }
   }, [selectedTopic, sovTopics])
 
+  // Estado de granularidad para Visibilidad
+  const [visibilityGranularity, setVisibilityGranularity] = useState<'day' | 'hour'>('day')
+
   // 3. USEEFFECT (sin cambios en su lógica, siempre depende de dateRange)
   useEffect(() => {
     if (!dateRange?.from || !dateRange?.to) {
@@ -430,7 +433,7 @@ export function AnalyticsDashboard() {
       try {
         setIsLoading(true)
         setError(null)
-        const filters = { model: selectedModel, source: selectedSource, topic: selectedTopic, brand: primaryBrandName }
+        const filters = { model: selectedModel, source: selectedSource, topic: selectedTopic, brand: primaryBrandName, granularity: visibilityGranularity }
         const [visibilityResponse, visibilityRankingRes, sovResponse, mentionsResponse, promptsRes, sentimentRes, topicsCloudRes] = await Promise.all([
           getVisibility(dateRange, filters),
           getVisibilityRanking(dateRange, filters),
@@ -457,7 +460,7 @@ export function AnalyticsDashboard() {
       }
     }
     loadDashboardData()
-  }, [dateRange, selectedModel, selectedTopic, primaryBrandName]);
+  }, [dateRange, selectedModel, selectedTopic, primaryBrandName, visibilityGranularity]);
 
   // cargar opciones de filtros (models y topics independientes del filtro activo)
   useEffect(() => {
@@ -1059,7 +1062,24 @@ export function AnalyticsDashboard() {
                               <CardTitle className="text-lg font-semibold">Puntuación de visibilidad</CardTitle>
                               <p className="text-sm text-muted-foreground"> Frecuencia con la que The Core School aparece en respuestas generadas por IA </p>
                             </div>
-                            {/* Controles de configuración removidos por solicitud */}
+                            <div className="flex items-center gap-1 border p-1 rounded-md bg-gray-50">
+                              <Button
+                                size="sm"
+                                variant={visibilityGranularity === 'day' ? 'secondary' : 'ghost'}
+                                onClick={() => setVisibilityGranularity('day')}
+                                className="text-xs"
+                              >
+                                Día
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant={visibilityGranularity === 'hour' ? 'secondary' : 'ghost'}
+                                onClick={() => setVisibilityGranularity('hour')}
+                                className="text-xs"
+                              >
+                                Poll
+                              </Button>
+                            </div>
                           </CardHeader>
                           <CardContent className="flex flex-col h-full">
                             <div className="mb-4">

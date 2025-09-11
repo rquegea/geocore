@@ -10,56 +10,7 @@ QUERIES = [
     # === Grupo 1: Prompts Generales y de Competencia ===
     # Prompts sobre Currículum y Programas
     ("¿Qué escuelas superiores o centros privados en España ofrecen programas para escribir guiones y formación audiovisual práctica?", "The Core School", "Curriculum & Programs", "es"),
-    ("¿Qué escuelas especializadas en entretenimiento existen en España, aparte de las universidades públicas?", "The Core School", "Curriculum & Programs", "es"),
-    ("¿Cuáles son los mejores centros de formación para estudiar desarrollo de videojuegos en España con un enfoque en la industria?", "The Core School", "Curriculum & Programs", "es"),
-    ("¿Dónde puedo estudiar cine o televisión en Madrid en escuelas especializadas con un enfoque práctico?", "The Core School", "Curriculum & Programs", "es"),
-    ("¿Qué formación especializada existe en España si me gusta el cine y la televisión, más allá de los grados universitarios tradicionales?", "The Core School", "Curriculum & Programs", "es"),
-    ("¿Dónde estudiar carreras creativas con enfoque profesional y conexión con empresas en España?", "The Core School", "Curriculum & Programs", "es"),
-    ("¿Dónde ofrecen formación profesional para la creación de guiones en Madrid?", "The Core School", "Curriculum & Programs", "es"),
-    ("¿Dónde estudiar guion para series en España en escuelas con enfoque práctico?", "The Core School", "Curriculum & Programs", "es"),
-    ("¿Cuáles son las mejores escuelas de postproducción y VFX en España?", "The Core School", "Curriculum & Programs", "es"),
-
-    # Prompts sobre Becas y Costes
-    ("¿Qué escuelas superiores privadas de cine en España ofrecen becas o ayudas al estudio?", "The Core School", "Scholarships & Cost", "es"),
-
-    # Prompts sobre Reputación y Marca
-    ("¿Qué escuelas de audiovisual en España tienen los mejores acuerdos con productoras y cadenas de televisión?", "The Core School", "Brand & Reputation", "es"),
-    ("¿Qué centros de formación audiovisual tienen la mejor reputación profesional en España, excluyendo universidades públicas?", "The Core School", "Brand & Reputation", "es"),
-
-    # Prompts sobre Empleo
-    ("¿Qué trabajos en el sector audiovisual tienen buen sueldo y qué formación especializada se necesita?", "The Core School", "Employment & Jobs", "es"),
-    ("¿Qué salidas laborales reales ofrece la formación en comunicación audiovisual de escuelas privadas en España?", "The Core School", "Employment & Jobs", "es"),
-    ("¿Es difícil encontrar trabajo en la industria del cine en España si estudio en una escuela especializada en lugar de una universidad pública?", "The Core School", "Employment & Jobs", "es"),
-
-    # Prompts sobre Competencia
-    ("¿Cuál es el mejor máster en dirección de cine en Europa, enfocándose en escuelas con conexión directa con la industria?", "The Core School", "Competition & Benchmarking", "es"),
-    ("¿Qué máster online para creación de contenido o para ser influencer es el mejor en España?", "The Core School", "Competition & Benchmarking", "es"),
-    ("Comparativa de precios de grados en comunicación audiovisual en escuelas privadas de España.", "The Core School", "Competition & Benchmarking", "es"),
-    ("Análisis comparativo entre las mejores escuelas de formación audiovisual de España", "The Core School", "Competition & Benchmarking", "es"),
-    ("¿Cuáles son las mejores escuelas en Madrid para formarse en producción de televisión?", "The Core School", "Competition & Benchmarking", "es"),
-
-    # === Grupo 2: Prompts Estratégicos y de Audiencia ===
-    # ANÁLISIS DE AUDIENCIA: El joven indeciso
-    ("¿Qué intereses en el sector audiovisual y producción de contenidos muestran los jóvenes indecisos en España?", "The Core School", "Audience & Research", "es"),
-    ("¿Qué 'triggers' o referentes motivan a los jóvenes en España a interesarse por carreras en el sector audiovisual y qué emociones asocian a ello?", "The Core School", "Motivation & Triggers", "es"),
-    ("¿Qué motivaciones llevan a los jóvenes en España a preferir carreras creativas en audiovisual frente a estudios tradicionales?", "The Core School", "Motivation & Triggers", "es"),
-    ("¿Qué estilos de trabajo rechazan los jóvenes en España y qué carreras audiovisuales perciben con mayor libertad y mejor sueldo?", "The Core School", "Employment & Jobs", "es"),
-
-    # PERCEPCIÓN DE MARCA Y SECTOR
-    ("¿Cómo perciben los jóvenes en España la industria audiovisual en términos de prestigio, empleabilidad e innovación?", "The Core School", "Brand & Reputation", "es"),
-
-    # ANÁLISIS DE LA COMPETENCIA Y OFERTA (Versión estratégica)
-    ("Análisis comparativo de las mejores escuelas de negocio y formación audiovisual en España, como The Core, ECAM, TAI o ESCAC.", "The Core School", "Competition & Benchmarking", "es"),
-    ("¿Qué alternativas de formación (FP, bootcaps, academias online) consideran los jóvenes en España para el sector audiovisual?", "The Core School", "Competition & Benchmarking", "es"),
-    ("¿Cuáles son las mejores escuelas en Madrid para formarse en producción de televisión, del estilo de The Core School?", "The Core School", "Competition & Benchmarking", "es"),
-
-    # INFLUENCIA DE LOS PADRES
-    ("¿Cuáles son las preocupaciones de los padres en España sobre las carreras en el sector audiovisual y qué fuentes consultan para informarse?", "The Core School", "Parents & Family Concerns", "es"),
-    ("¿Qué argumentos (casos de éxito, salarios, empleo) son más persuasivos para los padres en España sobre estudiar carreras audiovisuales?", "The Core School", "Parents & Family Concerns", "es"),
-
-    # MARKETING Y CANALES
-    ("¿Qué canales digitales (TikTok, YouTube, Twitch, foros) son más efectivos para llegar a jóvenes interesados en audiovisual en España?", "The Core School", "Digital Trends & Marketing", "es"),
-    ("¿Cómo evoluciona el 'share of voice' y el sentimiento online de The Core School frente a sus competidores en España?", "The Core School", "Share of Voice & Monitoring", "es"),
+   
 ]
 
 def insert_thecore_queries():

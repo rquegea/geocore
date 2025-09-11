@@ -53,7 +53,8 @@ def run():
                 ADD COLUMN IF NOT EXISTS source_domain TEXT,
                 ADD COLUMN IF NOT EXISTS source_rank INTEGER,
                 ADD COLUMN IF NOT EXISTS query_text TEXT,
-                ADD COLUMN IF NOT EXISTS query_topic TEXT;
+                ADD COLUMN IF NOT EXISTS query_topic TEXT,
+                ADD COLUMN IF NOT EXISTS poll_id TEXT;
         EXCEPTION WHEN others THEN NULL; END;
     END$$;
     """)
@@ -70,6 +71,7 @@ def run():
     CREATE INDEX IF NOT EXISTS idx_mentions_model_name ON mentions(model_name);
     CREATE INDEX IF NOT EXISTS idx_mentions_source_domain ON mentions(source_domain);
     CREATE INDEX IF NOT EXISTS idx_mentions_query_topic ON mentions(query_topic);
+    CREATE INDEX IF NOT EXISTS idx_mentions_poll_id ON mentions(poll_id);
     """)
 
     # FK explícita para generated_insight_id

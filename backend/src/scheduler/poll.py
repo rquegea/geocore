@@ -1,9 +1,8 @@
-# backend/src/scheduler/poll.py (Versión final y corregida)
-
 import os
 import time
 import json
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Callable, Union, List, Tuple, Dict, Any
 
@@ -12,7 +11,7 @@ from psycopg2.extras import Json
 
 from src.engines.openai_engine import fetch_response, extract_insights, fetch_response_with_metadata
 from src.engines.perplexity import fetch_perplexity_response, fetch_perplexity_with_metadata
-from src.engines.serp import get_search_results as fetch_serp_response # <-- ÚNICA IMPORTACIÓN CORRECTA
+from src.engines.serp import get_search_results as fetch_serp_response
 from src.engines.serp import get_search_results_structured
 from src.engines.sentiment import analyze_sentiment
 from src.utils.slack import send_slack_alert
@@ -68,7 +67,7 @@ def insert_mention(cur, data: Dict[str, Any]):
             model_name, api_status_code, engine_request_id,
             input_tokens, output_tokens, price_usd,
             analysis_latency_ms, total_pipeline_ms, error_category,
-            source_domain, source_rank, query_text, query_topic
+            source_domain, source_rank, query_text, query_topic, poll_id
         )
         VALUES (
             %(query_id)s, %(engine)s, %(source)s, %(response)s, %(sentiment)s, %(emotion)s,
@@ -79,13 +78,12 @@ def insert_mention(cur, data: Dict[str, Any]):
             %(model_name)s, %(api_status_code)s, %(engine_request_id)s,
             %(input_tokens)s, %(output_tokens)s, %(price_usd)s,
             %(analysis_latency_ms)s, %(total_pipeline_ms)s, %(error_category)s,
-            %(source_domain)s, %(source_rank)s, %(query_text)s, %(query_topic)s
+            %(source_domain)s, %(source_rank)s, %(query_text)s, %(query_topic)s, %(poll_id)s
         )
         RETURNING id
         """,
         {
             **data,
-            # Adapt key_topics to JSON for jsonb column
             "key_topics": Json(data.get("key_topics", [])),
         },
     )
@@ -99,7 +97,7 @@ def insert_insights(cur, query_id: int, insights_payload: dict) -> int:
     return cur.fetchone()[0]
 
 def run_engine(name: str, fetch_fn: Callable[[str], Union[str, list]],
-               query_id: int, query_text: str, query_topic: str, cur) -> None:
+               query_id: int, query_text: str, query_topic: str, cur, poll_id: str) -> None:
     logging.info("▶ %s | query «%s»", name, query_text)
 
     try:
@@ -132,7 +130,6 @@ def run_engine(name: str, fetch_fn: Callable[[str], Union[str, list]],
                 logging.warning("⚠️ serpapi sin resultados para: %s", query_text)
                 return
         else:
-            # Para LLMs, intenta usar funciones con metadatos si están disponibles
             if name == "gpt-4":
                 engine_start = time.time()
                 response_text, meta = fetch_response_with_metadata(query_text, model="gpt-4o-mini")
@@ -163,7 +160,6 @@ def run_engine(name: str, fetch_fn: Callable[[str], Union[str, list]],
             return
 
         analysis_start = time.time()
-        # Primero generamos un summary breve y luego evaluamos sentimiento sobre ese resumen
         summary, key_topics = summarize_and_extract_topics(response_text)
         target_for_sentiment = summary if summary and isinstance(summary, str) and len(summary) >= 8 else response_text
         sentiment, emotion, confidence = analyze_sentiment(target_for_sentiment)
@@ -181,11 +177,9 @@ def run_engine(name: str, fetch_fn: Callable[[str], Union[str, list]],
             "sentiment": sentiment, "emotion": emotion, "confidence": confidence,
             "source_title": source_title, "source_url": source_url, "created_at": datetime.now(timezone.utc),
             "summary": summary, "key_topics": key_topics, "insight_id": insight_id,
-            # New fields with sane defaults
             "status": "active", "is_bot": False, "spam_score": 0.0, "duplicate_group_id": None,
             "alert_triggered": alert_triggered, "alert_reason": ("sentiment_below_threshold" if alert_triggered else None),
             "engine_latency_ms": fetch_ms, "error": None,
-            # v3 observabilidad
             "model_name": model_name,
             "api_status_code": api_status_code,
             "engine_request_id": engine_request_id,
@@ -200,6 +194,7 @@ def run_engine(name: str, fetch_fn: Callable[[str], Union[str, list]],
             "query_text": query_text,
             "query_topic": query_topic,
             "language": "unknown",
+            "poll_id": poll_id,
         }
 
         mention_id = insert_mention(cur, mention_data)
@@ -214,6 +209,8 @@ def run_engine(name: str, fetch_fn: Callable[[str], Union[str, list]],
 
 def main(loop_once: bool = True, sleep_seconds: int = 6 * 3600):
     logging.info("🔄 Polling service started")
+    poll_id = f"poll_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
+    logging.info(f"🚀 Starting new poll run with ID: {poll_id}")
     while True:
         with psycopg2.connect(**DB_CFG) as conn:
             with conn.cursor() as cur:
@@ -225,10 +222,10 @@ def main(loop_once: bool = True, sleep_seconds: int = 6 * 3600):
                         ("pplx-7b-chat", fetch_perplexity_response),
                         ("serpapi", fetch_serp_response),
                     ):
-                        run_engine(name, fn, query_id, query_text, query_topic, cur)
+                        run_engine(name, fn, query_id, query_text, query_topic, cur, poll_id)
                 conn.commit()
 
-        logging.info("🛑 Polling cycle finished")
+        logging.info(f"🛑 Polling cycle finished for poll_id={poll_id}")
         if loop_once:
             break
         time.sleep(sleep_seconds)

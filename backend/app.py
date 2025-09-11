@@ -804,9 +804,8 @@ def get_mentions():
 def get_visibility():
     """Visibilidad = menciones de la marca / total de menciones (con filtros aplicados).
     Devuelve score del periodo, delta y serie temporal en porcentaje (0–100%).
-
     Parámetros opcionales:
-      - granularity: 'day' (por defecto) o 'hour'.
+      - granularity: 'day' (por defecto) o 'hour' (que agrupa por poll_id).
     """
     try:
         filters = parse_filters(request)
@@ -820,103 +819,76 @@ def get_visibility():
             where.append("m.engine = %s"); params.append(filters['model'])
         if filters.get('source') and filters['source'] != 'all':
             where.append("m.source = %s"); params.append(filters['source'])
-        # Filtro directo por topic almacenado en las menciones
         if filters.get('topic') and filters['topic'] != 'all':
             where.append("q.topic = %s"); params.append(filters['topic'])
         where_sql = " AND ".join(where)
 
-        # Sinónimos/cadenas para detectar la marca en contenido (key_topics o texto)
         BRAND_SYNONYMS = {
             "The Core School": ["the core school", "the core", "thecore"],
         }
         synonyms = [s.lower() for s in BRAND_SYNONYMS.get(brand, [brand.lower()])]
         like_patterns = [f"%{s}%" for s in synonyms]
 
-        # Seleccionar agrupación por día u hora
-        if granularity == 'hour':
-            cur.execute(f"""
-                SELECT DATE_TRUNC('hour', m.created_at) AS t, COUNT(*)
-                FROM mentions m
-                JOIN queries q ON m.query_id = q.id
-                WHERE {where_sql}
-                GROUP BY DATE_TRUNC('hour', m.created_at)
-                ORDER BY DATE_TRUNC('hour', m.created_at)
-            """, tuple(params))
-            total_rows = cur.fetchall()
-
-            cur.execute(f"""
-                SELECT DATE_TRUNC('hour', m.created_at) AS t, COUNT(*)
-                FROM mentions m
-                JOIN queries q ON m.query_id = q.id
-                WHERE {where_sql}
-                  AND (
-                    EXISTS (
-                      SELECT 1 FROM jsonb_array_elements_text(COALESCE(to_jsonb(m.key_topics),'[]'::jsonb)) kt
-                      WHERE LOWER(TRIM(kt)) = ANY(%s)
-                    )
-                    OR LOWER(COALESCE(m.response,'')) LIKE ANY(%s)
-                    OR LOWER(COALESCE(m.source_title,'')) LIKE ANY(%s)
-                  )
-                GROUP BY DATE_TRUNC('hour', m.created_at)
-                ORDER BY DATE_TRUNC('hour', m.created_at)
-            """, tuple(params + [synonyms, like_patterns, like_patterns]))
-            core_rows = cur.fetchall()
-        else:
-            # Por defecto: agrupación diaria
-            cur.execute(f"""
-                SELECT DATE(m.created_at) AS d, COUNT(*)
-                FROM mentions m
-                JOIN queries q ON m.query_id = q.id
-                WHERE {where_sql}
-                GROUP BY DATE(m.created_at)
-                ORDER BY DATE(m.created_at)
-            """, tuple(params))
-            total_rows = cur.fetchall()
-
-            cur.execute(f"""
-                SELECT DATE(m.created_at) AS d, COUNT(*)
-                FROM mentions m
-                JOIN queries q ON m.query_id = q.id
-                WHERE {where_sql}
-                  AND (
-                    EXISTS (
-                      SELECT 1 FROM jsonb_array_elements_text(COALESCE(to_jsonb(m.key_topics),'[]'::jsonb)) kt
-                      WHERE LOWER(TRIM(kt)) = ANY(%s)
-                    )
-                    OR LOWER(COALESCE(m.response,'')) LIKE ANY(%s)
-                    OR LOWER(COALESCE(m.source_title,'')) LIKE ANY(%s)
-                  )
-                GROUP BY DATE(m.created_at)
-                ORDER BY DATE(m.created_at)
-            """, tuple(params + [synonyms, like_patterns, like_patterns]))
-            core_rows = cur.fetchall()
-
-        from datetime import timedelta
-        # Construir series según granularidad
         series = []
         num_sum = 0
         den_sum = 0
+
         if granularity == 'hour':
-            core_by_t = {d: int(c or 0) for d, c in core_rows}
-            total_by_t = {d: int(c or 0) for d, c in total_rows}
-            t = filters['start_date'].replace(minute=0, second=0, microsecond=0)
-            # Cap a la hora actual para no mostrar futuro
-            from datetime import datetime as _dt, timezone as _tz
-            now_aware = _dt.now(filters['end_date'].tzinfo or _tz.utc)
-            end_cap = min(filters['end_date'], now_aware)
-            end_t = end_cap.replace(minute=0, second=0, microsecond=0)
-            last_pct = None
-            while t <= end_t:
-                num = int(core_by_t.get(t, 0))
-                den = int(total_by_t.get(t, 0))
-                num_sum += num
-                den_sum += den
-                pct = round((num / max(den, 1)) * 100.0, 1) if den > 0 else (last_pct if last_pct is not None else 0.0)
-                series.append({"date": t.isoformat(), "ts": int(t.timestamp() * 1000), "value": pct})
-                if den > 0:
-                    last_pct = pct
-                t += timedelta(hours=1)
-        else:
+            query = f"""
+                WITH poll_stats AS (
+                    SELECT
+                        poll_id,
+                        MIN(m.created_at) as poll_start_time,
+                        COUNT(*) as total_mentions,
+                        COUNT(CASE WHEN
+                            EXISTS (
+                                SELECT 1 FROM jsonb_array_elements_text(COALESCE(to_jsonb(m.key_topics),'[]'::jsonb)) kt
+                                WHERE LOWER(TRIM(kt)) = ANY(%s)
+                            ) OR LOWER(COALESCE(m.response,'')) LIKE ANY(%s)
+                              OR LOWER(COALESCE(m.source_title,'')) LIKE ANY(%s)
+                        THEN 1 END) as brand_mentions
+                    FROM mentions m
+                    JOIN queries q ON m.query_id = q.id
+                    WHERE {where_sql} AND m.poll_id IS NOT NULL
+                    GROUP BY poll_id
+                )
+                SELECT
+                    poll_start_time,
+                    (brand_mentions::float / GREATEST(total_mentions, 1)) * 100.0 as visibility_pct
+                FROM poll_stats
+                ORDER BY poll_start_time;
+            """
+            cur.execute(query, tuple([synonyms, like_patterns, like_patterns] + params))
+            rows = cur.fetchall()
+            
+            series = [{"date": row[0].isoformat(), "value": round(row[1], 1)} for row in rows]
+            
+            num_sum = sum(p['value'] for p in series)
+            den_sum = len(series)
+
+        else: # granularidad 'day'
+            cur.execute(f"SELECT DATE(m.created_at) AS d, COUNT(*) FROM mentions m JOIN queries q ON m.query_id = q.id WHERE {where_sql} GROUP BY DATE(m.created_at) ORDER BY DATE(m.created_at)", tuple(params))
+            total_rows = cur.fetchall()
+
+            cur.execute(f"""
+                SELECT DATE(m.created_at) AS d, COUNT(*)
+                FROM mentions m
+                JOIN queries q ON m.query_id = q.id
+                WHERE {where_sql}
+                  AND (
+                    EXISTS (
+                      SELECT 1 FROM jsonb_array_elements_text(COALESCE(to_jsonb(m.key_topics),'[]'::jsonb)) kt
+                      WHERE LOWER(TRIM(kt)) = ANY(%s)
+                    )
+                    OR LOWER(COALESCE(m.response,'')) LIKE ANY(%s)
+                    OR LOWER(COALESCE(m.source_title,'')) LIKE ANY(%s)
+                  )
+                GROUP BY DATE(m.created_at)
+                ORDER BY DATE(m.created_at)
+            """, tuple(params + [synonyms, like_patterns, like_patterns]))
+            core_rows = cur.fetchall()
+
+            from datetime import timedelta
             core_by_day = {d: int(c or 0) for d, c in core_rows}
             total_by_day = {d: int(c or 0) for d, c in total_rows}
             start_day = filters['start_date'].date()
@@ -929,21 +901,19 @@ def get_visibility():
                 num_sum += num
                 den_sum += den
                 pct = round((num / max(den, 1)) * 100.0, 1)
-                # Normalizamos a medianoche para incluir ts
                 ts_dt = _dt.combine(day, _dt.min.time())
                 series.append({"date": ts_dt.isoformat(), "ts": int(ts_dt.timestamp() * 1000), "value": pct})
                 day += timedelta(days=1)
 
-        visibility_score = round((num_sum / max(den_sum, 1)) * 100.0, 1)
+        visibility_score = round((num_sum / max(den_sum, 1)), 1) if granularity == 'hour' else round((num_sum / max(den_sum, 1)) * 100.0, 1)
 
         n = len(series)
+        delta = 0.0
         if n >= 2:
             mid = n // 2
             first = sum(p['value'] for p in series[:mid]) / max(mid, 1)
             second = sum(p['value'] for p in series[mid:]) / max(n - mid, 1)
             delta = round(second - first, 1)
-        else:
-            delta = 0.0
 
         cur.close(); conn.close()
         return jsonify({"visibility_score": visibility_score, "delta": delta, "series": series, "granularity": granularity})

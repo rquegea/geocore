@@ -42,7 +42,7 @@ const buildDateQuery = (periodOrRange: DateRange | string): string => {
   return `?range=30d`;
 }
 
-type FilterParams = { model?: string; source?: string; topic?: string; brand?: string };
+type FilterParams = { model?: string; source?: string; topic?: string; brand?: string; granularity?: 'day' | 'hour' };
 
 const appendFilters = (qs: string, filters?: FilterParams): string => {
   if (!filters) return qs;
@@ -51,6 +51,7 @@ const appendFilters = (qs: string, filters?: FilterParams): string => {
   if (filters.source && filters.source !== 'all') url.set('source', filters.source);
   if (filters.topic && filters.topic !== 'all') url.set('topic', filters.topic);
   if (filters.brand) url.set('brand', filters.brand);
+  if (filters.granularity) url.set('granularity', filters.granularity);
   return `?${url.toString()}`;
 }
 
