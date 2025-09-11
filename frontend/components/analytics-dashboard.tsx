@@ -37,6 +37,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import PulsingCircle from "@/components/ui/pulsing-circle"
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible"
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
+import GlobalFiltersToolbar, { type PresetPeriod as ToolbarPresetPeriod, type OptionItem as ToolbarOptionItem } from "@/components/GlobalFiltersToolbar"
+import VisibilityTab from "@/components/VisibilityTab"
+import SentimentTab from "@/components/SentimentTab"
+import PromptsTab from "@/components/PromptsTab"
+import PromptDetailModal from "@/components/PromptDetailModal"
 
 // INTERFAZ PARA LOS DATOS DE VISIBILIDAD COMPLETOS
 interface VisibilityApiResponse {
@@ -229,7 +234,8 @@ export function AnalyticsDashboard() {
   // Filtro: source (oculto, siempre 'all')
   const selectedSource = "all"
   // Marca principal para filtrar sentimiento/SOV (mostrar The Core según entorno)
-  const primaryBrandName = process.env.NEXT_PUBLIC_BRAND || 'The Core School'
+  const brandName = process.env.NEXT_PUBLIC_BRAND_NAME || 'The Core School'
+  const primaryBrandName = brandName
   // Visibilidad ya usa 'Índice de Visibilidad' en backend
   const sovTopics = useMemo(() => Object.keys(sovByTopic || {}), [sovByTopic])
 
@@ -286,55 +292,11 @@ export function AnalyticsDashboard() {
   const [negHighlightIdx, setNegHighlightIdx] = useState(0)
   const [posHighlightIdx, setPosHighlightIdx] = useState(0)
   // Barra global de filtros reutilizable
-  const GlobalFiltersToolbar = () => (
-    <div className="flex items-center gap-2">
-      {/* Presets de periodo */}
-      <Select onValueChange={(value: PresetPeriod) => handlePresetChange(value)} value={activePeriod}>
-        <SelectTrigger className="w-[180px]">
-          <SelectValue placeholder="Seleccionar período" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="24h">Últimas 24 horas</SelectItem>
-          <SelectItem value="7d">Últimos 7 días</SelectItem>
-          <SelectItem value="30d">Últimos 30 días</SelectItem>
-          <SelectItem value="90d">Últimos 90 días</SelectItem>
-          {activePeriod === 'custom' && <SelectItem value="custom" disabled>Rango Personalizado</SelectItem>}
-        </SelectContent>
-      </Select>
-
-      {/* Calendario eliminado por solicitud */}
-
-      {/* Tema (traducción visible) */}
-      <Select value={selectedTopic} onValueChange={(v) => setSelectedTopic(v)}>
-        <SelectTrigger className="w-[180px]">
-          <SelectValue placeholder="Tema" />
-        </SelectTrigger>
-        <SelectContent>
-          {topicOptions.map((t) => (
-            <SelectItem key={t} value={t}>{t === 'all' ? 'Todos los temas' : translateTopicToSpanish(t)}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-
-      {/* Modelo a la derecha del selector de temas */}
-      <Select value={selectedModel} onValueChange={setSelectedModel}>
-        <SelectTrigger className="w-[180px]">
-          <SelectValue placeholder="Modelo" />
-        </SelectTrigger>
-        <SelectContent>
-          {modelOptions.map((m) => (
-            <SelectItem key={m} value={m}>{m === 'all' ? 'Todos los modelos' : m}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  )
-
 
   const openPrompt = async (promptId: number) => {
     try {
       setPromptLoading(true)
-      const filters = { model: selectedModel, source: selectedSource, topic: selectedTopic }
+      const filters = { model: selectedModel, source: selectedSource, topic: selectedTopic, granularity: isHourlyRange ? 'hour' as const : 'day' as const, brand: primaryBrandName }
       const details = await getPromptDetails(promptId, dateRange!, filters)
       setPromptDetails(details)
       setPromptModalOpen(true)
@@ -772,12 +734,21 @@ export function AnalyticsDashboard() {
               <div className="flex items-center justify-between p-6">
                 <div className="flex items-center gap-4">
                   <div className="flex items-center gap-2">
-                    <Image src="/the-core-logo.png" alt="The Core School" width={28} height={28} className="w-7 h-7 object-contain" />
-                    <h1 className="text-xl font-semibold text-black"> The Core School </h1>
+                    <Image src="/the-core-logo.png" alt={brandName} width={28} height={28} className="w-7 h-7 object-contain" />
+                    <h1 className="text-xl font-semibold text-black"> {brandName} </h1>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <GlobalFiltersToolbar />
+                  <GlobalFiltersToolbar
+                    activePeriod={activePeriod as ToolbarPresetPeriod}
+                    onPresetChange={handlePresetChange}
+                    selectedTopic={selectedTopic}
+                    onTopicChange={setSelectedTopic}
+                    topicOptions={topicOptions.map<ToolbarOptionItem>((t) => ({ value: t, label: t === 'all' ? 'Todos los temas' : translateTopicToSpanish(t) }))}
+                    selectedModel={selectedModel}
+                    onModelChange={setSelectedModel}
+                    modelOptions={modelOptions}
+                  />
                   <Button variant="ghost" size="sm"> <MoreHorizontal className="w-4 h-4" /> </Button>
                 </div>
               </div>
@@ -1078,8 +1049,8 @@ export function AnalyticsDashboard() {
               <div className="flex items-center justify-between p-6">
                 <div className="flex items-center gap-4">
                   <div className="flex items-center gap-2">
-                    <Image src="/the-core-logo.png" alt="The Core School" width={28} height={28} className="w-7 h-7 object-contain" />
-                    <h1 className="text-xl font-semibold text-black"> The Core School </h1>
+                    <Image src="/the-core-logo.png" alt={brandName} width={28} height={28} className="w-7 h-7 object-contain" />
+                    <h1 className="text-xl font-semibold text-black"> {brandName} </h1>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1100,115 +1071,33 @@ export function AnalyticsDashboard() {
                 {activeTab === 'Visibility' && (
                   <>
                     <div className="flex items-center justify-between">
-                      <GlobalFiltersToolbar />
+                      <GlobalFiltersToolbar
+                        activePeriod={activePeriod as ToolbarPresetPeriod}
+                        onPresetChange={handlePresetChange}
+                        selectedTopic={selectedTopic}
+                        onTopicChange={setSelectedTopic}
+                        topicOptions={topicOptions.map<ToolbarOptionItem>((t) => ({ value: t, label: t === 'all' ? 'Todos los temas' : translateTopicToSpanish(t) }))}
+                        selectedModel={selectedModel}
+                        onModelChange={setSelectedModel}
+                        modelOptions={modelOptions}
+                      />
                       <div className="flex items-center gap-2"></div>
                     </div>
                     
-                    {/* Contenido de visibilidad condicionado a que haya datos */}
-                    {visibility ? (
+                    {/* Contenido de visibilidad se muestra únicamente junto al ranking más abajo */}
+
+                    {/* Sección superior: Puntuación de visibilidad + Ranking */}
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
                       <div className="lg:col-span-2 h-full">
-                        <Card className="shadow-sm bg-white h-full min-h-[420px]">
-                          <CardHeader className="flex flex-row items-center justify-between">
-                            <div>
-                              <CardTitle className="text-lg font-semibold">Puntuación de visibilidad</CardTitle>
-                              <p className="text-sm text-muted-foreground"> Frecuencia con la que The Core School aparece en respuestas generadas por IA </p>
-                            </div>
-                          </CardHeader>
-                          <CardContent className="flex flex-col h-full">
-                            <div className="mb-4">
-                              <div className="flex items-baseline gap-2">
-                                <span className="text-3xl font-bold">{visibility.visibility_score.toFixed(1)}%</span>
-                                <span className={visibility.delta >= 0 ? "text-green-500 flex items-center gap-1" : "text-red-500 flex items-center gap-1"}>
-                                  {visibility.delta >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                                  {visibility.delta.toFixed(1)}%
-                                </span>
-                              </div>
-                            </div>
-                            <div className="flex-1 flex items-center justify-center">
-                              <ResponsiveContainer width="100%" height="100%">
-                                {visibilityChartType === "line" ? (
-                                  <LineChart data={visibility.series} key={visibilityChartKey}>
-                                    <XAxis
-                                      dataKey={(d: any) => new Date(d.date).getTime()}
-                                      axisLine={false}
-                                      tickLine={false}
-                                      tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }}
-                                      type="number"
-                                      scale="time"
-                                      domain={xDomain}
-                                      ticks={xTicks}
-                                      minTickGap={40}
-                                      tickFormatter={(unixTime: number) => {
-                                        const date = new Date(unixTime)
-                                        try {
-                                          return isHourlyRange ? format(date, 'HH:mm', { locale: es }) : format(date, 'MMM d', { locale: es })
-                                        } catch { return String(unixTime) }
-                                      }}
-                                    />
-                                    <YAxis
-                                      axisLine={false}
-                                      tickLine={false}
-                                      domain={[0, 100]}
-                                      ticks={[0,10,20,30,40,50,60,70,80,90,100]}
-                                      tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }}
-                                      tickFormatter={(v: number) => `${v}%`}
-                                    />
-                                    <Tooltip
-                                      contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }}
-                                      formatter={(v: number) => [`${Number(v).toFixed(1)}%`, 'Puntuación']}
-                                      labelFormatter={(label: number | string) => {
-                                        const ts = typeof label === 'number' ? label : new Date(label).getTime()
-                                        try { return format(new Date(ts), "eeee, d MMM yyyy, HH:mm", { locale: es }); } catch { return String(label) }
-                                      }}
-                                    />
-                                    <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={2} dot={{ fill: "#000", strokeWidth: 2, r: 4 }} />
-                                    {/* Brush eliminado */}
-                                  </LineChart>
-                                ) : (
-                                  <AreaChart data={visibility.series} key={visibilityChartKey}>
-                                    <XAxis
-                                      dataKey={(d: any) => new Date(d.date).getTime()}
-                                      axisLine={false}
-                                      tickLine={false}
-                                      tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }}
-                                      type="number"
-                                      scale="time"
-                                      domain={xDomain}
-                                      ticks={xTicks}
-                                      minTickGap={40}
-                                      tickFormatter={(unixTime: number) => {
-                                        const date = new Date(unixTime)
-                                        try {
-                                          return isHourlyRange ? format(date, 'HH:mm', { locale: es }) : format(date, 'MMM d', { locale: es })
-                                        } catch { return String(unixTime) }
-                                      }}
-                                    />
-                                    <YAxis
-                                      axisLine={false}
-                                      tickLine={false}
-                                      domain={[0, 100]}
-                                      ticks={[0,10,20,30,40,50,60,70,80,90,100]}
-                                      tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }}
-                                      tickFormatter={(v: number) => `${v}%`}
-                                    />
-                                    <Tooltip
-                                      contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }}
-                                      formatter={(v: number) => [`${Number(v).toFixed(1)}%`, 'Puntuación']}
-                                      labelFormatter={(label: number | string) => {
-                                        const ts = typeof label === 'number' ? label : new Date(label).getTime()
-                                        try { return format(new Date(ts), "eeee, d MMM yyyy, HH:mm", { locale: es }); } catch { return String(label) }
-                                      }}
-                                    />
-                                    <Area type="monotone" dataKey="value" stroke="#000" fill="hsl(var(--chart-2))" fillOpacity={0.2} />
-                                    {/* Brush eliminado */}
-                                  </AreaChart>
-                                )}
-                              </ResponsiveContainer>
-                            </div>
-                            {/* Leyendas y enlaces removidos por solicitud */}
-                          </CardContent>
-                        </Card>
+                        <VisibilityTab
+                          visibility={visibility as any}
+                          brandName={brandName}
+                          isHourlyRange={isHourlyRange}
+                          xDomain={xDomain}
+                          xTicks={xTicks}
+                          visibilityChartType={visibilityChartType}
+                          visibilityChartKey={visibilityChartKey}
+                        />
                       </div>
                       <div className="h-full">
                         <Card className="shadow-sm bg-white h-full min-h-[420px]">
@@ -1217,14 +1106,15 @@ export function AnalyticsDashboard() {
                           </CardHeader>
                           <CardContent>
                             <div className="mb-4">
-                               {selectedCompetitor && (
+                              {selectedCompetitor && (
                                 <div className="flex items-baseline gap-2">
                                   <span className="text-3xl font-bold">#{selectedCompetitor.rank}</span>
-                                  <span className="text-green-500 flex items-center gap-1">
-                                    <TrendingUp className="w-4 h-4" />1
+                                  <span className={`${selectedCompetitor.positive ? "text-green-500" : "text-red-500"} flex items-center gap-1`}>
+                                    {selectedCompetitor.positive ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+                                    {selectedCompetitor.change}
                                   </span>
                                 </div>
-                               )}
+                              )}
                             </div>
                             <div className="space-y-3">
                               <div className="flex items-center justify-between text-sm font-medium text-muted-foreground">
@@ -1234,9 +1124,7 @@ export function AnalyticsDashboard() {
                               {visibilityRanking.map((competitor) => (
                                 <div
                                   key={competitor.rank}
-                                  className={`flex items-center justify-between p-2 rounded ${
-                                    competitor.selected ? "bg-accent/20" : ""
-                                  }`}
+                                  className={`flex items-center justify-between p-2 rounded ${competitor.selected ? "bg-accent/20" : ""}`}
                                 >
                                   <div className="flex items-center gap-3">
                                     <span className="text-sm text-muted-foreground">{competitor.rank}.</span>
@@ -1244,51 +1132,34 @@ export function AnalyticsDashboard() {
                                     <span className="text-sm font-medium">
                                       {competitor.name}
                                       {competitor.selected && (
-                                        <Badge variant="secondary" className="ml-2 text-xs">
-                                          Seleccionado
-                                        </Badge>
+                                        <Badge variant="secondary" className="ml-2 text-xs">Seleccionado</Badge>
                                       )}
                                     </span>
                                   </div>
                                   <div className="flex items-center gap-2">
                                     <span className="text-sm font-medium">{competitor.score}</span>
-                                    <span
-                                      className={`text-xs ${competitor.positive ? "text-green-500" : "text-red-500"}`}
-                                    >
-                                      {competitor.change}
-                                    </span>
+                                    <span className={`text-xs ${competitor.positive ? "text-green-500" : "text-red-500"}`}>{competitor.change}</span>
                                   </div>
                                 </div>
                               ))}
                             </div>
-                            <Button variant="link" className="w-full mt-4 text-sm"> Expandir </Button>
+                            <Button variant="link" className="w-full mt-4 text-sm">Expandir</Button>
                           </CardContent>
                         </Card>
                       </div>
                     </div>
-                    ) : (
-                      <Card className="shadow-sm bg-white">
-                        <CardContent>
-                          <div className="h-64 flex items-center justify-center text-sm text-muted-foreground">
-                            Sin datos para el rango o filtros seleccionados.
-                          </div>
-                        </CardContent>
-                      </Card>
-                    )}
 
-                    {/* Share of Voice Section - conectado a /api/industry/ranking */}
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
+                    {/* Sección inferior: Share of Voice + Ranking */}
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch mt-6">
                       <div className="lg:col-span-2 h-full">
                         <Card className="shadow-sm bg-white h-full min-h-[420px]">
                           <CardHeader className="flex flex-row items-center justify-between">
                             <div>
                               <CardTitle className="text-lg font-semibold">Share of Voice</CardTitle>
-                              <p className="text-sm text-muted-foreground"> Menciones de {primaryBrandName} en respuestas generadas por IA en relación con competidores </p>
+                              <p className="text-sm text-muted-foreground"> Menciones de {brandName} en respuestas generadas por IA en relación con competidores </p>
                             </div>
-                            {/* Controles de configuración removidos por solicitud */}
                           </CardHeader>
                           <CardContent className="flex flex-col h-full">
-                            {/* Pie chart comparativo de share of voice por marca */}
                             <div className="flex-1 flex items-center justify-center">
                               <ResponsiveContainer width="100%" height="100%">
                                 <PieChart>
@@ -1304,7 +1175,6 @@ export function AnalyticsDashboard() {
                           </CardContent>
                         </Card>
                       </div>
-
                       <div className="h-full">
                         <Card className="shadow-sm bg-white h-full">
                           <CardHeader>
@@ -1322,7 +1192,6 @@ export function AnalyticsDashboard() {
                                 </div>
                               )}
                             </div>
-
                             <div className="space-y-3">
                               <div className="flex items-center justify-between text-sm font-medium text-muted-foreground">
                                 <span>Activo</span>
@@ -1331,7 +1200,7 @@ export function AnalyticsDashboard() {
                               {competitorData.map((competitor) => (
                                 <div
                                   key={competitor.rank}
-                                  className={`flex items-center justify-between p-2 rounded ${competitor.name === primaryBrandName ? "bg-accent/20" : ""}`}
+                                  className={`flex items-center justify-between p-2 rounded ${competitor.name === brandName ? "bg-accent/20" : ""}`}
                                 >
                                   <div className="flex items-center gap-3">
                                     <span className="text-sm text-muted-foreground">{competitor.rank}.</span>
@@ -1350,554 +1219,76 @@ export function AnalyticsDashboard() {
                       </div>
                     </div>
 
-                    
                   </>
                 )}
                 {activeTab === 'Sentiment' && (
                   <>
                     <div className="flex items-center justify-between">
-                      <GlobalFiltersToolbar />
+                      <GlobalFiltersToolbar
+                        activePeriod={activePeriod as ToolbarPresetPeriod}
+                        onPresetChange={handlePresetChange}
+                        selectedTopic={selectedTopic}
+                        onTopicChange={setSelectedTopic}
+                        topicOptions={topicOptions.map<ToolbarOptionItem>((t) => ({ value: t, label: t === 'all' ? 'Todos los temas' : translateTopicToSpanish(t) }))}
+                        selectedModel={selectedModel}
+                        onModelChange={setSelectedModel}
+                        modelOptions={modelOptions}
+                      />
                       <div className="flex items-center gap-2"></div>
-                    </div>
+                        </div>
 
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                      <div className="lg:col-span-2">
-                        <Card className="shadow-sm bg-white">
-                          <CardHeader className="flex flex-row items-center justify-between">
-                            <div>
-                              <CardTitle className="text-lg font-semibold">Análisis de sentimiento</CardTitle>
-                              <p className="text-sm text-muted-foreground"> Sentimiento positivo a lo largo del tiempo </p>
-                            </div>
-                            {/* Controles de configuración removidos por solicitud */}
-                          </CardHeader>
-                          <CardContent>
-                            <div className="mb-6">
-                              <div className="flex items-baseline gap-2">
-                                <span className="text-3xl font-bold">{sentimentComputed.positivePercent.toFixed(1)}%</span>
-                                <span className="text-sm text-muted-foreground">(de menciones positivas)</span>
-                                <span className={sentimentComputed.delta >= 0 ? "text-green-500 flex items-center gap-1" : "text-red-500 flex items-center gap-1"}>
-                                  {sentimentComputed.delta >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                                  {sentimentComputed.delta.toFixed(1)}%
-                                </span>
-                              </div>
-                            </div>
-                            <div className="h-64 flex items-center justify-center">
-                              <ResponsiveContainer width="95%" height="100%">
-                                {sentimentChartType === "line" ? (
-                                  <LineChart data={[...(sentimentComputed.timeseries || [])]}>
-                                    <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
-                                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} domain={[0, 100]} />
-                                    <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }} formatter={(v) => [`${Number(v).toFixed(1)}%`, 'Positivo']} />
-                                    <Line type="monotone" dataKey="value" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={{ fill: "hsl(var(--chart-1))", strokeWidth: 2, r: 4 }} />
-                                    {sentimentBrush && <Brush dataKey="date" height={20} />}
-                                  </LineChart>
-                                ) : (
-                                  <AreaChart data={[...(sentimentComputed.timeseries || [])]}>
-                                    <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
-                                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} domain={[0, 100]} />
-                                    <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }} formatter={(v) => [`${Number(v).toFixed(1)}%`, 'Positivo']} />
-                                    <Area type="monotone" dataKey="value" stroke="hsl(var(--chart-1))" fill="hsl(var(--chart-1))" fillOpacity={0.2} />
-                                    {sentimentBrush && <Brush dataKey="date" height={20} />}
-                                  </AreaChart>
-                                )}
-                              </ResponsiveContainer>
-                            </div>
-
-                            <div className="mt-6">
-                              <div className="flex items-center justify-between text-sm mb-2">
-                                <span>Negativo</span>
-                                <span>Neutral</span>
-                                <span>Positivo</span>
-                              </div>
-                              <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden flex">
-                                <div className="h-3 bg-red-500" style={{ width: `${Math.min(100, Math.max(0, sentimentComputed.negativePercent))}%` }}></div>
-                                <div className="h-3 bg-gray-400" style={{ width: `${Math.min(100, Math.max(0, sentimentComputed.neutralPercent || 0))}%` }}></div>
-                                <div className="h-3 bg-green-500" style={{ width: `${Math.min(100, Math.max(0, sentimentComputed.positivePercent))}%` }}></div>
-                              </div>
-                              <div className="flex items-center justify-between text-xs text-muted-foreground mt-1">
-                                <span>{sentimentComputed.negativePercent.toFixed(1)}%</span>
-                                <span>{(sentimentComputed.neutralPercent || 0).toFixed(1)}%</span>
-                                <span>{sentimentComputed.positivePercent.toFixed(1)}%</span>
-                              </div>
-                            </div>
-
-                          </CardContent>
-                        </Card>
-                      </div>
-                      <div>
-                        <Card className="shadow-sm bg-white">
-                          <CardHeader>
-                            <CardTitle className="text-lg font-semibold">Destacados</CardTitle>
-                          </CardHeader>
-                          <CardContent>
-                            <div className="space-y-4">
-                              {/* Positivo */}
-                              {sentimentComputed.positives && sentimentComputed.positives.length > 0 ? (
-                                (() => { const p = sentimentComputed.positives[posHighlightIdx % sentimentComputed.positives.length]; return (
-                                  <div key={`pos-${p.id}-${posHighlightIdx}`} className="p-3 border rounded bg-green-50 border-green-200">
-                                    <div className="text-xs text-green-700 mb-1">Positivo · {p.sentiment?.toFixed(2)}</div>
-                                    <div className="text-sm text-gray-900 line-clamp-3">{p.summary || ''}</div>
-                                    <div className="mt-2 flex flex-wrap gap-1">
-                                      {(p.key_topics || []).slice(0, 5).map((t, i) => (
-                                        <Badge key={`${p.id}-t-${i}`} variant="secondary" className="text-xs">{t}</Badge>
-                                      ))}
-                                    </div>
-                                    {p.source_url && (
-                                      <div className="mt-2 text-xs"><a href={p.source_url} target="_blank" rel="noreferrer" className="text-blue-600 underline">{p.source_title || p.source_url}</a></div>
-                                    )}
-                                  </div>
-                                ) })()
-                              ) : (
-                                <div className="p-3 border rounded bg-gray-50 border-gray-200 text-sm text-gray-600">No hay ninguna positiva</div>
-                              )}
-
-                              {/* Negativo */}
-                              {sentimentComputed.negatives && sentimentComputed.negatives.length > 0 ? (
-                                (() => { const m = sentimentComputed.negatives[negHighlightIdx % sentimentComputed.negatives.length]; return (
-                                  <div key={`neg-${m.id}-${negHighlightIdx}`} className="p-3 border rounded bg-red-50 border-red-200">
-                                    <div className="text-xs text-red-700 mb-1">Negativo · {m.sentiment?.toFixed(2)}</div>
-                                    <div className="text-sm text-gray-900 line-clamp-3">{m.summary || ''}</div>
-                                    <div className="mt-2 flex flex-wrap gap-1">
-                                      {(m.key_topics || []).slice(0, 5).map((t, i) => (
-                                        <Badge key={`${m.id}-t-${i}`} variant="secondary" className="text-xs">{t}</Badge>
-                                      ))}
-                                    </div>
-                                    {m.source_url && (
-                                      <div className="mt-2 text-xs"><a href={m.source_url} target="_blank" rel="noreferrer" className="text-blue-600 underline">{m.source_title || m.source_url}</a></div>
-                                    )}
-                                  </div>
-                                ) })()
-                              ) : (
-                                <div className="p-3 border rounded bg-gray-50 border-gray-200 text-sm text-gray-600">No hay ninguna negativa</div>
-                              )}
-                            </div>
-                          </CardContent>
-                        </Card>
-                      </div>
-                    </div>
-
-                    {/* Topics cloud (AHORA AGRUPADO) */}
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-lg font-semibold">Temas por Categoría</h3>
-                      </div>
-                      <Card className="shadow-sm bg-white border-gray-200">
-                        <CardContent className="p-0">
-                          {topicGroups.length > 0 ? (
-                            (topicGroups.filter((g) => g.group_name !== 'Temas Generales del Sector')).map((group) => {
-                              const totalCount = (group?.topics || []).reduce((sum: number, t: any) => sum + (t.count || 0), 0)
-                              const weightedAvg = totalCount > 0 ? (group.topics.reduce((s: number, t: any) => s + ((t.avg_sentiment ?? 0) * (t.count || 0)), 0) / totalCount) : 0
-                              const groupAvgPercent = ((weightedAvg + 1) / 2) * 100
-                              const isOpen = !!openGroups[group.group_name]
-                              return (
-                                <Collapsible key={group.group_name} open={isOpen} onOpenChange={(v) => setOpenGroups((prev) => ({ ...prev, [group.group_name]: v }))}>
-                                  <div className="border-b last:border-b-0">
-                                    <CollapsibleTrigger className="w-full p-4 flex items-center justify-between hover:bg-gray-50">
-                                      <div className="flex items-center gap-3">
-                                        <div className="font-medium text-gray-900">{group.group_name}</div>
-                                        <Badge variant="secondary">{group.total_occurrences} menciones</Badge>
-                                      </div>
-                                      <div className="flex items-center gap-4">
-                                        <div className="text-sm">Sentimiento Medio: <span className={`font-semibold ${weightedAvg > 0.1 ? 'text-green-600' : weightedAvg < -0.1 ? 'text-red-600' : 'text-gray-600'}`}>{groupAvgPercent.toFixed(0)}%</span></div>
-                                        <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-                                      </div>
-                                    </CollapsibleTrigger>
-                                    <CollapsibleContent>
-                                      <div className="bg-gray-50/50 p-4">
-                                        <table className="w-full table-fixed">
-                                          <colgroup>
-                                            <col className="w-[60%]" />
-                                            <col className="w-[240px]" />
-                                            <col className="w-[140px]" />
-                                          </colgroup>
-                                          <tbody>
-                                            {group.topics.map((t: any) => {
-                                              const sentimentScore = ((t.avg_sentiment ?? 0) + 1) / 2 * 100;
-                                              return (
-                                                <tr key={t.topic} className="hover:bg-gray-100">
-                                                  <td className="p-2 font-medium text-gray-800">{translateTopicToSpanish(t.topic)}</td>
-                                                  <td className="p-2 w-[240px]">
-                                                    <div className="flex items-center justify-center gap-2">
-                                                      <div className="w-32 h-2 bg-gray-200 rounded-full">
-                                                        <div
-                                                          className={`h-2 rounded-full ${sentimentScore > 60 ? 'bg-green-500' : sentimentScore < 40 ? 'bg-red-500' : 'bg-yellow-500'}`}
-                                                          style={{ width: `${sentimentScore}%` }}
-                                                        />
-                                                      </div>
-                                                      <span className="text-sm font-medium">{sentimentScore.toFixed(0)}%</span>
-                                                    </div>
-                                                  </td>
-                                                  <td className="p-2 text-right">{t.count} ocurrencias</td>
-                                                </tr>
-                                              );
-                                            })}
-                                          </tbody>
-                                        </table>
-                                      </div>
-                                    </CollapsibleContent>
-                                  </div>
-                                </Collapsible>
-                              )
-                            })
-                          ) : (
-                            <div className="overflow-x-auto">
-                              <table className="w-full bg-white table-fixed">
-                                <colgroup>
-                                  <col className="w-[60%]" />
-                                  <col className="w-[240px]" />
-                                  <col className="w-[140px]" />
-                                </colgroup>
-                                <thead className="border-b border-gray-200 bg-white">
-                                  <tr>
-                                    <th className="text-left p-4 font-medium text-gray-600">Tema</th>
-                                    <th className="text-left p-4 font-medium text-gray-600">Nivel de Sentimiento</th>
-                                    <th className="text-left p-4 font-medium text-gray-600">Ocurrencias</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="bg-white">
-                                  {(() => {
-                                    const top = topicsCloud.slice(0, 50)
-                                    const maxCount = Math.max(...top.map(t => t.count || 0), 1)
-                                    return top.map((t) => {
-                                      const sentimentScore = ((t.avg_sentiment ?? 0) + 1) / 2 * 100
-                                      return (
-                                        <tr key={t.topic} className="border-b border-gray-100 hover:bg-gray-50">
-                                          <td className="p-4">
-                                            <div className="flex items-center gap-3">
-                                              <div className="w-8 h-8 bg-blue-50 border border-blue-200 rounded-full flex items-center justify-center">
-                                                <span className="text-base">🧩</span>
-                                              </div>
-                                              <div className="font-medium text-gray-900">{translateTopicToSpanish(t.topic)}</div>
-                                            </div>
-                                          </td>
-                                          <td className="p-4 w-[240px]">
-                                            <div className="flex items-center gap-2 justify-center">
-                                              <div className="w-32 h-2 bg-gray-200 rounded-full">
-                                                <div
-                                                  className={`h-2 rounded-full ${sentimentScore > 60 ? 'bg-green-500' : sentimentScore < 40 ? 'bg-red-500' : 'bg-yellow-500'}`}
-                                                  style={{ width: `${sentimentScore}%` }}
-                                                />
-                                              </div>
-                                              <span className="text-sm font-medium">{sentimentScore.toFixed(0)}%</span>
-                                            </div>
-                                          </td>
-                                          <td className="p-4">
-                                            <div className="flex items-center gap-3">
-                                              <span className="font-medium">{t.count}</span>
-                                              <div className="w-32 h-1.5 bg-gray-200 rounded-full overflow-hidden"><div className="h-1.5 bg-gray-800" style={{ width: `${Math.max(0, Math.min(100, (t.count / maxCount) * 100)) }%` }}></div></div>
-                                            </div>
-                                          </td>
-                                        </tr>
-                                      )
-                                    })
-                                  })()}
-                                </tbody>
-                              </table>
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                    </div>
+                    <SentimentTab
+                      sentimentComputed={sentimentComputed}
+                      sentimentChartType={sentimentChartType}
+                      sentimentBrush={sentimentBrush}
+                      posHighlightIdx={posHighlightIdx}
+                      negHighlightIdx={negHighlightIdx}
+                      topicsCloud={topicsCloud}
+                      topicGroups={topicGroups as any}
+                      openGroups={openGroups}
+                      setOpenGroups={setOpenGroups}
+                      translateTopicToSpanish={translateTopicToSpanish}
+                      isHourlyRange={isHourlyRange}
+                      xDomain={xDomain}
+                      xTicks={xTicks}
+                    />
                   </>
                 )}
                 {activeTab === 'Prompts' && (
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-4">
-                        <h2 className="text-xl font-semibold text-gray-900">Prompts</h2>
-                        {/* Selector de período movido aquí */}
-                        <Select onValueChange={(value: PresetPeriod) => handlePresetChange(value)} value={activePeriod}>
-                          <SelectTrigger className="w-[200px]">
-                            <SelectValue placeholder="Período" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="24h">Últimas 24 horas</SelectItem>
-                            <SelectItem value="7d">Últimos 7 días</SelectItem>
-                            <SelectItem value="30d">Últimos 30 días</SelectItem>
-                            <SelectItem value="90d">Últimos 90 días</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        {/* Filtro de Tema igual al de Visibilidad */}
-                        <Select value={selectedTopic} onValueChange={(v) => setSelectedTopic(v)}>
-                          <SelectTrigger className="w-[220px]">
-                            <SelectValue placeholder="Todos los topics" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {topicOptions.map((t) => (
-                              <SelectItem key={t} value={t}>{t === 'all' ? 'Todos los topics' : translateTopicToSpanish(t)}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        {/* Filtro de modelo (entre topics y añadir) */}
-                        <Select value={selectedModel} onValueChange={setSelectedModel}>
-                          <SelectTrigger className="w-[200px]">
-                            <SelectValue placeholder="Todos los modelos" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {modelOptions.map((m) => (
-                              <SelectItem key={m} value={m}>{m === 'all' ? 'Todos los modelos' : m}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <Button size="sm" onClick={() => setAddPromptOpen(true)} className="shadow-sm">+ Añadir Prompt</Button>
-                      </div>
-                      {/* Buscador de temas eliminado por solicitud */}
-                    </div>
-
-                    <Card className="shadow-sm bg-white border-gray-200">
-                      <CardContent className="p-0">
-                        <div className="overflow-x-auto">
-                          <table className="w-full bg-white">
-                            <thead className="border-b border-gray-200 bg-white">
-                              <tr>
-                                <th className="text-left p-4 font-medium text-gray-600">Tema</th>
-                                <th className="text-left p-4 font-medium text-gray-600">Puntuación de visibilidad</th>
-                                <th className="text-left p-4 font-medium text-gray-600">Rank</th>
-                                <th className="text-left p-4 font-medium text-gray-600">Share of Voice</th>
-                                <th className="text-left p-4 font-medium text-gray-600">Executions</th>
-                              </tr>
-                            </thead>
-                            <tbody className="bg-white">
-                              {isLoading ? (
-                                // --- ESTADO DE CARGA (SKELETON) ---
-                                Array.from({ length: 3 }).map((_, i) => (
-                                  <tr key={`skel-${i}`}>
-                                    <td className="p-4"><Skeleton className="h-8 w-48" /></td>
-                                    <td className="p-4"><Skeleton className="h-4 w-24" /></td>
-                                    <td className="p-4"><Skeleton className="h-4 w-12" /></td>
-                                    <td className="p-4"><Skeleton className="h-4 w-20" /></td>
-                                    <td className="p-4"><Skeleton className="h-4 w-12" /></td>
-                                  </tr>
-                                ))
-                              ) : (
-                                // --- RENDERIZADO DE DATOS REALES ---
-                                (() => {
-                                  // Sin buscador: usar todos los grupos
-                                  const filtered = promptsGrouped
-                                  return filtered.map((group, index) => {
-                                    // --- LÓGICA DE CÁLCULO UNIFICADA Y CORRECTA ---
-                                    const avgVisibility = group.prompts.length > 0
-                                      ? group.prompts.reduce((sum, p) => sum + (p.visibility_score_individual ?? 0), 0) / group.prompts.length
-                                      : 0
-                                    // SOV del topic = media de los SOV de sus prompts
-                                    const avgSov = group.prompts.length > 0
-                                      ? group.prompts.reduce((sum, p) => sum + (p.share_of_voice_individual ?? 0), 0) / group.prompts.length
-                                      : 0
-                                    const rank = index + 1
-                                    const isOpen = !!openTopics[group.topic]
-                                    return (
-                                      <React.Fragment key={group.topic}>
-                                        <tr
-                                          className="border-b border-gray-100 hover:bg-gray-50 bg-white cursor-pointer"
-                                          onClick={() => {
-                                            setOpenTopics(prev => ({ ...prev, [group.topic]: !prev[group.topic] }))
-                                          }}
-                                        >
-                                          <td className="p-4">
-                                            <div className="flex items-center gap-3">
-                                              <ChevronRight className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
-                                              <div className="w-8 h-8 bg-blue-50 border border-blue-200 rounded-full flex items-center justify-center">
-                                                <span className="text-base">{emojiForTopic(group.topic)}</span>
-                                              </div>
-                                              <div>
-                                                <div className="font-medium text-gray-900">{translateTopicToSpanish(group.topic)}</div>
-                                                <div className="text-sm text-gray-500">
-                                                  <Badge variant="secondary" className="text-xs">Topic</Badge>
-                                                  <span className="ml-2">{group.prompts.length} prompts</span>
-                                                </div>
-                                              </div>
-                                            </div>
-                                          </td>
-                                          <td className="p-4">
-                                            <div className="flex items-center gap-3">
-                                              <span className="font-medium">{avgVisibility.toFixed(1)}%</span>
-                                              <div className="w-32 h-1.5 bg-gray-200 rounded-full overflow-hidden"><div className="h-1.5 bg-gray-800" style={{ width: `${Math.min(100, Math.max(0, avgVisibility))}%` }}></div></div>
-                                            </div>
-                                          </td>
-                                          <td className="p-4">
-                                            <div className="flex items-center gap-2">
-                                              <span className="font-medium">#{rank}</span>
-                                            </div>
-                                          </td>
-                                          <td className="p-4">
-                                            <div className="flex items-center gap-2">
-                                              <span className="font-medium">{avgSov.toFixed(1)}%</span>
-                                            </div>
-                                          </td>
-                                          <td className="p-4">
-                                            <span className="font-medium">{group.topic_total_mentions}</span>
-                                          </td>
-                                        </tr>
-                                        {isOpen && (
-                                          <tr className="bg-white">
-                                            <td colSpan={5} className="p-0">
-                                              <div className="px-4 py-2">
-                                                <div className="divide-y">
-                                                  {group.prompts.map((p) => (
-                                                    <div
-                                                      key={p.id}
-                                                      className="flex items-center justify-between py-2 rounded px-2 hover:bg-gray-50"
-                                                      role="button"
-                                                      tabIndex={0}
-                                                      onClick={() => openPrompt(p.id)}
-                                                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { openPrompt(p.id); } }}
-                                                    >
-                                                      <div className="text-sm text-gray-900 line-clamp-2 max-w-[50%]">
-                                                        {p.query}
-                                                      </div>
-                                                      <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                                                        <div className="w-48 text-right">Visibilidad (prompt): <span className="font-medium text-gray-900">{(p.visibility_score_individual ?? 0).toFixed(1)}%</span></div>
-                                                        <div className="w-40 text-right">SOV (prompt): <span className="font-medium text-gray-900">{(p.share_of_voice_individual ?? 0).toFixed(1)}%</span></div>
-                                                        <div className="w-28 text-right">Ranking: <span className="font-medium text-gray-900">#{p.rank}</span></div>
-                                                        <div className="w-32 text-right">Ejecuciones: <span className="font-medium text-gray-900">{p.executions}</span></div>
-                                                        <div className="flex items-center gap-2">
-                                                          <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); openEditPrompt(p.id, p.query as string, group.topic, undefined); }}>Editar</Button>
-                                                          <Button size="sm" variant="destructive" onClick={(e) => { e.stopPropagation(); handleDeletePrompt(p.id); }}>Eliminar</Button>
-                                                        </div>
-                                                      </div>
-                                                    </div>
-                                                  ))}
-                                                </div>
-                                              </div>
-                                            </td>
-                                          </tr>
-                                        )}
-                                      </React.Fragment>
-                                    )
-                                  })
-                                })()
-                              )}
-                            </tbody>
-                          </table>
-                        </div>
-                      </CardContent>
-                    </Card>
-
-                    {/* Rankings laterales eliminados por solicitud */}
-                  </div>
+                  <PromptsTab
+                    activePeriod={activePeriod as PresetPeriod}
+                    onPresetChange={handlePresetChange}
+                    selectedTopic={selectedTopic}
+                    onTopicChange={setSelectedTopic}
+                    topicOptions={topicOptions}
+                    selectedModel={selectedModel}
+                    onModelChange={setSelectedModel}
+                    modelOptions={modelOptions}
+                    isLoading={isLoading}
+                    promptsGrouped={promptsGrouped}
+                    openTopics={openTopics}
+                    setOpenTopics={setOpenTopics}
+                    openPrompt={openPrompt}
+                    openEditPrompt={openEditPrompt}
+                    handleDeletePrompt={handleDeletePrompt}
+                    translateTopicToSpanish={translateTopicToSpanish}
+                    emojiForTopic={emojiForTopic}
+                  />
                 )}
                 {/* Modal de detalle de prompt */}
-                <Dialog open={promptModalOpen} onOpenChange={setPromptModalOpen}>
-                  <DialogContent className="w-[95vw] max-w-6xl max-h-[90vh] overflow-y-auto">
-                    <DialogHeader>
-                      <DialogTitle className="text-lg">{promptDetails?.query || "Prompt"}</DialogTitle>
-                      <p className="text-sm text-muted-foreground pt-1">
-                        Mostrando métricas para el prompt seleccionado en el rango de fechas y modelo actual.
-                      </p>
-                    </DialogHeader>
-                    {promptLoading ? (
-                      <div className="p-6 text-center">Cargando detalles del prompt...</div>
-                    ) : promptDetails ? (
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-4">
-                        {/* Columna Izquierda: Métricas + Tendencias */}
-                        <div className="flex flex-col gap-6">
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                            <Card>
-                              <CardHeader><CardTitle className="text-sm font-medium">Visibilidad</CardTitle></CardHeader>
-                              <CardContent><p className="text-3xl font-bold">{promptDetails.visibility_score?.toFixed(1) ?? '0.0'}%</p></CardContent>
-                            </Card>
-                            <Card>
-                              <CardHeader><CardTitle className="text-sm font-medium">Share of Voice</CardTitle></CardHeader>
-                              <CardContent><p className="text-3xl font-bold">{promptDetails.share_of_voice?.toFixed(1) ?? '0.0'}%</p></CardContent>
-                            </Card>
-                            <Card>
-                              <CardHeader><CardTitle className="text-sm font-medium">Ejecuciones</CardTitle></CardHeader>
-                              <CardContent><p className="text-3xl font-bold">{promptDetails.total_executions ?? '0'}</p></CardContent>
-                            </Card>
-                          </div>
-
-                          {promptDetails.trends && promptDetails.trends.length > 0 && (
-                            <Card>
-                              <CardHeader><CardTitle className="text-sm font-medium">Tendencias Clave</CardTitle></CardHeader>
-                              <CardContent className="flex flex-wrap gap-2">
-                                {promptDetails.trends.map((trend, index) => (
-                                  <Badge key={index} variant="secondary" className="text-sm">{trend}</Badge>
-                                ))}
-                              </CardContent>
-                            </Card>
-                          )}
-
-                          <Card>
-                            <CardHeader><CardTitle className="text-sm">Ejecuciones Recientes</CardTitle></CardHeader>
-                            <CardContent>
-                              <div className="space-y-3 max-h-[260px] overflow-auto border rounded-lg p-3">
-                                {promptDetails.executions?.map((e, idx) => (
-                                  <div key={e.id} className="text-xs border-b pb-2 last:border-b-0">
-                                    <div className="flex justify-between text-muted-foreground mb-1">
-                                      <span>{e.engine}</span>
-                                      <span>{new Date(e.created_at).toLocaleDateString()}</span>
-                                    </div>
-                                    <p className="text-sm text-foreground line-clamp-3 cursor-pointer" onClick={() => { setExecActiveIndex(idx); setExecDialogOpen(true); }}>{e.response}</p>
-                                  </div>
-                                ))}
-                              </div>
-                            </CardContent>
-                          </Card>
-                        </div>
-
-                        {/* Columna Derecha: Gráficos */}
-                        <div className="flex flex-col gap-6">
-                          <Card>
-                            <CardHeader><CardTitle className="text-sm">Puntuación de Visibilidad (Evolución)</CardTitle></CardHeader>
-                            <CardContent className="h-[250px] w-full">
-                              <ResponsiveContainer>
-                                <LineChart data={promptDetails.timeseries}>
-                                  <XAxis
-                                    dataKey={(d: any) => new Date(d.date).getTime()}
-                                    type="number"
-                                    scale="time"
-                                    domain={xDomain}
-                                    ticks={xTicks}
-                                    stroke="#888888"
-                                    fontSize={12}
-                                    tickFormatter={(unixTime: number) => {
-                                      const date = new Date(unixTime)
-                                      try { return isHourlyRange ? format(date, 'HH:mm', { locale: es }) : format(date, 'MMM d', { locale: es }) } catch { return String(unixTime) }
-                                    }}
-                                  />
-                                  <YAxis stroke="#888888" fontSize={12} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
-                                  <Tooltip formatter={(value) => [`${value}%`, "Visibilidad"]} labelFormatter={(label: number | string) => {
-                                    const ts = typeof label === 'number' ? label : new Date(label).getTime()
-                                    try { return format(new Date(ts), "eeee, d MMM yyyy, HH:mm", { locale: es }) } catch { return String(label) }
-                                  }} />
-                                  <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={2} dot={{ r: 3, fill: "#000" }} />
-                                </LineChart>
-                              </ResponsiveContainer>
-                            </CardContent>
-                          </Card>
-                          <Card>
-                            <CardHeader><CardTitle className="text-sm">Share of Voice (Evolución)</CardTitle></CardHeader>
-                            <CardContent className="h-[250px] w-full">
-                              <ResponsiveContainer>
-                                <LineChart data={promptDetails.sov_timeseries}>
-                                  <XAxis
-                                    dataKey={(d: any) => new Date(d.date).getTime()}
-                                    type="number"
-                                    scale="time"
-                                    domain={xDomain}
-                                    ticks={xTicks}
-                                    stroke="#888888"
-                                    fontSize={12}
-                                    tickFormatter={(unixTime: number) => {
-                                      const date = new Date(unixTime)
-                                      try { return isHourlyRange ? format(date, 'HH:mm', { locale: es }) : format(date, 'MMM d', { locale: es }) } catch { return String(unixTime) }
-                                    }}
-                                  />
-                                  <YAxis stroke="#888888" fontSize={12} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
-                                  <Tooltip formatter={(value) => [`${value}%`, "Share of Voice"]} labelFormatter={(label: number | string) => {
-                                    const ts = typeof label === 'number' ? label : new Date(label).getTime()
-                                    try { return format(new Date(ts), "eeee, d MMM yyyy, HH:mm", { locale: es }) } catch { return String(label) }
-                                  }} />
-                                  <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={2} dot={{ r: 3, fill: "#000" }} />
-                                </LineChart>
-                              </ResponsiveContainer>
-                            </CardContent>
-                          </Card>
-                        </div>
-                      </div>
-                    ) : (<div className="p-6 text-center">No se encontraron detalles para este prompt.</div>)}
-                  </DialogContent>
-                </Dialog>
+                <PromptDetailModal
+                  open={promptModalOpen}
+                  onOpenChange={setPromptModalOpen}
+                  promptDetails={promptDetails}
+                  promptLoading={promptLoading}
+                  isHourlyRange={isHourlyRange}
+                  xDomain={xDomain}
+                  xTicks={xTicks}
+                  execDialogOpen={execDialogOpen}
+                  setExecDialogOpen={setExecDialogOpen}
+                  execActiveIndex={execActiveIndex}
+                  setExecActiveIndex={setExecActiveIndex}
+                />
 
                 {/* Dialogo de respuesta completa y navegación entre ejecuciones */}
                 <Dialog open={execDialogOpen} onOpenChange={setExecDialogOpen}>

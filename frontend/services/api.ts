@@ -132,9 +132,12 @@ export interface PromptDetails {
   share_of_voice: number;
   total_executions: number;
   trends: string[];
-  timeseries: { date: string; value: number }[];
-  sov_timeseries: { date: string; value: number }[];
-  platforms: { name: string; value: number }[];
+  timeseries: { date: string; value: number; ts?: number }[];
+  sov_timeseries: { date: string; value: number; ts?: number }[];
+  // Distribución por marca (backend actual)
+  brand_distribution?: Record<string, number>;
+  // Compatibilidad con versiones previas
+  platforms?: { name: string; value: number }[];
   executions: { id: number; created_at: string; engine: string; source: string; response: string; }[];
 }
 
