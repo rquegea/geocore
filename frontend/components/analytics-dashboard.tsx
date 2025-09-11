@@ -273,7 +273,10 @@ export function AnalyticsDashboard() {
 
   // Configuración de gráficos (3 opciones): tipo, zoom (brush) y exportar
   const [visibilityChartType, setVisibilityChartType] = useState<"line" | "area">("line")
-  const [visibilityBrush, setVisibilityBrush] = useState(false)
+  const [visibilityBrush, setVisibilityBrush] = useState(true)
+  const [visibilityBrushStart, setVisibilityBrushStart] = useState<number | undefined>(undefined)
+  const [visibilityBrushEnd, setVisibilityBrushEnd] = useState<number | undefined>(undefined)
+  const [visibilityChartKey, setVisibilityChartKey] = useState<string>("")
   const [sovDonut, setSovDonut] = useState(true)
   const [sovShowLabels, setSovShowLabels] = useState(false)
   const [sentimentChartType, setSentimentChartType] = useState<"line" | "area">("line")
@@ -421,14 +424,23 @@ export function AnalyticsDashboard() {
     }
   }, [selectedTopic, sovTopics])
 
-  // Estado de granularidad para Visibilidad
-  const [visibilityGranularity, setVisibilityGranularity] = useState<'day' | 'hour'>('day')
+  // Vista única por ejecución (granularidad fija por poll/ejecución)
+  const visibilityGranularity: 'day' | 'hour' = 'hour'
 
   // 3. USEEFFECT (sin cambios en su lógica, siempre depende de dateRange)
   useEffect(() => {
     if (!dateRange?.from || !dateRange?.to) {
         return;
     }
+    // Reset del visor (Brush) cuando cambia el rango
+    try {
+      const start = dateRange.from.getTime()
+      const end = dateRange.to.getTime()
+      setVisibilityBrushStart(start)
+      setVisibilityBrushEnd(end)
+      // Forzar remount del chart para que Brush se reinicialice visualmente
+      setVisibilityChartKey(`${start}-${end}`)
+    } catch {}
     const loadDashboardData = async () => {
       try {
         setIsLoading(true)
@@ -460,7 +472,7 @@ export function AnalyticsDashboard() {
       }
     }
     loadDashboardData()
-  }, [dateRange, selectedModel, selectedTopic, primaryBrandName, visibilityGranularity]);
+  }, [dateRange, selectedModel, selectedTopic, primaryBrandName]);
 
   // cargar opciones de filtros (models y topics independientes del filtro activo)
   useEffect(() => {
@@ -508,7 +520,15 @@ export function AnalyticsDashboard() {
     // Impacto mejorado: combina magnitud de sentimiento y frecuencia de temas del insight
     const impactFrom = (row: any): "Alto" | "Medio" | "Bajo" => {
       const s = typeof row?.avg_sentiment === 'number' ? Math.min(1, Math.abs(row.avg_sentiment)) : 0.2
-      const tf = row?.topic_frequency && typeof row.topic_frequency === 'object' ? Math.min(1, (Math.max(0, ...Object.values(row.topic_frequency as any)) as number) / 5) : 0
+      const tf = (() => {
+        const obj = row?.topic_frequency
+        if (obj && typeof obj === 'object') {
+          const vals = Object.values(obj as Record<string, number>).map((x) => (typeof x === 'number' ? x : Number(x) || 0))
+          const maxVal = vals.length ? Math.max(0, ...vals) : 0
+          return Math.min(1, maxVal / 5)
+        }
+        return 0
+      })()
       const score = 0.5 * s + 0.5 * tf
       if (score >= 0.6) return "Alto"
       if (score >= 0.35) return "Medio"
@@ -1062,24 +1082,6 @@ export function AnalyticsDashboard() {
                               <CardTitle className="text-lg font-semibold">Puntuación de visibilidad</CardTitle>
                               <p className="text-sm text-muted-foreground"> Frecuencia con la que The Core School aparece en respuestas generadas por IA </p>
                             </div>
-                            <div className="flex items-center gap-1 border p-1 rounded-md bg-gray-50">
-                              <Button
-                                size="sm"
-                                variant={visibilityGranularity === 'day' ? 'secondary' : 'ghost'}
-                                onClick={() => setVisibilityGranularity('day')}
-                                className="text-xs"
-                              >
-                                Día
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant={visibilityGranularity === 'hour' ? 'secondary' : 'ghost'}
-                                onClick={() => setVisibilityGranularity('hour')}
-                                className="text-xs"
-                              >
-                                Poll
-                              </Button>
-                            </div>
                           </CardHeader>
                           <CardContent className="flex flex-col h-full">
                             <div className="mb-4">
@@ -1094,8 +1096,16 @@ export function AnalyticsDashboard() {
                             <div className="flex-1 flex items-center justify-center">
                               <ResponsiveContainer width="100%" height="100%">
                                 {visibilityChartType === "line" ? (
-                                  <LineChart data={visibility.series}>
-                                    <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
+                                  <LineChart data={visibility.series} key={visibilityChartKey}>
+                                    <XAxis
+                                      dataKey="date"
+                                      axisLine={false}
+                                      tickLine={false}
+                                      tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }}
+                                      tickFormatter={(v: string) => {
+                                        try { return format(new Date(v), "dd MMM HH:mm", { locale: es }); } catch { return v }
+                                      }}
+                                    />
                                     <YAxis
                                       axisLine={false}
                                       tickLine={false}
@@ -1104,13 +1114,44 @@ export function AnalyticsDashboard() {
                                       tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }}
                                       tickFormatter={(v: number) => `${v}%`}
                                     />
-                                    <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }} formatter={(v: number) => [`${Number(v).toFixed(1)}%`, 'Índice de Visibilidad']} />
+                                    <Tooltip
+                                      contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }}
+                                      formatter={(v: number) => [`${Number(v).toFixed(1)}%`, 'Puntuación']}
+                                      labelFormatter={(label: string) => {
+                                        try { return format(new Date(label), "dd MMM yyyy HH:mm", { locale: es }); } catch { return label }
+                                      }}
+                                    />
                                     <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={2} dot={{ fill: "#000", strokeWidth: 2, r: 4 }} />
-                                    {visibilityBrush && <Brush dataKey="date" height={20} />}
+                                    {visibilityBrush && (
+                                      <Brush
+                                        dataKey="date"
+                                        height={24}
+                                        travellerWidth={8}
+                                        startIndex={(() => {
+                                          if (!visibility.series?.length || !visibilityBrushStart) return 0
+                                          const idx = visibility.series.findIndex((d: any) => new Date(d.date).getTime() >= visibilityBrushStart)
+                                          return idx >= 0 ? idx : 0
+                                        })()}
+                                        endIndex={(() => {
+                                          if (!visibility.series?.length || !visibilityBrushEnd) return (visibility.series?.length || 1) - 1
+                                          let idx = visibility.series.findIndex((d: any) => new Date(d.date).getTime() > visibilityBrushEnd)
+                                          if (idx < 0) idx = (visibility.series?.length || 1) - 1
+                                          return Math.max(0, idx)
+                                        })()}
+                                      />
+                                    )}
                                   </LineChart>
                                 ) : (
-                                  <AreaChart data={visibility.series}>
-                                    <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
+                                  <AreaChart data={visibility.series} key={visibilityChartKey}>
+                                    <XAxis
+                                      dataKey="date"
+                                      axisLine={false}
+                                      tickLine={false}
+                                      tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }}
+                                      tickFormatter={(v: string) => {
+                                        try { return format(new Date(v), "dd MMM HH:mm", { locale: es }); } catch { return v }
+                                      }}
+                                    />
                                     <YAxis
                                       axisLine={false}
                                       tickLine={false}
@@ -1119,9 +1160,32 @@ export function AnalyticsDashboard() {
                                       tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }}
                                       tickFormatter={(v: number) => `${v}%`}
                                     />
-                                    <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }} formatter={(v: number) => [`${Number(v).toFixed(1)}%`, 'Índice de Visibilidad']} />
+                                    <Tooltip
+                                      contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px" }}
+                                      formatter={(v: number) => [`${Number(v).toFixed(1)}%`, 'Puntuación']}
+                                      labelFormatter={(label: string) => {
+                                        try { return format(new Date(label), "dd MMM yyyy HH:mm", { locale: es }); } catch { return label }
+                                      }}
+                                    />
                                     <Area type="monotone" dataKey="value" stroke="#000" fill="hsl(var(--chart-2))" fillOpacity={0.2} />
-                                    {visibilityBrush && <Brush dataKey="date" height={20} />}
+                                    {visibilityBrush && (
+                                      <Brush
+                                        dataKey="date"
+                                        height={24}
+                                        travellerWidth={8}
+                                        startIndex={(() => {
+                                          if (!visibility.series?.length || !visibilityBrushStart) return 0
+                                          const idx = visibility.series.findIndex((d: any) => new Date(d.date).getTime() >= visibilityBrushStart)
+                                          return idx >= 0 ? idx : 0
+                                        })()}
+                                        endIndex={(() => {
+                                          if (!visibility.series?.length || !visibilityBrushEnd) return (visibility.series?.length || 1) - 1
+                                          let idx = visibility.series.findIndex((d: any) => new Date(d.date).getTime() > visibilityBrushEnd)
+                                          if (idx < 0) idx = (visibility.series?.length || 1) - 1
+                                          return Math.max(0, idx)
+                                        })()}
+                                      />
+                                    )}
                                   </AreaChart>
                                 )}
                               </ResponsiveContainer>
