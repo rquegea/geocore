@@ -33,7 +33,6 @@ import { cn } from "@/lib/utils"
 import { DateRange } from "react-day-picker"
 import { format, subDays } from "date-fns"
 import { es } from "date-fns/locale"
-import { DateRangePicker } from "@/components/ui/date-range-picker"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import PulsingCircle from "@/components/ui/pulsing-circle"
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible"
@@ -273,7 +272,8 @@ export function AnalyticsDashboard() {
 
   // Configuración de gráficos (3 opciones): tipo, zoom (brush) y exportar
   const [visibilityChartType, setVisibilityChartType] = useState<"line" | "area">("line")
-  const [visibilityBrush, setVisibilityBrush] = useState(true)
+  // Brush eliminado por solicitud
+  const [visibilityBrush, setVisibilityBrush] = useState(false)
   const [visibilityBrushStart, setVisibilityBrushStart] = useState<number | undefined>(undefined)
   const [visibilityBrushEnd, setVisibilityBrushEnd] = useState<number | undefined>(undefined)
   const [visibilityChartKey, setVisibilityChartKey] = useState<string>("")
@@ -302,8 +302,7 @@ export function AnalyticsDashboard() {
         </SelectContent>
       </Select>
 
-      {/* Calendario */}
-      <DateRangePicker value={dateRange} onChange={handleCustomDateChange} />
+      {/* Calendario eliminado por solicitud */}
 
       {/* Tema (traducción visible) */}
       <Select value={selectedTopic} onValueChange={(v) => setSelectedTopic(v)}>
@@ -691,10 +690,7 @@ export function AnalyticsDashboard() {
     setDateRange({ from: fromDate, to: now });
   };
 
-  const handleCustomDateChange = (range: DateRange | undefined) => {
-    setDateRange(range)
-    setActivePeriod('custom')
-  }
+  // Eliminado el cambio de rango personalizado (DateRangePicker)
 
   // 5. MANEJO DE CARGA Y ERROR (sin cambios)
   if (isLoading) { return <div className="flex h-screen w-full items-center justify-center"><p>Cargando datos del dashboard...</p></div> }
@@ -1064,7 +1060,23 @@ export function AnalyticsDashboard() {
               {/* Navigation Tabs */}
               <div className="flex items-center gap-6 px-6 bg-white">
                 <Button variant="ghost" className={ activeTab === "Visibility" ? "text-blue-600 border-b-2 border-blue-600 rounded-none hover:bg-gray-100 hover:text-black" : "text-gray-600 hover:text-gray-800 hover:bg-gray-100" } onClick={() => setActiveTab("Visibility")}>Visibilidad</Button>
-                <Button variant="ghost" className={ activeTab === "Prompts" ? "text-blue-600 border-b-2 border-blue-600 rounded-none hover:bg-gray-100 hover:text-black" : "text-gray-600 hover:text-gray-800 hover:bg-gray-100" } onClick={() => setActiveTab("Prompts")}>Prompts</Button>
+                <div className="flex items-center gap-3">
+                  <Button variant="ghost" className={ activeTab === "Prompts" ? "text-blue-600 border-b-2 border-blue-600 rounded-none hover:bg-gray-100 hover:text-black" : "text-gray-600 hover:text-gray-800 hover:bg-gray-100" } onClick={() => setActiveTab("Prompts")}>Prompts</Button>
+                  {/* Selector de período para Prompts */}
+                  <div className="hidden md:flex items-center gap-2">
+                    <Select onValueChange={(value: PresetPeriod) => handlePresetChange(value)} value={activePeriod}>
+                      <SelectTrigger className="w-[160px] h-8">
+                        <SelectValue placeholder="Período" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="24h">Últimas 24 horas</SelectItem>
+                        <SelectItem value="7d">Últimos 7 días</SelectItem>
+                        <SelectItem value="30d">Últimos 30 días</SelectItem>
+                        <SelectItem value="90d">Últimos 90 días</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
                 <Button variant="ghost" className={ activeTab === "Sentiment" ? "text-blue-600 border-b-2 border-blue-600 rounded-none hover:bg-gray-100 hover:text-black" : "text-gray-600 hover:text-gray-800 hover:bg-gray-100" } onClick={() => setActiveTab("Sentiment")}>Sentimiento</Button>
                 
                 {/* Filtro de modelo se movió al toolbar de filtros globales */}
@@ -1149,24 +1161,7 @@ export function AnalyticsDashboard() {
                                       }}
                                     />
                                     <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={2} dot={{ fill: "#000", strokeWidth: 2, r: 4 }} />
-                                    {visibilityBrush && (
-                                      <Brush
-                                        dataKey="date"
-                                        height={24}
-                                        travellerWidth={8}
-                                        startIndex={(() => {
-                                          if (!visibility.series?.length || !visibilityBrushStart) return 0
-                                          const idx = visibility.series.findIndex((d: any) => new Date(d.date).getTime() >= visibilityBrushStart)
-                                          return idx >= 0 ? idx : 0
-                                        })()}
-                                        endIndex={(() => {
-                                          if (!visibility.series?.length || !visibilityBrushEnd) return (visibility.series?.length || 1) - 1
-                                          let idx = visibility.series.findIndex((d: any) => new Date(d.date).getTime() > visibilityBrushEnd)
-                                          if (idx < 0) idx = (visibility.series?.length || 1) - 1
-                                          return Math.max(0, idx)
-                                        })()}
-                                      />
-                                    )}
+                                    {/* Brush eliminado */}
                                   </LineChart>
                                 ) : (
                                   <AreaChart data={visibility.series} key={visibilityChartKey}>
@@ -1215,24 +1210,7 @@ export function AnalyticsDashboard() {
                                       }}
                                     />
                                     <Area type="monotone" dataKey="value" stroke="#000" fill="hsl(var(--chart-2))" fillOpacity={0.2} />
-                                    {visibilityBrush && (
-                                      <Brush
-                                        dataKey="date"
-                                        height={24}
-                                        travellerWidth={8}
-                                        startIndex={(() => {
-                                          if (!visibility.series?.length || !visibilityBrushStart) return 0
-                                          const idx = visibility.series.findIndex((d: any) => new Date(d.date).getTime() >= visibilityBrushStart)
-                                          return idx >= 0 ? idx : 0
-                                        })()}
-                                        endIndex={(() => {
-                                          if (!visibility.series?.length || !visibilityBrushEnd) return (visibility.series?.length || 1) - 1
-                                          let idx = visibility.series.findIndex((d: any) => new Date(d.date).getTime() > visibilityBrushEnd)
-                                          if (idx < 0) idx = (visibility.series?.length || 1) - 1
-                                          return Math.max(0, idx)
-                                        })()}
-                                      />
-                                    )}
+                                    {/* Brush eliminado */}
                                   </AreaChart>
                                 )}
                               </ResponsiveContainer>
