@@ -204,7 +204,7 @@ export function AnalyticsDashboard() {
   const [sovByTopic, setSovByTopic] = useState<Record<string, Competitor[]>>({})
   const [selectedSovTopic, setSelectedSovTopic] = useState<string>("All")
   const [mentions, setMentions] = useState<Mention[]>([])
-  const [isLoading, setIsLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   
   // El rango de fechas sigue siendo la única fuente de verdad para la API
@@ -287,6 +287,10 @@ export function AnalyticsDashboard() {
   const [sovShowLabels, setSovShowLabels] = useState(false)
   const [sentimentChartType, setSentimentChartType] = useState<"line" | "area">("line")
   const [sentimentBrush, setSentimentBrush] = useState(false)
+  // Prefetch para carga instantánea de la pestaña Sentiment
+  const [prefSentimentApi, setPrefSentimentApi] = useState<any>(null)
+  const [prefTopicsCloud, setPrefTopicsCloud] = useState<any[]>([])
+  const [prefTopicGroups, setPrefTopicGroups] = useState<any[]>([])
 
   // Índices para rotación de highlights
   const [negHighlightIdx, setNegHighlightIdx] = useState(0)
@@ -447,6 +451,48 @@ export function AnalyticsDashboard() {
   }, [])
 
   // eliminado: carga de resumen por tema (usamos métricas de API como avg_sentiment)
+
+  // Prefetch en background de Sentiment (para que la pestaña salga inmediata)
+  useEffect(() => {
+    if (!dateRange?.from || !dateRange?.to) return
+    const fetchPref = async () => {
+      try {
+        const filters = { model: selectedModel, source: selectedSource, topic: selectedTopic, brand: primaryBrandName, granularity: isHourlyRange ? 'hour' as const : 'day' as const }
+        const [senti, topicsC] = await Promise.all([
+          getSentiment(dateRange, filters),
+          getTopicsCloud(dateRange, filters),
+        ])
+        setPrefSentimentApi(senti)
+        setPrefTopicsCloud((topicsC as any)?.topics || [])
+        setPrefTopicGroups((topicsC as any)?.groups || [])
+      } catch {
+        setPrefSentimentApi(null); setPrefTopicsCloud([]); setPrefTopicGroups([])
+      }
+    }
+    fetchPref()
+  }, [dateRange, selectedModel, selectedTopic, primaryBrandName, isHourlyRange])
+
+  // Cargar ranking y SOV cuando la pestaña Visibilidad esté activa
+  useEffect(() => {
+    if (activeTab !== 'Visibility') return
+    if (!dateRange?.from || !dateRange?.to) return
+    const load = async () => {
+      try {
+        const filters = { model: selectedModel, source: selectedSource, topic: selectedTopic, brand: primaryBrandName, granularity: 'hour' as const }
+        const [visibilityRankingRes, sovResponse] = await Promise.all([
+          getVisibilityRanking(dateRange, filters),
+          getShareOfVoice(dateRange, filters),
+        ])
+        setVisibilityRanking(visibilityRankingRes.ranking || [])
+        setCompetitorData((sovResponse as ShareOfVoiceResponse).overall_ranking || [])
+      } catch (e) {
+        console.error('No se pudieron cargar ranking/SOV', e)
+        setVisibilityRanking([])
+        setCompetitorData([])
+      }
+    }
+    load()
+  }, [activeTab, dateRange, selectedModel, selectedTopic, primaryBrandName])
 
   // Cargar insights reales cuando estemos en "Estrategias y objetivos"
   useEffect(() => {
@@ -647,7 +693,7 @@ export function AnalyticsDashboard() {
   // Eliminado el cambio de rango personalizado (DateRangePicker)
 
   // 5. MANEJO DE CARGA Y ERROR (sin cambios)
-  if (isLoading) { return <div className="flex h-screen w-full items-center justify-center"><p>Cargando datos del dashboard...</p></div> }
+  // No bloqueamos el render por carga; mostramos la UI y cada pestaña se encarga de sus datos
   if (error) { return <div className="flex h-screen w-full items-center justify-center bg-red-50 p-4"><p className="text-red-600">{error}</p></div> }
   
   const selectedCompetitor = competitorData.find(c => c.selected);
@@ -1219,6 +1265,9 @@ export function AnalyticsDashboard() {
                       model={selectedModel}
                       topic={selectedTopic}
                       brandName={brandName}
+                      initialSentimentApi={prefSentimentApi}
+                      initialTopicsCloud={prefTopicsCloud}
+                      initialTopicGroups={prefTopicGroups as any}
                     />
                   </>
                 )}

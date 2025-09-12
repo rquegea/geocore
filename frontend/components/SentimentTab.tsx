@@ -36,18 +36,33 @@ export interface SentimentTabProps {
   model?: string
   topic?: string
   brandName: string
+  // Prefetched data (opcional)
+  initialSentimentApi?: SentimentApiResponse | null
+  initialTopicsCloud?: { topic: string; count: number; avg_sentiment?: number }[]
+  initialTopicGroups?: TopicGroup[]
 }
 
 import type { DateRange } from "react-day-picker"
 import { getSentiment, getTopicsCloud, type TopicsCloudResponse, type SentimentApiResponse } from "@/services/api"
 
 export default function SentimentTab(props: SentimentTabProps) {
-  const { sentimentChartType, sentimentBrush, posHighlightIdx, negHighlightIdx, openGroups, setOpenGroups, translateTopicToSpanish, isHourlyRange, xDomain, xTicks, executionTimestamps, dateRange, model, topic, brandName } = props
+  const { sentimentChartType, sentimentBrush, posHighlightIdx, negHighlightIdx, openGroups, setOpenGroups, translateTopicToSpanish, isHourlyRange, xDomain, xTicks, executionTimestamps, dateRange, model, topic, brandName, initialSentimentApi, initialTopicsCloud, initialTopicGroups } = props
 
-  const [topicsCloud, setTopicsCloud] = useState<{ topic: string; count: number; avg_sentiment?: number }[]>([])
-  const [topicGroups, setTopicGroups] = useState<TopicGroup[]>([])
-  const [sentimentApi, setSentimentApi] = useState<SentimentApiResponse | null>(null)
-  const [sentimentComputed, setSentimentComputed] = useState<SentimentComputed>({ positivePercent: 0, neutralPercent: 0, negativePercent: 0, delta: 0, timeseries: [], negatives: [], positives: [] })
+  const [topicsCloud, setTopicsCloud] = useState<{ topic: string; count: number; avg_sentiment?: number }[]>(initialTopicsCloud || [])
+  const [topicGroups, setTopicGroups] = useState<TopicGroup[]>(initialTopicGroups || [])
+  const [sentimentApi, setSentimentApi] = useState<SentimentApiResponse | null>(initialSentimentApi || null)
+  const [sentimentComputed, setSentimentComputed] = useState<SentimentComputed>(() => {
+    if (initialSentimentApi) {
+      const { distribution, timeseries, negatives, positives } = initialSentimentApi
+      const total = (distribution.negative + distribution.neutral + distribution.positive) || 1
+      const positivePercent = (distribution.positive / total) * 100
+      const neutralPercent = (distribution.neutral / total) * 100
+      const negativePercent = (distribution.negative / total) * 100
+      const scaledTimeseries = (timeseries || []).map(p => ({ date: p.date, value: Math.max(0, Math.min(100, Number(p.value) || 0)) }))
+      return { positivePercent, neutralPercent, negativePercent, delta: 0, timeseries: scaledTimeseries, negatives: negatives || [], positives: positives || [] }
+    }
+    return { positivePercent: 0, neutralPercent: 0, negativePercent: 0, delta: 0, timeseries: [], negatives: [], positives: [] }
+  })
 
   useEffect(() => {
     let cancelled = false
