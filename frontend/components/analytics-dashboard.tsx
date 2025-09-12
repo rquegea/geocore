@@ -437,33 +437,75 @@ export function AnalyticsDashboard() {
         setIsLoading(true)
         setError(null)
         const filters = { model: selectedModel, source: selectedSource, topic: selectedTopic, brand: primaryBrandName, granularity: visibilityGranularity }
-        // Cargar primero lo esencial para mostrar el dashboard
-        const [visibilityResponse, visibilityRankingRes, sovResponse, mentionsResponse, promptsRes, sentimentRes] = await Promise.all([
+        // Cargar TODO en paralelo (incluye topics-cloud) para que Sentimientos salga de inmediato
+        const [visibilityResponse, visibilityRankingRes, sovResponse, promptsRes, sentimentRes, topicsCloudRes] = await Promise.all([
           getVisibility(dateRange, filters),
           getVisibilityRanking(dateRange, filters),
           getShareOfVoice(dateRange, filters),
-          getMentions(dateRange, filters),
           getPrompts(dateRange, filters),
           getSentiment(dateRange, filters),
+          getTopicsCloud(dateRange, filters),
         ]);
         setVisibility(visibilityResponse);
         setVisibilityRanking(visibilityRankingRes.ranking || [])
         setCompetitorData((sovResponse as ShareOfVoiceResponse).overall_ranking);
         setSovByTopic((sovResponse as ShareOfVoiceResponse).by_topic || {});
-        setMentions(mentionsResponse.mentions);
+        // Cargar menciones después, sin bloquear render inicial
+        getMentions(dateRange, filters).then((m) => setMentions(m.mentions)).catch(() => setMentions([]))
         setPromptsGrouped(promptsRes.topics);
         setSentimentApi(sentimentRes);
-        // Cargar la nube de temas sin bloquear el render del dashboard
-        getTopicsCloud(dateRange, filters)
-          .then((topicsCloudRes) => {
-            setTopicsCloud(topicsCloudRes.topics);
-            setTopicGroups((topicsCloudRes as any).groups || []);
-          })
-          .catch((e) => {
-            console.error("No se pudieron cargar los topics-cloud", e)
-            setTopicsCloud([])
-            setTopicGroups([])
-          })
+        // Temas por categoría: usar grupos de la API o agrupar por defecto
+        try {
+          const tc = topicsCloudRes as any
+          setTopicsCloud((tc?.topics ?? []) as any)
+          const apiGroups = (tc?.groups ?? []) as any[]
+          if (apiGroups && apiGroups.length > 0) {
+            setTopicGroups(apiGroups)
+          } else {
+            const competitorNames = ((sovResponse as ShareOfVoiceResponse).overall_ranking || []).map(c => (c.name || '').toLowerCase())
+            const fallbackGroups = (() => {
+              const groupsMap: Record<string, { total_occurrences: number; sum_weighted_sent: number; topics: { topic: string; count: number; avg_sentiment?: number }[] }> = {}
+              const ensure = (name: string) => groupsMap[name] || (groupsMap[name] = { total_occurrences: 0, sum_weighted_sent: 0, topics: [] })
+              const toKey = (s: string) => (s || '').toLowerCase()
+              const isBrand = (t: string) => /\bthe\s*core\b/.test(t)
+              const isCompetitor = (t: string) => competitorNames.some(n => n && t.includes(n))
+              const isUniversity = (t: string) => /universidad|universitat|complutense|rey\s*juan\s*carlos|navarra/.test(t)
+              const isAdmissions = (t: string) => /beca|precio|coste|costo|admis|financiaci[oó]n|matr[ií]cula/.test(t)
+              const isJobs = (t: string) => /empleo|empleabilidad|trabajo|salidas/.test(t)
+              const isPrograms = (t: string) => /cine|audiovisual|animaci[oó]n|vfx|fotograf[ií]a|guion|gu[ií]on|ingenier[ií]a|software|programaci[oó]n|dise[nñ]o|3d|edici[oó]n/.test(t)
+              const OTHER = 'Temas Generales del Sector'
+              ;((tc?.topics ?? []) as any[]).forEach((row: any) => {
+                const topic = toKey(row.topic)
+                const count = Number(row.count || 0)
+                const sent = Number(row.avg_sentiment || 0)
+                const push = (groupName: string) => {
+                  const g = ensure(groupName)
+                  g.total_occurrences += count
+                  g.sum_weighted_sent += sent * count
+                  g.topics.push({ topic: row.topic, count, avg_sentiment: sent })
+                }
+                if (isBrand(topic)) push('Menciones de Marca Propia')
+                else if (isCompetitor(topic)) push('Menciones de Competidores Directos')
+                else if (isUniversity(topic)) push('Menciones de Universidades Tradicionales')
+                else if (isAdmissions(topic)) push('Becas y Admisiones')
+                else if (isJobs(topic)) push('Salidas Profesionales')
+                else if (isPrograms(topic)) push('Programas y Grados')
+                else push(OTHER)
+              })
+              return Object.entries(groupsMap).map(([group_name, v]) => ({
+                group_name,
+                total_occurrences: v.total_occurrences,
+                avg_sentiment: v.total_occurrences ? v.sum_weighted_sent / v.total_occurrences : 0,
+                topics: v.topics.sort((a, b) => (b.count || 0) - (a.count || 0)).slice(0, 100),
+              }))
+            })()
+            setTopicGroups(fallbackGroups)
+          }
+        } catch (e) {
+          console.error('Error procesando topics-cloud', e)
+          setTopicsCloud([])
+          setTopicGroups([])
+        }
       } catch (err) {
         setError("No se pudieron cargar los datos. Por favor, revisa la consola o el estado del backend.")
         console.error(err)
@@ -501,7 +543,7 @@ export function AnalyticsDashboard() {
     const load = async () => {
       try {
         setInsightsLoading(true)
-        const filters = { model: selectedModel, source: selectedSource, topic: selectedTopic }
+        const filters = { model: selectedModel, source: selectedSource, topic: selectedTopic, brand: primaryBrandName }
         const res = await getInsights(dateRange, filters, 100, 0)
         setInsightsRows(res.insights || [])
       } catch (e) {
@@ -729,8 +771,8 @@ export function AnalyticsDashboard() {
           <div className="space-y-2">
             <Button variant="ghost" className="w-full justify-start text-black hover:text-black hover:bg-gradient-to-r hover:from-gray-100 hover:to-gray-50 rounded-md text-sm"> <Settings className="w-4 h-4 mr-3" /> Soporte </Button>
             <div className="flex items-center gap-2 px-3 py-2">
-              <div className="w-6 h-6 bg-blue-600 rounded-full flex items-center justify-center text-xs text-white font-semibold shadow-sm flex-shrink-0"> B </div>
-              <span className="text-sm text-black truncate">Breno Lasserre</span>
+              <Image src="/juanjo-siguero.jpg" alt="Juanjo Siguero" width={24} height={24} className="w-6 h-6 rounded-full object-cover flex-shrink-0" />
+              <span className="text-sm text-black truncate">Juanjo Siguero</span>
             </div>
           </div>
         </div>

@@ -4,8 +4,6 @@ import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, AreaChart,
 import { Badge } from "@/components/ui/badge"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import React from "react"
-import { format } from "date-fns"
-import { es } from "date-fns/locale"
 
 export interface SentimentComputed {
   positivePercent: number
@@ -39,9 +37,18 @@ export interface SentimentTabProps {
 
 export default function SentimentTab(props: SentimentTabProps) {
   const { sentimentComputed, sentimentChartType, sentimentBrush, posHighlightIdx, negHighlightIdx, topicsCloud, topicGroups, openGroups, setOpenGroups, translateTopicToSpanish, isHourlyRange, xDomain, xTicks, executionTimestamps } = props
+  const formatMadrid = (tsMs: number) => {
+    try {
+      return isHourlyRange
+        ? new Date(tsMs).toLocaleString('es-ES', { timeZone: 'Europe/Madrid', hour: '2-digit', minute: '2-digit', hour12: false })
+        : new Date(tsMs).toLocaleString('es-ES', { timeZone: 'Europe/Madrid', day: 'numeric', month: 'short' })
+    } catch {
+      return String(new Date(tsMs))
+    }
+  }
   const labelFormatter = (label: number | string) => {
     const ts = typeof label === 'number' ? label : new Date(label).getTime()
-    try { return format(new Date(ts), isHourlyRange ? 'HH:mm' : 'MMM d', { locale: es }) } catch { return String(label) }
+    return formatMadrid(ts)
   }
 
   const CustomTooltip = ({ active, label, payload }: any) => {
@@ -97,7 +104,14 @@ export default function SentimentTab(props: SentimentTabProps) {
                       />
                       <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} domain={[0, 100]} />
                       <Tooltip content={<CustomTooltip />} />
-                      <Line type="monotone" dataKey="value" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={{ fill: "hsl(var(--chart-1))", strokeWidth: 2, r: 4 }} />
+                      <Line
+                        type="monotone"
+                        dataKey="value"
+                        stroke="#111111"
+                        strokeWidth={2}
+                        connectNulls
+                        dot={{ fill: "#111111", strokeWidth: 2, r: 4 }}
+                      />
                       {(executionTimestamps || []).map((ts, i) => (
                         <ReferenceDot key={`exec-dot-${i}`} x={ts} y={0} r={3} stroke="#6b7280" fill="#6b7280" />
                       ))}
@@ -119,7 +133,14 @@ export default function SentimentTab(props: SentimentTabProps) {
                       />
                       <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} domain={[0, 100]} />
                       <Tooltip content={<CustomTooltip />} />
-                      <Area type="monotone" dataKey="value" stroke="hsl(var(--chart-1))" fill="hsl(var(--chart-1))" fillOpacity={0.2} />
+                      <Area
+                        type="monotone"
+                        dataKey="value"
+                        stroke="#111111"
+                        fill="#111111"
+                        fillOpacity={0.15}
+                        connectNulls
+                      />
                       {(executionTimestamps || []).map((ts, i) => (
                         <ReferenceDot key={`exec-dot-area-${i}`} x={ts} y={0} r={3} stroke="#6b7280" fill="#6b7280" />
                       ))}
@@ -275,6 +296,7 @@ export default function SentimentTab(props: SentimentTabProps) {
                   </thead>
                   <tbody className="bg-white">
                     {(() => {
+                      // Fallback cuando no hay groups: usar topicsCloud como pseudo-grupos por topic
                       const top = topicsCloud.slice(0, 50)
                       const maxCount = Math.max(...top.map(t => t.count || 0), 1)
                       return top.map((t) => {

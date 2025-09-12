@@ -2,8 +2,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { TrendingUp, TrendingDown } from "lucide-react"
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, AreaChart, Area } from "recharts"
 import React from "react"
-import { format } from "date-fns"
-import { es } from "date-fns/locale"
 
 export interface VisibilityPoint { date: string | number; value: number }
 export interface VisibilityApiResponse { visibility_score: number; delta: number; series: VisibilityPoint[] }
@@ -41,9 +39,20 @@ export default function VisibilityTab(props: VisibilityTabProps) {
       </Card>
     )
   }
+  const formatMadridTime = (tsMs: number, hourly: boolean) => {
+    try {
+      if (hourly) {
+        return new Date(tsMs).toLocaleString('es-ES', { timeZone: 'Europe/Madrid', hour: '2-digit', minute: '2-digit', hour12: false })
+      }
+      const d = new Date(tsMs).toLocaleString('es-ES', { timeZone: 'Europe/Madrid', day: 'numeric', month: 'short' })
+      return d
+    } catch {
+      return String(new Date(tsMs))
+    }
+  }
   const labelFormatter = (label: number | string) => {
     const ts = typeof label === 'number' ? label : new Date(label).getTime()
-    try { return format(new Date(ts), 'HH:mm', { locale: es }) } catch { return String(label) }
+    return formatMadridTime(ts, true)
   }
   const valueFormatter = (v: number) => [`${Number(v).toFixed(1)}%`, 'Visibilidad'] as const
   const deltaFromRange = computeDeltaFromSeries(visibility.series)
@@ -80,12 +89,7 @@ export default function VisibilityTab(props: VisibilityTabProps) {
                   domain={xDomain}
                   ticks={xTicks}
                   minTickGap={40}
-                  tickFormatter={(unixTime: number) => {
-                    const date = new Date(unixTime)
-                    try {
-                      return isHourlyRange ? format(date, 'HH:mm', { locale: es }) : format(date, 'MMM d', { locale: es })
-                    } catch { return String(unixTime) }
-                  }}
+                  tickFormatter={(unixTime: number) => formatMadridTime(unixTime, isHourlyRange)}
                 />
                 <YAxis
                   axisLine={false}
@@ -113,12 +117,7 @@ export default function VisibilityTab(props: VisibilityTabProps) {
                   domain={xDomain}
                   ticks={xTicks}
                   minTickGap={40}
-                  tickFormatter={(unixTime: number) => {
-                    const date = new Date(unixTime)
-                    try {
-                      return isHourlyRange ? format(date, 'HH:mm', { locale: es }) : format(date, 'MMM d', { locale: es })
-                    } catch { return String(unixTime) }
-                  }}
+                  tickFormatter={(unixTime: number) => formatMadridTime(unixTime, isHourlyRange)}
                 />
                 <YAxis axisLine={false} tickLine={false} domain={[0, 100]} ticks={[0,10,20,30,40,50,60,70,80,90,100]} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
                 <Tooltip

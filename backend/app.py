@@ -5,6 +5,7 @@ from flask_cors import CORS
 import psycopg2
 import os
 from datetime import datetime, timedelta
+import pytz
 # Importamos una librería más robusta para parsear fechas
 from dateutil.parser import parse as parse_date
 import json
@@ -12,6 +13,7 @@ from dotenv import load_dotenv
 import re
 import unicodedata
 from difflib import SequenceMatcher
+import time
 from src.engines.openai_engine import fetch_response
 
 load_dotenv()
@@ -342,8 +344,20 @@ def canonicalize_topic(topic: str) -> str:
 
 
 # Nueva función: agrupar topics con IA en categorías estratégicas
+_TOPICS_AI_CACHE: dict[str, tuple[float, list[dict]]] = {}
+_TOPICS_AI_TTL_SECONDS = 300  # 5 minutos
+
+def _topics_cache_key(rows: list[dict]) -> str:
+    items = [f"{(t.get('topic') or '').lower()}|{int(t.get('count') or 0)}|{round(float(t.get('avg_sentiment') or 0.0),2)}" for t in (rows or [])[:100]]
+    return "|".join(items)
+
 def group_topics_with_ai(topics_rows: list[dict]) -> list[dict]:
     try:
+        ck = _topics_cache_key(topics_rows)
+        now = time.time()
+        cached = _TOPICS_AI_CACHE.get(ck)
+        if cached and (now - cached[0]) < _TOPICS_AI_TTL_SECONDS:
+            return cached[1]
         topics_list_str = "\n".join([f"- {t.get('topic','')} | count={t.get('count',0)} | avg_sentiment={t.get('avg_sentiment',0.0):.2f}" for t in topics_rows])
         
         # --- INICIO DE LA MODIFICACIÓN ---
@@ -393,6 +407,7 @@ Lista de Temas a Analizar:
         if match:
             data = json.loads(match.group(0))
             if isinstance(data, list):
+                _TOPICS_AI_CACHE[ck] = (now, data)
                 return data
         return []
     except Exception:
@@ -865,8 +880,16 @@ def get_visibility():
             cur.execute(query, tuple([synonyms, like_patterns, like_patterns, synonyms] + params))
             rows = cur.fetchall()
 
-            # Serie se queda por hora
-            series = [{"date": row[0].isoformat(), "value": round(row[3], 1)} for row in rows]
+            # Serie por hora convertida a zona Europe/Madrid
+            tz_madrid = pytz.timezone('Europe/Madrid')
+            series = []
+            for row in rows:
+                dt_utc = row[0]
+                try:
+                    dt_madrid = (dt_utc.replace(tzinfo=pytz.UTC) if dt_utc.tzinfo is None else dt_utc.astimezone(pytz.UTC)).astimezone(tz_madrid)
+                except Exception:
+                    dt_madrid = dt_utc
+                series.append({"date": dt_madrid.isoformat(), "value": round(row[3], 1)})
 
             # Score del periodo (ponderado por volumen)
             pooled_total = sum(int(r[1] or 0) for r in rows)
@@ -914,7 +937,8 @@ def get_visibility():
                 num_sum += num
                 den_sum += den
                 pct = round((num / max(den, 1)) * 100.0, 1)
-                ts_dt = _dt.combine(day, _dt.min.time())
+                tz_madrid = pytz.timezone('Europe/Madrid')
+                ts_dt = _dt.combine(day, _dt.min.time()).replace(tzinfo=pytz.UTC).astimezone(tz_madrid)
                 series.append({"date": ts_dt.isoformat(), "ts": int(ts_dt.timestamp() * 1000), "value": pct})
                 day += timedelta(days=1)
 
@@ -1253,14 +1277,19 @@ def get_sentiment():
             """
             cur.execute(query, tuple([synonyms, like_patterns, like_patterns, synonyms] + params))
             rows = cur.fetchall()
+            tz_madrid = pytz.timezone('Europe/Madrid')
             for poll_start_time, total_b, pos_b, neu_b, neg_b in rows:
                 total_b = int(total_b or 0); pos_b = int(pos_b or 0); neu_b = int(neu_b or 0); neg_b = int(neg_b or 0)
                 total_neg += neg_b; total_neu += neu_b; total_pos += pos_b
                 denom = max(total_b, 1)
                 pct = round((pos_b / denom) * 100.0, 1)
+                try:
+                    dt_madrid = (poll_start_time.replace(tzinfo=pytz.UTC) if poll_start_time.tzinfo is None else poll_start_time.astimezone(pytz.UTC)).astimezone(tz_madrid)
+                except Exception:
+                    dt_madrid = poll_start_time
                 timeseries.append({
-                    "date": poll_start_time.isoformat(),
-                    "ts": int(poll_start_time.timestamp() * 1000),
+                    "date": dt_madrid.isoformat(),
+                    "ts": int(dt_madrid.timestamp() * 1000),
                     "value": pct,
                 })
         else:
@@ -1299,12 +1328,13 @@ def get_sentiment():
             cur.execute(query, tuple([synonyms, like_patterns, like_patterns, synonyms] + params))
             rows = cur.fetchall()
             from datetime import datetime as _dt
+            tz_madrid = pytz.timezone('Europe/Madrid')
             for d_bucket, pos, neu, neg in rows:
                 pos = int(pos or 0); neu = int(neu or 0); neg = int(neg or 0)
                 total = pos + neu + neg
                 total_neg += neg; total_neu += neu; total_pos += pos
                 pct_pos = (pos / max(total, 1)) * 100.0
-                ts_dt = _dt.combine(d_bucket, _dt.min.time())
+                ts_dt = _dt.combine(d_bucket, _dt.min.time()).replace(tzinfo=pytz.UTC).astimezone(tz_madrid)
                 timeseries.append({"date": ts_dt.isoformat(), "ts": int(ts_dt.timestamp() * 1000), "value": round(pct_pos, 1)})
 
         distribution = {"negative": int(total_neg), "neutral": int(total_neu), "positive": int(total_pos)}
@@ -1420,7 +1450,7 @@ def get_topics_cloud():
         rows = cur.fetchall()
         topics = [{"topic": r[0], "count": int(r[1] or 0), "avg_sentiment": float(r[2] or 0.0)} for r in rows]
 
-        # Intentar agrupar por categorías estratégicas con IA; si falla, devolver sin groups
+        # Intentar agrupar por categorías estratégicas con IA; si tarda o falla, omitir
         groups = []
         try:
             groups = group_topics_with_ai(topics) or []
