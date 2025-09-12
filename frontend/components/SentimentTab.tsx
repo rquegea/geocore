@@ -64,6 +64,32 @@ export default function SentimentTab(props: SentimentTabProps) {
     return { positivePercent: 0, neutralPercent: 0, negativePercent: 0, delta: 0, timeseries: [], negatives: [], positives: [] }
   })
 
+  // Fallback local: agrupar topics en categorías cuando la API no devuelve groups
+  const buildFallbackGroups = (topics: { topic: string; count: number; avg_sentiment?: number }[]): TopicGroup[] => {
+    const groupsMap: Record<string, { total_occurrences: number; sum_weighted_sent: number; topics: { topic: string; count: number; avg_sentiment?: number }[] }> = {}
+    const ensure = (name: string) => (groupsMap[name] ||= { total_occurrences: 0, sum_weighted_sent: 0, topics: [] })
+    const toKey = (s: string) => (s || '').toLowerCase().trim()
+    const isBrand = (t: string) => /\bthe\s*core\b/.test(t)
+    const isUniversity = (t: string) => /universidad|universitat|complutense|rey\s*juan\s*carlos|navarra|uva|upm|urjc|usc|uam|unav/.test(t)
+    const isAdmissions = (t: string) => /beca|precio|coste|costo|admis|financiaci[oó]n|matr[ií]cula/.test(t)
+    const isJobs = (t: string) => /empleo|empleabilidad|trabajo|salidas/.test(t)
+    const isPrograms = (t: string) => /cine|audiovisual|animaci[oó]n|vfx|fotograf[ií]a|guion|gu[ií]on|ingenier[ií]a|software|programaci[oó]n|dise[nñ]o|3d|edici[oó]n|formaci[oó]n/.test(t)
+    const OTHER = 'Temas Generales del Sector'
+    topics.forEach((row) => {
+      const topic = toKey(row.topic)
+      const count = Number(row.count || 0)
+      const sent = Number(row.avg_sentiment || 0)
+      const push = (groupName: string) => { const g = ensure(groupName); g.total_occurrences += count; g.sum_weighted_sent += sent * count; g.topics.push({ topic: row.topic, count, avg_sentiment: sent }) }
+      if (isBrand(topic)) push('Menciones de Marca Propia')
+      else if (isUniversity(topic)) push('Menciones de Universidades Tradicionales')
+      else if (isAdmissions(topic)) push('Becas y Admisiones')
+      else if (isJobs(topic)) push('Salidas Profesionales')
+      else if (isPrograms(topic)) push('Programas y Grados')
+      else push(OTHER)
+    })
+    return Object.entries(groupsMap).map(([group_name, v]) => ({ group_name, total_occurrences: v.total_occurrences, avg_sentiment: v.total_occurrences ? v.sum_weighted_sent / v.total_occurrences : 0, topics: v.topics.sort((a, b) => (b.count || 0) - (a.count || 0)).slice(0, 100) }))
+  }
+
   useEffect(() => {
     let cancelled = false
     const load = async () => {
@@ -76,7 +102,9 @@ export default function SentimentTab(props: SentimentTabProps) {
       if (cancelled) return
       setSentimentApi(sentimentRes)
       setTopicsCloud(topicsRes.topics || [])
-      setTopicGroups((topicsRes as any).groups || [])
+      const apiGroups = (topicsRes as any).groups || []
+      if (apiGroups && apiGroups.length > 0) setTopicGroups(apiGroups)
+      else setTopicGroups(buildFallbackGroups((topicsRes.topics || []) as any))
 
       // compute derived
       const { distribution, timeseries, negatives, positives } = sentimentRes
