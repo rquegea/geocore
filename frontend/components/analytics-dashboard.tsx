@@ -723,6 +723,8 @@ export function AnalyticsDashboard() {
           <nav className="space-y-1">
             <Button variant="ghost" className={`w-full justify-start text-black rounded-md hover:bg-gradient-to-r hover:from-gray-200 hover:to-gray-100 ${ activeSidebarSection === "Answer Engine Insights" ? "bg-gray-100" : "" }`} onClick={() => setActiveSidebarSection("Answer Engine Insights")}> <Zap className="w-4 h-4 mr-3" /> Insights del Answer Engine </Button>
             <Button variant="ghost" className={`w-full justify-start text-black hover:text-black hover:bg-gradient-to-r hover:from-gray-100 hover:to-gray-50 rounded-md text-left ${ activeSidebarSection === "Estrategias y objetivos" ? "bg-gray-100" : "" }`} onClick={() => setActiveSidebarSection("Estrategias y objetivos")}> <Target className="w-4 h-4 mr-3 flex-shrink-0" /> <span className="truncate">Estrategias y objetivos </span> </Button>
+            <Button variant="ghost" className={`w-full justify-start text-black hover:text-black hover:bg-gradient-to-r hover:from-gray-100 hover:to-gray-50 rounded-md text-left ${ activeSidebarSection === "Crear informes" ? "bg-gray-100" : "" }`} onClick={() => setActiveSidebarSection("Crear informes")}> <Lightbulb className="w-4 h-4 mr-3 flex-shrink-0" /> <span className="truncate">Crear informes</span> </Button>
+            <Button variant="ghost" className={`w-full justify-start text-black hover:text-black hover:bg-gradient-to-r hover:from-gray-100 hover:to-gray-50 rounded-md text-left ${ activeSidebarSection === "Optimización de artículos" ? "bg-gray-100" : "" }`} onClick={() => setActiveSidebarSection("Optimización de artículos")}> <AlertTriangle className="w-4 h-4 mr-3 flex-shrink-0" /> <span className="truncate">Optimización de artículos</span> </Button>
           </nav>
         </div>
         <div className="p-4 border-t border-gray-200 flex-shrink-0">
@@ -1051,6 +1053,81 @@ export function AnalyticsDashboard() {
               )}
             </div>
           </>
+        ) : activeSidebarSection === "Crear informes" ? (
+          <div className="p-6 space-y-6">
+            <div className="relative">
+              <div className="absolute inset-0 z-10 flex items-center justify-center">
+                <div className="text-center">
+                  <div className="text-2xl font-semibold mb-2">Crear informes</div>
+                  <div className="text-muted-foreground">Funcionalidad disponible en el siguiente plan</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 filter blur-sm pointer-events-none select-none bg-[radial-gradient(circle_at_20%_20%,_#e5e7eb,_transparent_40%),_radial-gradient(circle_at_80%_60%,_#f3f4f6,_transparent_40%)] rounded-lg p-2">
+                <Card className="shadow-sm bg-white">
+                  <CardHeader>
+                    <CardTitle className="text-lg font-semibold">Informe de desempeño</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="h-40 bg-gray-100 rounded animate-pulse" />
+                    <div className="mt-4 h-3 bg-gray-100 rounded w-3/4 animate-pulse" />
+                  </CardContent>
+                </Card>
+                <Card className="shadow-sm bg-white">
+                  <CardHeader>
+                    <CardTitle className="text-lg font-semibold">Resumen ejecutivo</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      <div className="h-3 bg-gray-100 rounded animate-pulse" />
+                      <div className="h-3 bg-gray-100 rounded w-5/6 animate-pulse" />
+                      <div className="h-3 bg-gray-100 rounded w-2/3 animate-pulse" />
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </div>
+        ) : activeSidebarSection === "Optimización de artículos" ? (
+          <div className="p-6 space-y-6">
+            <div className="relative">
+              <div className="absolute inset-0 z-10 flex items-center justify-center">
+                <div className="text-center">
+                  <div className="text-2xl font-semibold mb-2">Optimización de artículos</div>
+                  <div className="text-muted-foreground">Funcionalidad disponible en el siguiente plan</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 filter blur-sm pointer-events-none select-none bg-[linear-gradient(135deg,_#f5f5f5_25%,_transparent_25%),_linear-gradient(225deg,_#f5f5f5_25%,_transparent_25%),_linear-gradient(45deg,_#f5f5f5_25%,_transparent_25%),_linear-gradient(315deg,_#f5f5f5_25%,_#ffffff_25%)] bg-[size:20px_20px] bg-[position:0_0,10px_0,10px_-10px,0px_10px] rounded-lg p-2">
+                <Card className="shadow-sm bg-white">
+                  <CardHeader>
+                    <CardTitle className="text-lg font-semibold">Análisis SEO</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="h-40 bg-gray-100 rounded animate-pulse" />
+                  </CardContent>
+                </Card>
+                <Card className="shadow-sm bg-white">
+                  <CardHeader>
+                    <CardTitle className="text-lg font-semibold">Recomendaciones</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      <div className="h-3 bg-gray-100 rounded animate-pulse" />
+                      <div className="h-3 bg-gray-100 rounded w-5/6 animate-pulse" />
+                      <div className="h-3 bg-gray-100 rounded w-2/3 animate-pulse" />
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="shadow-sm bg-white">
+                  <CardHeader>
+                    <CardTitle className="text-lg font-semibold">Impacto estimado</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="h-40 bg-gray-100 rounded animate-pulse" />
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </div>
         ) : (
           <>
             {/* Header */}

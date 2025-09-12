@@ -80,7 +80,7 @@ export default function VisibilityTab(props: VisibilityTabProps) {
   }
   const labelFormatter = (label: number | string) => {
     const ts = typeof label === 'number' ? label : new Date(label).getTime()
-    return formatMadridTime(ts, true)
+    return formatMadridTime(ts, isHourlyRange)
   }
   const valueFormatter = (v: number) => [`${Number(v).toFixed(1)}%`, 'Visibilidad'] as const
   const deltaFromRange = computeDeltaFromSeries(visibility.series)

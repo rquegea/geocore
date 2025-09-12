@@ -129,7 +129,9 @@ export default function SentimentTab(props: SentimentTabProps) {
   }
   const labelFormatter = (label: number | string) => {
     const ts = typeof label === 'number' ? label : new Date(label).getTime()
-    return formatMadrid(ts)
+    return isHourlyRange
+      ? new Date(ts).toLocaleString('es-ES', { timeZone: 'Europe/Madrid', hour: '2-digit', minute: '2-digit', hour12: false })
+      : new Date(ts).toLocaleString('es-ES', { timeZone: 'Europe/Madrid', day: 'numeric', month: 'short' })
   }
 
   const CustomTooltip = ({ active, label, payload }: any) => {
