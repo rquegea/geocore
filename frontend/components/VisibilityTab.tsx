@@ -1,19 +1,21 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { TrendingUp, TrendingDown } from "lucide-react"
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, AreaChart, Area } from "recharts"
-import React from "react"
+import React, { useEffect, useState } from "react"
 
 export interface VisibilityPoint { date: string | number; value: number }
 export interface VisibilityApiResponse { visibility_score: number; delta: number; series: VisibilityPoint[] }
 
 export interface VisibilityTabProps {
-  visibility: VisibilityApiResponse | null
   brandName: string
   isHourlyRange: boolean
   xDomain: [number, number]
   xTicks: number[]
   visibilityChartType: "line" | "area"
   visibilityChartKey: string
+  dateRange?: { from?: Date; to?: Date }
+  model?: string
+  topic?: string
 }
 
 function computeDeltaFromSeries(series: VisibilityPoint[]): number {
@@ -25,16 +27,42 @@ function computeDeltaFromSeries(series: VisibilityPoint[]): number {
   return Math.round(diff * 10) / 10
 }
 
+import type { DateRange } from "react-day-picker"
+import { getVisibility, type VisibilityApiResponse as ApiVisibility } from "@/services/api"
+
 export default function VisibilityTab(props: VisibilityTabProps) {
-  const { visibility, brandName, isHourlyRange, xDomain, xTicks, visibilityChartType, visibilityChartKey } = props
-  if (!visibility) {
+  const { brandName, isHourlyRange, xDomain, xTicks, visibilityChartType, visibilityChartKey, dateRange, model, topic } = props
+
+  const [visibility, setVisibility] = useState<ApiVisibility | null>(null)
+  const [loading, setLoading] = useState<boolean>(false)
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      if (!dateRange?.from || !dateRange?.to) return
+      try {
+        setLoading(true)
+        const filters = { model: model || 'all', topic: topic || 'all', brand: brandName, granularity: isHourlyRange ? 'hour' as const : 'day' as const }
+        const res = await getVisibility(dateRange as DateRange, filters)
+        if (!cancelled) setVisibility(res)
+      } catch {
+        if (!cancelled) setVisibility(null)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [dateRange, model, topic, brandName, isHourlyRange])
+
+  if (!visibility || loading) {
     return (
       <Card className="shadow-sm bg-white h-full min-h-[420px]">
         <CardHeader>
           <CardTitle className="text-lg font-semibold">Puntuación de visibilidad</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="text-sm text-muted-foreground">Sin datos para el rango seleccionado.</div>
+          <div className="text-sm text-muted-foreground">{loading ? 'Cargando...' : 'Sin datos para el rango seleccionado.'}</div>
         </CardContent>
       </Card>
     )

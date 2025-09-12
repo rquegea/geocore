@@ -3,7 +3,7 @@ import { TrendingUp, TrendingDown, ChevronDown } from "lucide-react"
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, AreaChart, Area, Brush, ReferenceDot } from "recharts"
 import { Badge } from "@/components/ui/badge"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import React from "react"
+import React, { useEffect, useState } from "react"
 
 export interface SentimentComputed {
   positivePercent: number
@@ -18,7 +18,6 @@ export interface SentimentComputed {
 export interface TopicGroup { group_name: string; total_occurrences: number; topics: { topic: string; count: number; avg_sentiment?: number }[] }
 
 export interface SentimentTabProps {
-  sentimentComputed: SentimentComputed
   sentimentChartType: "line" | "area"
   sentimentBrush: boolean
   posHighlightIdx: number
@@ -33,10 +32,49 @@ export interface SentimentTabProps {
   xDomain: [number, number]
   xTicks: number[]
   executionTimestamps?: number[]
+  dateRange?: { from?: Date; to?: Date }
+  model?: string
+  topic?: string
+  brandName: string
 }
 
+import type { DateRange } from "react-day-picker"
+import { getSentiment, getTopicsCloud, type TopicsCloudResponse, type SentimentApiResponse } from "@/services/api"
+
 export default function SentimentTab(props: SentimentTabProps) {
-  const { sentimentComputed, sentimentChartType, sentimentBrush, posHighlightIdx, negHighlightIdx, topicsCloud, topicGroups, openGroups, setOpenGroups, translateTopicToSpanish, isHourlyRange, xDomain, xTicks, executionTimestamps } = props
+  const { sentimentChartType, sentimentBrush, posHighlightIdx, negHighlightIdx, openGroups, setOpenGroups, translateTopicToSpanish, isHourlyRange, xDomain, xTicks, executionTimestamps, dateRange, model, topic, brandName } = props
+
+  const [topicsCloud, setTopicsCloud] = useState<{ topic: string; count: number; avg_sentiment?: number }[]>([])
+  const [topicGroups, setTopicGroups] = useState<TopicGroup[]>([])
+  const [sentimentApi, setSentimentApi] = useState<SentimentApiResponse | null>(null)
+  const [sentimentComputed, setSentimentComputed] = useState<SentimentComputed>({ positivePercent: 0, neutralPercent: 0, negativePercent: 0, delta: 0, timeseries: [], negatives: [], positives: [] })
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      if (!dateRange?.from || !dateRange?.to) return
+      const filters = { model: model || 'all', topic: topic || 'all', brand: brandName, granularity: isHourlyRange ? 'hour' as const : 'day' as const }
+      const [sentimentRes, topicsRes] = await Promise.all([
+        getSentiment(dateRange as DateRange, filters),
+        getTopicsCloud(dateRange as DateRange, filters),
+      ])
+      if (cancelled) return
+      setSentimentApi(sentimentRes)
+      setTopicsCloud(topicsRes.topics || [])
+      setTopicGroups((topicsRes as any).groups || [])
+
+      // compute derived
+      const { distribution, timeseries, negatives, positives } = sentimentRes
+      const total = (distribution.negative + distribution.neutral + distribution.positive) || 1
+      const positivePercent = (distribution.positive / total) * 100
+      const neutralPercent = (distribution.neutral / total) * 100
+      const negativePercent = (distribution.negative / total) * 100
+      const scaledTimeseries = (timeseries || []).map(p => ({ date: p.date, value: Math.max(0, Math.min(100, Number(p.value) || 0)) }))
+      setSentimentComputed({ positivePercent, neutralPercent, negativePercent, delta: 0, timeseries: scaledTimeseries, negatives: negatives || [], positives: positives || [] })
+    }
+    load()
+    return () => { cancelled = true }
+  }, [dateRange, model, topic, brandName, isHourlyRange])
   const formatMadrid = (tsMs: number) => {
     try {
       return isHourlyRange

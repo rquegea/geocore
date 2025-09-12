@@ -13,7 +13,6 @@ from dotenv import load_dotenv
 import re
 import unicodedata
 from difflib import SequenceMatcher
-import time
 from src.engines.openai_engine import fetch_response
 
 load_dotenv()
@@ -344,20 +343,8 @@ def canonicalize_topic(topic: str) -> str:
 
 
 # Nueva función: agrupar topics con IA en categorías estratégicas
-_TOPICS_AI_CACHE: dict[str, tuple[float, list[dict]]] = {}
-_TOPICS_AI_TTL_SECONDS = 300  # 5 minutos
-
-def _topics_cache_key(rows: list[dict]) -> str:
-    items = [f"{(t.get('topic') or '').lower()}|{int(t.get('count') or 0)}|{round(float(t.get('avg_sentiment') or 0.0),2)}" for t in (rows or [])[:100]]
-    return "|".join(items)
-
 def group_topics_with_ai(topics_rows: list[dict]) -> list[dict]:
     try:
-        ck = _topics_cache_key(topics_rows)
-        now = time.time()
-        cached = _TOPICS_AI_CACHE.get(ck)
-        if cached and (now - cached[0]) < _TOPICS_AI_TTL_SECONDS:
-            return cached[1]
         topics_list_str = "\n".join([f"- {t.get('topic','')} | count={t.get('count',0)} | avg_sentiment={t.get('avg_sentiment',0.0):.2f}" for t in topics_rows])
         
         # --- INICIO DE LA MODIFICACIÓN ---
@@ -407,7 +394,6 @@ Lista de Temas a Analizar:
         if match:
             data = json.loads(match.group(0))
             if isinstance(data, list):
-                _TOPICS_AI_CACHE[ck] = (now, data)
                 return data
         return []
     except Exception:
@@ -1450,7 +1436,7 @@ def get_topics_cloud():
         rows = cur.fetchall()
         topics = [{"topic": r[0], "count": int(r[1] or 0), "avg_sentiment": float(r[2] or 0.0)} for r in rows]
 
-        # Intentar agrupar por categorías estratégicas con IA; si tarda o falla, omitir
+        # Intentar agrupar por categorías estratégicas con IA; si falla, devolver sin groups
         groups = []
         try:
             groups = group_topics_with_ai(topics) or []

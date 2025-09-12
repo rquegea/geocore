@@ -420,101 +420,13 @@ export function AnalyticsDashboard() {
 
   // 3. USEEFFECT (sin cambios en su lógica, siempre depende de dateRange)
   useEffect(() => {
-    if (!dateRange?.from || !dateRange?.to) {
-        return;
-    }
-    // Reset del visor (Brush) cuando cambia el rango
+    if (!dateRange?.from || !dateRange?.to) return
     try {
-      const start = dateRange.from.getTime()
-      const end = dateRange.to.getTime()
-      setVisibilityBrushStart(start)
-      setVisibilityBrushEnd(end)
-      // Forzar remount del chart para que Brush se reinicialice visualmente
-      setVisibilityChartKey(`${start}-${end}`)
+      const start = dateRange.from.getTime(); const end = dateRange.to.getTime()
+      setVisibilityBrushStart(start); setVisibilityBrushEnd(end); setVisibilityChartKey(`${start}-${end}`)
     } catch {}
-    const loadDashboardData = async () => {
-      try {
-        setIsLoading(true)
-        setError(null)
-        const filters = { model: selectedModel, source: selectedSource, topic: selectedTopic, brand: primaryBrandName, granularity: visibilityGranularity }
-        // Cargar TODO en paralelo (incluye topics-cloud) para que Sentimientos salga de inmediato
-        const [visibilityResponse, visibilityRankingRes, sovResponse, promptsRes, sentimentRes, topicsCloudRes] = await Promise.all([
-          getVisibility(dateRange, filters),
-          getVisibilityRanking(dateRange, filters),
-          getShareOfVoice(dateRange, filters),
-          getPrompts(dateRange, filters),
-          getSentiment(dateRange, filters),
-          getTopicsCloud(dateRange, filters),
-        ]);
-        setVisibility(visibilityResponse);
-        setVisibilityRanking(visibilityRankingRes.ranking || [])
-        setCompetitorData((sovResponse as ShareOfVoiceResponse).overall_ranking);
-        setSovByTopic((sovResponse as ShareOfVoiceResponse).by_topic || {});
-        // Cargar menciones después, sin bloquear render inicial
-        getMentions(dateRange, filters).then((m) => setMentions(m.mentions)).catch(() => setMentions([]))
-        setPromptsGrouped(promptsRes.topics);
-        setSentimentApi(sentimentRes);
-        // Temas por categoría: usar grupos de la API o agrupar por defecto
-        try {
-          const tc = topicsCloudRes as any
-          setTopicsCloud((tc?.topics ?? []) as any)
-          const apiGroups = (tc?.groups ?? []) as any[]
-          if (apiGroups && apiGroups.length > 0) {
-            setTopicGroups(apiGroups)
-          } else {
-            const competitorNames = ((sovResponse as ShareOfVoiceResponse).overall_ranking || []).map(c => (c.name || '').toLowerCase())
-            const fallbackGroups = (() => {
-              const groupsMap: Record<string, { total_occurrences: number; sum_weighted_sent: number; topics: { topic: string; count: number; avg_sentiment?: number }[] }> = {}
-              const ensure = (name: string) => groupsMap[name] || (groupsMap[name] = { total_occurrences: 0, sum_weighted_sent: 0, topics: [] })
-              const toKey = (s: string) => (s || '').toLowerCase()
-              const isBrand = (t: string) => /\bthe\s*core\b/.test(t)
-              const isCompetitor = (t: string) => competitorNames.some(n => n && t.includes(n))
-              const isUniversity = (t: string) => /universidad|universitat|complutense|rey\s*juan\s*carlos|navarra/.test(t)
-              const isAdmissions = (t: string) => /beca|precio|coste|costo|admis|financiaci[oó]n|matr[ií]cula/.test(t)
-              const isJobs = (t: string) => /empleo|empleabilidad|trabajo|salidas/.test(t)
-              const isPrograms = (t: string) => /cine|audiovisual|animaci[oó]n|vfx|fotograf[ií]a|guion|gu[ií]on|ingenier[ií]a|software|programaci[oó]n|dise[nñ]o|3d|edici[oó]n/.test(t)
-              const OTHER = 'Temas Generales del Sector'
-              ;((tc?.topics ?? []) as any[]).forEach((row: any) => {
-                const topic = toKey(row.topic)
-                const count = Number(row.count || 0)
-                const sent = Number(row.avg_sentiment || 0)
-                const push = (groupName: string) => {
-                  const g = ensure(groupName)
-                  g.total_occurrences += count
-                  g.sum_weighted_sent += sent * count
-                  g.topics.push({ topic: row.topic, count, avg_sentiment: sent })
-                }
-                if (isBrand(topic)) push('Menciones de Marca Propia')
-                else if (isCompetitor(topic)) push('Menciones de Competidores Directos')
-                else if (isUniversity(topic)) push('Menciones de Universidades Tradicionales')
-                else if (isAdmissions(topic)) push('Becas y Admisiones')
-                else if (isJobs(topic)) push('Salidas Profesionales')
-                else if (isPrograms(topic)) push('Programas y Grados')
-                else push(OTHER)
-              })
-              return Object.entries(groupsMap).map(([group_name, v]) => ({
-                group_name,
-                total_occurrences: v.total_occurrences,
-                avg_sentiment: v.total_occurrences ? v.sum_weighted_sent / v.total_occurrences : 0,
-                topics: v.topics.sort((a, b) => (b.count || 0) - (a.count || 0)).slice(0, 100),
-              }))
-            })()
-            setTopicGroups(fallbackGroups)
-          }
-        } catch (e) {
-          console.error('Error procesando topics-cloud', e)
-          setTopicsCloud([])
-          setTopicGroups([])
-        }
-      } catch (err) {
-        setError("No se pudieron cargar los datos. Por favor, revisa la consola o el estado del backend.")
-        console.error(err)
-      } finally {
-        setIsLoading(false)
-      }
-    }
-    loadDashboardData()
-  }, [dateRange, selectedModel, selectedTopic, primaryBrandName]);
+    // Ya no cargamos datos aquí; cada pestaña hace sus propias llamadas
+  }, [dateRange])
 
   // cargar opciones de filtros (models y topics independientes del filtro activo)
   useEffect(() => {
@@ -1141,13 +1053,15 @@ export function AnalyticsDashboard() {
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
                       <div className="lg:col-span-2 h-full">
                         <VisibilityTab
-                          visibility={visibility as any}
                           brandName={brandName}
                           isHourlyRange={isHourlyRange}
                           xDomain={xDomain}
                           xTicks={xTicks}
                           visibilityChartType={visibilityChartType}
                           visibilityChartKey={visibilityChartKey}
+                          dateRange={dateRange}
+                          model={selectedModel}
+                          topic={selectedTopic}
                         />
                       </div>
                       <div className="h-full">
@@ -1289,7 +1203,6 @@ export function AnalyticsDashboard() {
                     </div>
 
                     <SentimentTab
-                      sentimentComputed={sentimentComputed}
                       sentimentChartType={sentimentChartType}
                       sentimentBrush={sentimentBrush}
                       posHighlightIdx={posHighlightIdx}
@@ -1302,6 +1215,10 @@ export function AnalyticsDashboard() {
                       isHourlyRange={isHourlyRange}
                       xDomain={xDomain}
                       xTicks={xTicks}
+                      dateRange={dateRange}
+                      model={selectedModel}
+                      topic={selectedTopic}
+                      brandName={brandName}
                     />
                   </>
                 )}
@@ -1315,8 +1232,8 @@ export function AnalyticsDashboard() {
                     selectedModel={selectedModel}
                     onModelChange={setSelectedModel}
                     modelOptions={modelOptions}
-                    isLoading={isLoading}
-                    promptsGrouped={promptsGrouped}
+                    dateRange={dateRange}
+                    brandName={brandName}
                     openTopics={openTopics}
                     setOpenTopics={setOpenTopics}
                     openPrompt={openPrompt}

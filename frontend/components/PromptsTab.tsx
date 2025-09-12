@@ -1,10 +1,12 @@
-import React from "react"
+import React, { useEffect, useState } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
 import { ChevronRight } from "lucide-react"
+import type { DateRange } from "react-day-picker"
+import { getPrompts, type PromptsByTopic as ApiPromptsByTopic } from "@/services/api"
 
 export type PresetPeriod = '24h' | '7d' | '30d' | '90d' | 'custom'
 
@@ -20,8 +22,9 @@ export interface PromptsTabProps {
   selectedModel: string
   onModelChange: (value: string) => void
   modelOptions: string[]
-  isLoading: boolean
-  promptsGrouped: PromptsByTopic[]
+  dateRange?: DateRange
+  brandName: string
+  isHourlyRange?: boolean
   openTopics: Record<string, boolean>
   setOpenTopics: React.Dispatch<React.SetStateAction<Record<string, boolean>>>
   openPrompt: (id: number) => void
@@ -32,7 +35,29 @@ export interface PromptsTabProps {
 }
 
 export default function PromptsTab(props: PromptsTabProps) {
-  const { activePeriod, onPresetChange, selectedTopic, onTopicChange, topicOptions, selectedModel, onModelChange, modelOptions, isLoading, promptsGrouped, openTopics, setOpenTopics, openPrompt, openEditPrompt, handleDeletePrompt, translateTopicToSpanish, emojiForTopic } = props
+  const { activePeriod, onPresetChange, selectedTopic, onTopicChange, topicOptions, selectedModel, onModelChange, modelOptions, dateRange, brandName, openTopics, setOpenTopics, openPrompt, openEditPrompt, handleDeletePrompt, translateTopicToSpanish, emojiForTopic } = props
+
+  const [isLoading, setIsLoading] = useState<boolean>(false)
+  const [promptsGrouped, setPromptsGrouped] = useState<ApiPromptsByTopic[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      if (!dateRange?.from || !dateRange?.to) return
+      try {
+        setIsLoading(true)
+        const filters = { model: selectedModel, topic: selectedTopic, brand: brandName }
+        const res = await getPrompts(dateRange, filters)
+        if (!cancelled) setPromptsGrouped(res.topics || [])
+      } catch (e) {
+        if (!cancelled) setPromptsGrouped([])
+      } finally {
+        if (!cancelled) setIsLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [dateRange, selectedModel, selectedTopic, brandName])
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
