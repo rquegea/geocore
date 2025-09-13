@@ -3,7 +3,7 @@ import { TrendingUp, TrendingDown, ChevronDown } from "lucide-react"
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, AreaChart, Area, Brush, ReferenceDot } from "recharts"
 import { Badge } from "@/components/ui/badge"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import React, { useEffect, useState } from "react"
+import React, { useEffect, useMemo, useRef, useState } from "react"
 
 export interface SentimentComputed {
   positivePercent: number
@@ -43,7 +43,7 @@ export interface SentimentTabProps {
 }
 
 import type { DateRange } from "react-day-picker"
-import { getSentiment, getTopicsCloud, type TopicsCloudResponse, type SentimentApiResponse } from "@/services/api"
+import { getSentiment, getTopicsCloud, type SentimentApiResponse } from "@/services/api"
 
 export default function SentimentTab(props: SentimentTabProps) {
   const { sentimentChartType, sentimentBrush, posHighlightIdx, negHighlightIdx, openGroups, setOpenGroups, translateTopicToSpanish, isHourlyRange, xDomain, xTicks, executionTimestamps, dateRange, model, topic, brandName, initialSentimentApi, initialTopicsCloud, initialTopicGroups } = props
@@ -90,34 +90,84 @@ export default function SentimentTab(props: SentimentTabProps) {
     return Object.entries(groupsMap).map(([group_name, v]) => ({ group_name, total_occurrences: v.total_occurrences, avg_sentiment: v.total_occurrences ? v.sum_weighted_sent / v.total_occurrences : 0, topics: v.topics.sort((a, b) => (b.count || 0) - (a.count || 0)).slice(0, 100) }))
   }
 
+  // Si entramos con datos precargados sin grupos, mostrar fallback inmediatamente
+  useEffect(() => {
+    if ((!initialTopicGroups || initialTopicGroups.length === 0) && (initialTopicsCloud && initialTopicsCloud.length > 0)) {
+      setTopicGroups(buildFallbackGroups(initialTopicsCloud))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Clave actual de filtros para evitar cargas innecesarias
+  const currentKey = useMemo(() => {
+    const f = dateRange?.from ? dateRange.from.getTime() : 0
+    const t = dateRange?.to ? dateRange.to.getTime() : 0
+    return `${brandName}|${model || 'all'}|${topic || 'all'}|${isHourlyRange ? 'hour' : 'day'}|${f}|${t}`
+  }, [brandName, model, topic, isHourlyRange, dateRange])
+  const loadedKeyRef = useRef<string | null>(null)
+
+  // Carga ligera inmediata + enriquecimiento por IA diferido e inactivo
   useEffect(() => {
     let cancelled = false
-    const load = async () => {
-      if (!dateRange?.from || !dateRange?.to) return
-      const filters = { model: model || 'all', topic: topic || 'all', brand: brandName, granularity: isHourlyRange ? 'hour' as const : 'day' as const }
-      const [sentimentRes, topicsRes] = await Promise.all([
-        getSentiment(dateRange as DateRange, filters),
-        getTopicsCloud(dateRange as DateRange, filters),
-      ])
-      if (cancelled) return
-      setSentimentApi(sentimentRes)
-      setTopicsCloud(topicsRes.topics || [])
-      const apiGroups = (topicsRes as any).groups || []
-      if (apiGroups && apiGroups.length > 0) setTopicGroups(apiGroups)
-      else setTopicGroups(buildFallbackGroups((topicsRes.topics || []) as any))
+    if (!dateRange?.from || !dateRange?.to) return
 
-      // compute derived
-      const { distribution, timeseries, negatives, positives } = sentimentRes
-      const total = (distribution.negative + distribution.neutral + distribution.positive) || 1
-      const positivePercent = (distribution.positive / total) * 100
-      const neutralPercent = (distribution.neutral / total) * 100
-      const negativePercent = (distribution.negative / total) * 100
-      const scaledTimeseries = (timeseries || []).map(p => ({ date: p.date, value: Math.max(0, Math.min(100, Number(p.value) || 0)) }))
-      setSentimentComputed({ positivePercent, neutralPercent, negativePercent, delta: 0, timeseries: scaledTimeseries, negatives: negatives || [], positives: positives || [] })
+    const filters = { model: model || 'all', topic: topic || 'all', brand: brandName, granularity: isHourlyRange ? 'hour' as const : 'day' as const }
+
+    const lightRefresh = async () => {
+      try {
+        const [maybeSentiment, topicsRes] = await Promise.all([
+          sentimentApi ? Promise.resolve(null) : getSentiment(dateRange as DateRange, filters),
+          // rápido (sin IA)
+          getTopicsCloud(dateRange as DateRange, filters, false),
+        ])
+        if (cancelled) return
+        if (maybeSentiment) {
+          const s = maybeSentiment
+          setSentimentApi(s)
+          const { distribution, timeseries, negatives, positives } = s
+          const total = (distribution.negative + distribution.neutral + distribution.positive) || 1
+          const positivePercent = (distribution.positive / total) * 100
+          const neutralPercent = (distribution.neutral / total) * 100
+          const negativePercent = (distribution.negative / total) * 100
+          const scaledTimeseries = (timeseries || []).map(p => ({ date: p.date, value: Math.max(0, Math.min(100, Number(p.value) || 0)) }))
+          setSentimentComputed({ positivePercent, neutralPercent, negativePercent, delta: 0, timeseries: scaledTimeseries, negatives: negatives || [], positives: positives || [] })
+        }
+        setTopicsCloud((topicsRes.topics || []) as any)
+        setTopicGroups(buildFallbackGroups((topicsRes.topics || []) as any))
+      } catch {
+        // ignorar errores para no bloquear UI
+      }
     }
-    load()
+
+    const enrichWithAI = async () => {
+      try {
+        const res = await getTopicsCloud(dateRange as DateRange, filters, true)
+        if (!cancelled) {
+          const apiGroups = (res as any).groups || []
+          if (apiGroups && apiGroups.length > 0) setTopicGroups(apiGroups)
+        }
+      } catch {
+        // si falla IA, mantenemos fallback
+      }
+    }
+
+    // Evita carga pesada inicial si ya tenemos datos precargados para esta clave
+    if (loadedKeyRef.current !== currentKey) {
+      loadedKeyRef.current = currentKey
+      lightRefresh()
+      // Enriquecer cuando el hilo esté libre
+      const idleCb = (window as any).requestIdleCallback
+      if (typeof idleCb === 'function') {
+        const id = idleCb(() => { if (!cancelled) enrichWithAI() }, { timeout: 2000 })
+        return () => { cancelled = true; (window as any).cancelIdleCallback?.(id) }
+      } else {
+        const t = setTimeout(() => { if (!cancelled) enrichWithAI() }, 800)
+        return () => { cancelled = true; clearTimeout(t) }
+      }
+    }
+
     return () => { cancelled = true }
-  }, [dateRange, model, topic, brandName, isHourlyRange])
+  }, [currentKey])
   const formatMadrid = (tsMs: number) => {
     try {
       return isHourlyRange

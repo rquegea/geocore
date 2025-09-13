@@ -14,6 +14,7 @@ import re
 import unicodedata
 from difflib import SequenceMatcher
 from src.engines.openai_engine import fetch_response
+from time import time
 
 load_dotenv()
 
@@ -28,6 +29,30 @@ def _env(*names: str, default: str | int | None = None):
         if v is not None and v != "":
             return v
     return default
+
+# Caché simple en memoria para resultados de agrupación por IA (TTL configurable)
+_GROUPS_CACHE: dict[str, tuple[float, list[dict]]] = {}
+GROUPS_CACHE_TTL_SECONDS = int(os.getenv("TOPICS_GROUPS_TTL", "60"))
+
+def _groups_cache_get(key: str) -> list[dict] | None:
+    try:
+        ts, data = _GROUPS_CACHE.get(key, (0.0, None))  # type: ignore
+        if not data:
+            return None
+        if (time() - ts) <= GROUPS_CACHE_TTL_SECONDS:
+            return data
+        # Expirado
+        _GROUPS_CACHE.pop(key, None)
+        return None
+    except Exception:
+        return None
+
+def _groups_cache_set(key: str, data: list[dict]) -> None:
+    try:
+        _GROUPS_CACHE[key] = (time(), data)
+    except Exception:
+        # En caso de error, no bloquear el flujo
+        pass
 
 # --- Nueva Función de Categorización con IA ---
 def _normalize_text_for_match(text: str) -> list[str]:
@@ -1440,10 +1465,34 @@ def get_topics_cloud():
         groups = []
         groups_flag = (request.args.get('groups', '1') or '1').lower()
         if groups_flag in ('1', 'true', 'yes', 'y'):
+            # Clave de caché por ventana temporal + filtros principales
             try:
-                groups = group_topics_with_ai(topics) or []
+                cache_key = "|".join([
+                    str(filters.get('brand') or ''),
+                    str(filters.get('model') or ''),
+                    str(filters.get('source') or ''),
+                    str(filters.get('topic') or ''),
+                    (filters.get('start_date') or datetime.min).isoformat(),
+                    (filters.get('end_date') or datetime.max).isoformat(),
+                ])
             except Exception:
-                groups = []
+                cache_key = None
+
+            if cache_key:
+                cached = _groups_cache_get(cache_key)
+                if cached is not None:
+                    groups = cached
+                else:
+                    try:
+                        groups = group_topics_with_ai(topics) or []
+                        _groups_cache_set(cache_key, groups)
+                    except Exception:
+                        groups = []
+            else:
+                try:
+                    groups = group_topics_with_ai(topics) or []
+                except Exception:
+                    groups = []
 
         cur.close(); conn.close()
         return jsonify({"topics": topics, "groups": groups})
