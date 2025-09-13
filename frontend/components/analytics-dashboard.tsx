@@ -460,7 +460,8 @@ export function AnalyticsDashboard() {
         const filters = { model: selectedModel, source: selectedSource, topic: selectedTopic, brand: primaryBrandName, granularity: isHourlyRange ? 'hour' as const : 'day' as const }
         const [senti, topicsC] = await Promise.all([
           getSentiment(dateRange, filters),
-          getTopicsCloud(dateRange, filters),
+          // Evita IA de agrupación en el prefetch para que sea inmediato
+          getTopicsCloud(dateRange, filters, false),
         ])
         setPrefSentimentApi(senti)
         setPrefTopicsCloud((topicsC as any)?.topics || [])

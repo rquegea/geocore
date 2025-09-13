@@ -1436,12 +1436,14 @@ def get_topics_cloud():
         rows = cur.fetchall()
         topics = [{"topic": r[0], "count": int(r[1] or 0), "avg_sentiment": float(r[2] or 0.0)} for r in rows]
 
-        # Intentar agrupar por categorías estratégicas con IA; si falla, devolver sin groups
+        # Agrupación opcional (puede ser costosa). Si ?groups=0, saltar IA.
         groups = []
-        try:
-            groups = group_topics_with_ai(topics) or []
-        except Exception:
-            groups = []
+        groups_flag = (request.args.get('groups', '1') or '1').lower()
+        if groups_flag in ('1', 'true', 'yes', 'y'):
+            try:
+                groups = group_topics_with_ai(topics) or []
+            except Exception:
+                groups = []
 
         cur.close(); conn.close()
         return jsonify({"topics": topics, "groups": groups})

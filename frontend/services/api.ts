@@ -102,9 +102,11 @@ export const getSentiment = (periodOrRange: DateRange | string, filters?: Filter
 
 export interface TopicGroup { group_name: string; avg_sentiment: number; total_occurrences: number; topics: { topic: string; count: number; avg_sentiment: number }[] }
 export interface TopicsCloudResponse { topics: { topic: string; count: number; avg_sentiment: number }[]; groups?: TopicGroup[] }
-export const getTopicsCloud = (periodOrRange: DateRange | string, filters?: FilterParams): Promise<TopicsCloudResponse> => {
-  const qs = appendFilters(buildDateQuery(periodOrRange), filters);
-  return fetchFromAPI<TopicsCloudResponse>(`/api/topics-cloud${qs}`);
+export const getTopicsCloud = (periodOrRange: DateRange | string, filters?: FilterParams, includeGroups: boolean = true): Promise<TopicsCloudResponse> => {
+  const base = appendFilters(buildDateQuery(periodOrRange), filters);
+  const url = new URLSearchParams(base.startsWith('?') ? base.slice(1) : base);
+  url.set('groups', includeGroups ? '1' : '0');
+  return fetchFromAPI<TopicsCloudResponse>(`/api/topics-cloud?${url.toString()}`);
 };
 
 // Prompts
