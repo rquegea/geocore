@@ -55,6 +55,11 @@ export default function GlobalFiltersToolbar(props: GlobalFiltersToolbarProps) {
           {modelOptions.map((m) => (
             <SelectItem key={m} value={m}>{m === 'all' ? 'Todos los modelos' : m}</SelectItem>
           ))}
+          {/* Opciones no disponibles en esta versión (deshabilitadas) */}
+          <SelectItem value="anthropic-claude" disabled>Claude (no disponible)</SelectItem>
+          <SelectItem value="meta-llama" disabled>Llama (no disponible)</SelectItem>
+          <SelectItem value="google-gemini" disabled>Gemini (no disponible)</SelectItem>
+          <SelectItem value="google-ai" disabled>Google (no disponible)</SelectItem>
         </SelectContent>
       </Select>
     </div>

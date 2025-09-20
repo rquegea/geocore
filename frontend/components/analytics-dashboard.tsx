@@ -2,7 +2,7 @@
 
 // 1. IMPORTACIONES (sin cambios)
 import { useState, useEffect, useMemo } from "react"
-import { Card, CardContent, CardHeader, CardTitle, CardFooter, CardAction } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle, CardFooter, CardAction, CardDescription } from "@/components/ui/card"
 import React from "react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -267,6 +267,8 @@ export function AnalyticsDashboard() {
   const [editPromptQuery, setEditPromptQuery] = useState("")
   const [editPromptTopic, setEditPromptTopic] = useState("")
   const [editPromptBrand, setEditPromptBrand] = useState("")
+
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false)
 
   // Sentiment API-backed state
   const [sentimentApi, setSentimentApi] = useState<SentimentApiResponse | null>(null)
@@ -732,8 +734,8 @@ export function AnalyticsDashboard() {
           <div className="space-y-2">
             <Button variant="ghost" className="w-full justify-start text-black hover:text-black hover:bg-gradient-to-r hover:from-gray-100 hover:to-gray-50 rounded-md text-sm"> <Settings className="w-4 h-4 mr-3" /> Soporte </Button>
             <div className="flex items-center gap-2 px-3 py-2">
-              <Image src="/juanjo-siguero.jpg" alt="Juanjo Siguero" width={24} height={24} className="w-6 h-6 rounded-full object-cover flex-shrink-0" />
-              <span className="text-sm text-black truncate">Juanjo Siguero</span>
+              <Image src="/sergio-castrelo.jpg" alt="Sergio Castrelo" width={24} height={24} className="w-6 h-6 rounded-full object-cover flex-shrink-0" />
+              <span className="text-sm text-black truncate">Sergio Castrelo</span>
             </div>
           </div>
         </div>
@@ -1055,37 +1057,59 @@ export function AnalyticsDashboard() {
             </div>
           </>
         ) : activeSidebarSection === "Crear informes" ? (
-          <div className="p-6 space-y-6">
-            <div className="relative">
-              <div className="absolute inset-0 z-10 flex items-center justify-center">
-                <div className="text-center">
-                  <div className="text-2xl font-semibold mb-2">Crear informes</div>
-                  <div className="text-muted-foreground">Funcionalidad disponible en el siguiente plan</div>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 filter blur-sm pointer-events-none select-none bg-[radial-gradient(circle_at_20%_20%,_#e5e7eb,_transparent_40%),_radial-gradient(circle_at_80%_60%,_#f3f4f6,_transparent_40%)] rounded-lg p-2">
-                <Card className="shadow-sm bg-white">
-                  <CardHeader>
-                    <CardTitle className="text-lg font-semibold">Informe de desempeño</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="h-40 bg-gray-100 rounded animate-pulse" />
-                    <div className="mt-4 h-3 bg-gray-100 rounded w-3/4 animate-pulse" />
-                  </CardContent>
-                </Card>
-                <Card className="shadow-sm bg-white">
-                  <CardHeader>
-                    <CardTitle className="text-lg font-semibold">Resumen ejecutivo</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      <div className="h-3 bg-gray-100 rounded animate-pulse" />
-                      <div className="h-3 bg-gray-100 rounded w-5/6 animate-pulse" />
-                      <div className="h-3 bg-gray-100 rounded w-2/3 animate-pulse" />
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
+          <div className="p-6 flex flex-col items-center justify-center text-center h-full bg-gray-50">
+            <div className="max-w-lg w-full">
+              <Card className="p-8 shadow-xl">
+                <CardHeader>
+                  <CardTitle className="text-2xl font-bold text-gray-800">Generador de Informes de Inteligencia</CardTitle>
+                  <CardDescription className="text-muted-foreground pt-2">
+                    Utiliza los filtros globales (fecha, tema, modelo) para definir el alcance de tu análisis. Al hacer clic, nuestro motor de IA procesará todos los datos relevantes y generará un informe ejecutivo en PDF con insights y palancas de decisión.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Button
+                    onClick={async () => {
+                      setIsGeneratingReport(true)
+                      try {
+                        const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5050'
+                        const response = await fetch(`${API_BASE}/api/reports/generate`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            start_date: dateRange?.from?.toISOString(),
+                            end_date: dateRange?.to?.toISOString(),
+                            model: selectedModel,
+                            topic: selectedTopic,
+                          }),
+                        })
+                        if (!response.ok) {
+                          const errorData = await response.json().catch(() => ({ error: 'Error desconocido al generar el informe' }))
+                          throw new Error(errorData.error || 'Error en el servidor al generar el informe')
+                        }
+                        const blob = await response.blob()
+                        const url = window.URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = url
+                        a.download = `informe_inteligencia_${new Date().toISOString().split('T')[0]}.pdf`
+                        document.body.appendChild(a)
+                        a.click()
+                        a.remove()
+                        window.URL.revokeObjectURL(url)
+                      } catch (error) {
+                        console.error('Fallo al generar el PDF:', error)
+                        alert((error as Error).message)
+                      } finally {
+                        setIsGeneratingReport(false)
+                      }
+                    }}
+                    disabled={isGeneratingReport}
+                    size="lg"
+                    className="w-full mt-4"
+                  >
+                    {isGeneratingReport ? 'Generando Informe, por favor espera...' : 'Generar y Descargar PDF'}
+                  </Button>
+                </CardContent>
+              </Card>
             </div>
           </div>
         ) : activeSidebarSection === "Optimización de artículos" ? (

@@ -1,6 +1,6 @@
 # backend/app.py
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 import psycopg2
 import os
@@ -15,6 +15,18 @@ import unicodedata
 from difflib import SequenceMatcher
 from src.engines.openai_engine import fetch_response
 from time import time
+import io
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import Paragraph
+from reportlab.lib.units import inch
+from reportlab.graphics.shapes import Drawing, Rect, String
+from reportlab.graphics import renderPDF
+from reportlab.graphics.charts.piecharts import Pie
+from reportlab.graphics.charts.lineplots import LinePlot
+from reportlab.graphics.widgets.markers import makeMarker
+from reportlab.lib import colors
 
 load_dotenv()
 
@@ -169,6 +181,399 @@ def get_db_connection():
     except psycopg2.OperationalError as e:
         print(f"ERROR: No se pudo conectar a la base de datos: {e}")
         raise e
+
+
+# ───────────────────── Motor de informes (helpers) ─────────────────────
+def _aggregate_data_for_report(filters):
+    """
+    Recopila y resume todos los datos necesarios para el informe desde la BD.
+    NOTA: Esta es una simulación. Deberías reemplazarla con tus propias consultas SQL.
+    """
+    # Normaliza filtros
+    brand = os.getenv('DEFAULT_BRAND', 'The Core School')
+    start_s = (filters or {}).get('start_date')
+    end_s = (filters or {}).get('end_date')
+    model = (filters or {}).get('model')
+    source = (filters or {}).get('source')
+    topic = (filters or {}).get('topic')
+
+    start_dt = parse_date(start_s) if start_s else datetime.utcnow() - timedelta(days=30)
+    end_dt = parse_date(end_s) if end_s else datetime.utcnow()
+
+    conn = get_db_connection(); cur = conn.cursor()
+
+    # WHERE base
+    where = ["m.created_at >= %s AND m.created_at < %s"]
+    params = [start_dt, end_dt]
+    if model and model != 'all':
+        where.append("m.engine = %s"); params.append(model)
+    if source and source != 'all':
+        where.append("m.source = %s"); params.append(source)
+    if topic and topic != 'all':
+        where.append("q.topic = %s"); params.append(topic)
+    where_sql = " AND ".join(where)
+
+    # Traer filas necesarias para cómputos (detección de marcas + sentimiento)
+    cur.execute(f"""
+        SELECT m.id, m.key_topics, LOWER(COALESCE(m.response,'')) AS resp,
+               LOWER(COALESCE(m.source_title,'')) AS title,
+               i.payload, m.sentiment, m.created_at
+        FROM mentions m
+        JOIN queries q ON m.query_id = q.id
+        LEFT JOIN insights i ON i.id = m.generated_insight_id
+        WHERE {where_sql}
+    """, tuple(params))
+    rows = cur.fetchall()
+
+    total_responses = len(rows)
+
+    # Conteos por marca (SOV y visibilidad)
+    from collections import defaultdict
+    brand_counts = defaultdict(int)
+    brand_sentiments = defaultdict(list)
+
+    for _id, key_topics, resp, title, payload, senti, created_at in rows:
+        detected = _detect_brands(key_topics, resp, title, payload)
+        seen = set()
+        for bn in detected:
+            if bn in seen:
+                continue
+            seen.add(bn)
+            brand_counts[bn] += 1
+            if isinstance(senti, (int, float)):
+                brand_sentiments[bn].append(float(senti))
+
+    def avg(xs):
+        return (sum(xs) / max(len(xs), 1)) if xs else 0.0
+
+    primary_brand = brand
+    visibility_score = round((brand_counts.get(primary_brand, 0) / max(total_responses, 1)) * 100.0, 1)
+    sentiment_avg = round(avg(brand_sentiments.get(primary_brand, [])), 2)
+
+    # Serie por día para delta de visibilidad
+    by_day_total = defaultdict(int)
+    by_day_brand = defaultdict(int)
+    for _id, key_topics, resp, title, payload, senti, created_at in rows:
+        d = created_at.date() if created_at else start_dt.date()
+        by_day_total[d] += 1
+        if primary_brand in _detect_brands(key_topics, resp, title, payload):
+            by_day_brand[d] += 1
+    days_sorted = sorted(by_day_total.keys())
+    series_vals = [ (by_day_brand[d] / max(by_day_total[d], 1)) * 100.0 for d in days_sorted ]
+    if len(series_vals) >= 2:
+        mid = len(series_vals) // 2
+        delta = round((sum(series_vals[mid:]) / max(len(series_vals[mid:]), 1)) - (sum(series_vals[:mid]) / max(len(series_vals[:mid]), 1)), 1)
+    else:
+        delta = 0.0
+
+    # Ranking SOV de los principales (según diccionario de marcas)
+    sov_list = []
+    for canon in BRAND_SYNONYMS.keys():
+        cnt = brand_counts.get(canon, 0)
+        sov = round((cnt / max(total_responses, 1)) * 100.0, 1)
+        if cnt > 0:
+            sov_list.append({"name": canon, "sov": sov})
+    sov_list.sort(key=lambda x: x["sov"], reverse=True)
+    competitor_ranking = [ {"rank": i+1, "name": it["name"], "sov": f"{it['sov']:.1f}%"} for i, it in enumerate(sov_list[:10]) ]
+
+    # Oportunidades / Riesgos / Tendencias / Citas desde insights
+    cur.execute(f"""
+        SELECT i.payload
+        FROM insights i
+        JOIN queries q ON i.query_id = q.id
+        WHERE i.created_at >= %s AND i.created_at < %s
+        {" AND q.topic = %s" if (topic and topic != 'all') else ''}
+    """, tuple([start_dt, end_dt] + ([topic] if (topic and topic != 'all') else [])))
+    insights_rows = cur.fetchall()
+    from collections import Counter
+    opp, risk, trend, quotes = Counter(), Counter(), Counter(), []
+    for (payload,) in insights_rows:
+        if not isinstance(payload, dict):
+            continue
+        for t in (payload.get('opportunities') or []):
+            opp[t] += 1
+        for t in (payload.get('risks') or []):
+            risk[t] += 1
+        for t in (payload.get('trends') or []):
+            trend[t] += 1
+        for q in (payload.get('quotes') or []):
+            if isinstance(q, str):
+                quotes.append(q)
+
+    top_opportunities = [t for t, _ in opp.most_common(5)]
+    top_risks = [t for t, _ in risk.most_common(5)]
+    emerging_trends = [t for t, _ in trend.most_common(5)]
+    key_quotes = quotes[:5]
+
+    cur.close(); conn.close()
+
+    aggregated_data = {
+        "start_date": start_dt.strftime('%Y-%m-%d'),
+        "end_date": end_dt.strftime('%Y-%m-%d'),
+        "brand": primary_brand,
+        "kpis": {
+            "visibility_score": visibility_score,
+            "visibility_delta": delta,
+            "sentiment_avg": sentiment_avg,
+            "sov_score": (sov_list[0]["sov"] if sov_list else 0.0),
+        },
+        "competitor_ranking": competitor_ranking,
+        "competitor_themes": {},
+        "top_positive_themes": [],
+        "top_negative_themes": [],
+        "emerging_trends": emerging_trends,
+        "top_opportunities": top_opportunities,
+        "top_risks": top_risks,
+        "key_quotes": key_quotes,
+        "sov_chart_data": sov_list[:5],
+        "visibility_timeseries": [
+            {"date": d.strftime('%Y-%m-%d'), "value": round(v, 1)}
+            for d, v in zip(days_sorted, series_vals)
+        ],
+    }
+
+    return aggregated_data
+
+
+def create_nielsen_style_prompt(aggregated_data):
+    """Crea el prompt avanzado para que la IA genere el contenido del informe."""
+    prompt = f"""
+    **ROL Y OBJETIVO:**
+    Actúa como un Analista de Inteligencia de Mercado Senior para "The Core School", una escuela superior especializada en entretenimiento y artes audiovisuales. Tu misión es redactar un informe ejecutivo de alto impacto, similar a los que producen consultoras como Nielsen o IRI, basándote en los datos cuantitativos y cualitativos proporcionados. El informe debe ser analítico, prescriptivo y orientado a la toma de decisiones estratégicas para el equipo directivo.
+
+    **CONTEXTO DE NEGOCIO:**
+    The Core School compite con otras escuelas especializadas y universidades tradicionales por atraer a jóvenes interesados en carreras creativas. Los "padres" son una audiencia secundaria clave que influye en la decisión. El objetivo es aumentar la visibilidad, mejorar la reputación y optimizar la captación de alumnos.
+
+    **DATOS DE MERCADO (Periodo: {aggregated_data['start_date']} a {aggregated_data['end_date']}):**
+
+    1.  **MÉTRICAS PRINCIPALES (KPIs):**
+        -   Visibilidad de Marca Global: {aggregated_data['kpis']['visibility_score']:.1f}%
+        -   Evolución de Visibilidad (vs. periodo anterior): {aggregated_data['kpis']['visibility_delta']:+.1f} pts
+        -   Sentimiento Promedio de la Marca: {aggregated_data['kpis']['sentiment_avg']:.2f} (escala -1 a 1)
+        -   Share of Voice (SOV) vs. Competencia: {aggregated_data['kpis']['sov_score']:.1f}%
+
+    2.  **ANÁLISIS DE LA COMPETENCIA:**
+        -   Ranking de Share of Voice: {json.dumps(aggregated_data['competitor_ranking'], indent=2, ensure_ascii=False)}
+        -   Temas Clave asociados a Competidores: {json.dumps(aggregated_data['competitor_themes'], indent=2, ensure_ascii=False)}
+
+    3.  **ANÁLISIS TEMÁTICO (DIAGNÓSTICO INTERNO):**
+        -   Temas con Sentimiento más Positivo: {json.dumps(aggregated_data['top_positive_themes'], indent=2, ensure_ascii=False)}
+        -   Temas con Sentimiento más Negativo (Puntos de Dolor): {json.dumps(aggregated_data['top_negative_themes'], indent=2, ensure_ascii=False)}
+        -   Tendencias Emergentes Detectadas: {json.dumps(aggregated_data['emerging_trends'], indent=2, ensure_ascii=False)}
+
+    4.  **DATOS CUALITATIVOS (VOZ DEL MERCADO):**
+        -   Oportunidades Estratégicas Clave (más frecuentes): {json.dumps(aggregated_data['top_opportunities'], indent=2, ensure_ascii=False)}
+        -   Riesgos y Amenazas Principales (más frecuentes): {json.dumps(aggregated_data['top_risks'], indent=2, ensure_ascii=False)}
+        -   Citas Textuales Representativas: {json.dumps(aggregated_data['key_quotes'], indent=2, ensure_ascii=False)}
+
+    **ESTRUCTURA DEL INFORME (RESPONDE ÚNICAMENTE CON ESTE JSON):**
+    {{
+      "executive_summary": {{
+        "title": "Informe Ejecutivo de Visibilidad e Inteligencia de Mercado",
+        "period": "{aggregated_data['start_date']} - {aggregated_data['end_date']}",
+        "headline": "Insight principal en una frase impactante (ej: 'Crecimiento en visibilidad impulsado por la reputación del programa de VFX, pero amenazado por la agresiva campaña de precios de la competencia').",
+        "key_findings": ["Hallazgo principal sobre la visibilidad y reputación.", "Hallazgo clave sobre la posición competitiva y SOV.", "Hallazgo relevante sobre la percepción de la audiencia."],
+        "overall_assessment": "Evaluación general del desempeño en el periodo, concluyendo si la posición de la marca ha mejorado, empeorado o se ha mantenido estable, y por qué."
+      }},
+      "strategic_levers": {{
+        "title": "Palancas de Decisión y Acciones Recomendadas",
+        "levers": [
+          {{
+            "lever_title": "Capitalizar en Oportunidad Clave (ej: Liderazgo en Formación Práctica)",
+            "description": "Análisis profundo de la oportunidad más importante y por qué es crucial.",
+            "recommended_actions": ["Acción de Marketing específica.", "Acción de Producto/Académica.", "Acción de Comunicación."]
+          }},
+          {{
+            "lever_title": "Mitigar Riesgo Principal (ej: Percepción de Alto Coste)",
+            "description": "Análisis del riesgo más significativo y su posible impacto.",
+            "recommended_actions": ["Acción Financiera/Comercial.", "Acción de Contenido."]
+          }}
+        ]
+      }},
+      "correlation_analysis": {{
+        "title": "Análisis de Correlaciones y Diagnóstico",
+        "insights": ["Observación que conecta dos o más puntos de datos.", "Observación sobre un competidor.", "Observación sobre una debilidad o 'blind spot'."]
+      }}
+    }}
+    """
+    return prompt
+
+
+def _create_pdf_report(content, data):
+    """Construye un PDF en memoria a partir del contenido JSON generado por la IA."""
+    buffer = io.BytesIO()
+    p = canvas.Canvas(buffer, pagesize=letter)
+    width, height = letter
+    styles = getSampleStyleSheet()
+    M = 0.75 * inch
+
+    # Rutas y helpers de cabecera/pie
+    project_root = os.path.dirname(os.path.dirname(__file__))
+    logo_path = os.path.join(project_root, 'frontend', 'public', 'the-core-logo.png')
+
+    def draw_header_footer():
+        try:
+            # Cabecera
+            if os.path.exists(logo_path):
+                p.drawImage(logo_path, M, height - M - 20, width=20, height=20, mask='auto')
+            p.setFont("Helvetica-Bold", 10)
+            p.drawString(M + 28, height - M - 8, f"{data.get('brand','')} — Informe Ejecutivo")
+            p.setLineWidth(0.3)
+            p.line(M, height - M - 24, width - M, height - M - 24)
+            # Pie
+            p.setFont("Helvetica", 9)
+            p.line(M, M * 0.8, width - M, M * 0.8)
+            p.drawString(M, M * 0.5, f"Periodo: {data['start_date']} a {data['end_date']}")
+            p.drawRightString(width - M, M * 0.5, f"Página {p.getPageNumber()}")
+        except Exception:
+            pass
+
+    def write_paragraph(text, x, y, style_name='Normal', font_size=10):
+        style = styles[style_name]
+        style.fontSize = font_size
+        para = Paragraph(text.replace('\n', '<br/>'), style)
+        w, h = para.wrapOn(p, width - x - inch, height)
+        if y - h < inch:
+            # Pie y cabecera de nueva página
+            draw_header_footer()
+            p.showPage()
+            draw_header_footer()
+            y = height - inch
+        para.drawOn(p, x, y - h)
+        return y - h - (font_size * 1.2)
+
+    y = height - inch
+
+    # Título y subtítulo
+    draw_header_footer()
+    p.setFont("Helvetica-Bold", 20)
+    p.drawString(M + 30, y, content['executive_summary']['title'])
+    y -= 25
+    p.setFont("Helvetica", 11)
+    p.drawString(M + 30, y, f"Periodo de Análisis: {data['start_date']} a {data['end_date']}")
+    y -= 40
+
+    # Headline
+    y = write_paragraph(f"<i><b>Insight Principal:</b> {content['executive_summary']['headline']}</i>", M, y, font_size=12)
+    y -= 20
+
+    # KPIs principales
+    k = data.get('kpis', {})
+    kpi_lines = [
+        f"Visibilidad de Marca: {k.get('visibility_score', 0):.1f}%",
+        f"Evolución vs periodo anterior: {k.get('visibility_delta', 0):+.1f} pts",
+        f"Sentimiento medio: {k.get('sentiment_avg', 0):.2f}",
+        f"Share of Voice (SOV): {k.get('sov_score', 0):.1f}%",
+    ]
+    y = write_paragraph("<b>KPIs del período</b><br/>- " + "<br/>- ".join(kpi_lines), M, y)
+    y -= 10
+
+    # Gráfico: Tendencia de visibilidad (línea)
+    try:
+        ts = data.get('visibility_timeseries', [])
+        if len(ts) >= 2:
+            lp_w, lp_h = 420, 140
+            lp = Drawing(lp_w, lp_h)
+            points = [(i + 1, float(item.get('value', 0))) for i, item in enumerate(ts)]
+            plot = LinePlot()
+            plot.x = 40; plot.y = 28
+            plot.height = lp_h - 48; plot.width = lp_w - 60
+            plot.data = [points]
+            plot.lines[0].strokeColor = colors.HexColor('#1f77b4')
+            plot.lines[0].strokeWidth = 1.8
+            plot.lines[0].symbol = makeMarker('Circle')
+            plot.lines[0].symbol.size = 3
+            xs = [x for x, _ in points]
+            ys = [y for _, y in points]
+            plot.xValueAxis.valueMin = min(xs)
+            plot.xValueAxis.valueMax = max(xs)
+            plot.yValueAxis.valueMin = 0
+            plot.yValueAxis.valueMax = max(100, max(ys) + 5)
+            plot.yValueAxis.labels.fontSize = 8
+            plot.xValueAxis.labels.fontSize = 8
+            lp.add(plot)
+            renderPDF.draw(lp, p, M, y - lp_h)
+            y -= lp_h + 10
+    except Exception:
+        pass
+
+    # Resumen Ejecutivo
+    p.setFont("Helvetica-Bold", 14)
+    p.drawString(M, y, "1. Resumen Ejecutivo")
+    y -= 30
+    findings_text = "- " + "<br/>- ".join(content['executive_summary']['key_findings'])
+    y = write_paragraph(f"<b>Hallazgos Clave:</b><br/>{findings_text}", M, y)
+    y = write_paragraph(f"<b>Evaluación General:</b><br/>{content['executive_summary']['overall_assessment']}", M, y)
+    y -= 20
+
+    # Palancas de Decisión
+    p.setFont("Helvetica-Bold", 14)
+    p.drawString(M, y, "2. Palancas de Decisión Estratégicas")
+    y -= 30
+    for lever in content['strategic_levers']['levers']:
+        y = write_paragraph(f"<b>{lever['lever_title']}</b>", M, y, font_size=12)
+        y = write_paragraph(lever['description'], M + 0.2*inch, y)
+        actions_text = "- " + "<br/>- ".join(lever['recommended_actions'])
+        y = write_paragraph(f"<b>Acciones Recomendadas:</b><br/>{actions_text}", M + 0.2*inch, y)
+        y -= 15
+
+    # 3. Análisis de Correlaciones
+    try:
+        p.setFont("Helvetica-Bold", 14)
+        p.drawString(M, y, "3. Análisis de Correlaciones y Diagnóstico")
+        y -= 25
+        corr_ins = content.get('correlation_analysis', {}).get('insights') or []
+        if corr_ins:
+            corr_text = "- " + "<br/>- ".join(corr_ins)
+            y = write_paragraph(corr_text, M, y)
+        y -= 10
+    except Exception:
+        pass
+
+    # 4. Ranking de competidores y gráfico SOV
+    try:
+        p.setFont("Helvetica-Bold", 14)
+        p.drawString(M, y, "4. Competencia: Ranking SOV")
+        y -= 22
+        # Tabla simple
+        table_x = M
+        p.setFont("Helvetica-Bold", 10)
+        p.drawString(table_x, y, "#")
+        p.drawString(table_x + 15, y, "Marca")
+        p.drawString(table_x + 220, y, "SOV")
+        y -= 12
+        p.setFont("Helvetica", 10)
+        for r in data.get('competitor_ranking', [])[:8]:
+            p.drawString(table_x, y, str(r.get('rank')))
+            p.drawString(table_x + 15, y, str(r.get('name')))
+            p.drawRightString(table_x + 260, y, str(r.get('sov')))
+            y -= 12
+        y -= 6
+        # Pie chart SOV a la derecha
+        chart_data = data.get('sov_chart_data', [])[:6]
+        if chart_data:
+            pie_w, pie_h = 220, 140
+            d = Drawing(pie_w, pie_h)
+            pie = Pie()
+            pie.x = 60; pie.y = 10
+            pie.width = 100; pie.height = 100
+            pie.data = [max(0.1, float(it['sov'])) for it in chart_data]
+            pie.labels = [it['name'] for it in chart_data]
+            pie.sideLabels = True
+            pie.slices.strokeWidth = 0.25
+            pie.slices.popout = 0
+            d.add(pie)
+            renderPDF.draw(d, p, width - M - pie_w, y - pie_h + 18)
+            y -= pie_h + 12
+    except Exception:
+        pass
+
+    # Cierre con cabecera/pie dibujados
+    draw_header_footer()
+
+    p.save()
+    buffer.seek(0)
+    return buffer
 
 
 # --- Detección de marcas reutilizable ---
@@ -2319,6 +2724,45 @@ def archive_mention(mention_id):
         return jsonify({"message": f"Mention {mention_id} archived successfully."})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/api/reports/generate', methods=['POST', 'OPTIONS'])
+def generate_report_endpoint():
+    try:
+        # Responder al preflight CORS
+        if request.method == 'OPTIONS':
+            return ('', 200)
+        filters = request.get_json()
+        if not filters:
+            return jsonify({"error": "Filtros no proporcionados"}), 400
+
+        # 1. Recopilar y agregar datos de la base de datos
+        aggregated_data = _aggregate_data_for_report(filters)
+
+        # 2. Generar contenido del informe con IA
+        prompt = create_nielsen_style_prompt(aggregated_data)
+        report_content_str = fetch_response(prompt, model="gpt-4o")
+
+        # Limpieza por si la IA devuelve el JSON dentro de un bloque de código
+        if "```json" in report_content_str:
+            report_content_str = report_content_str.split("```json\n")[1].split("\n```")[0]
+
+        report_content = json.loads(report_content_str)
+
+        # 3. Construir el archivo PDF
+        pdf_buffer = _create_pdf_report(report_content, aggregated_data)
+
+        # 4. Enviar el PDF como respuesta para descargar
+        return send_file(
+            pdf_buffer,
+            as_attachment=True,
+            download_name=f"Informe_Inteligencia_{datetime.now().strftime('%Y-%m-%d')}.pdf",
+            mimetype='application/pdf'
+        )
+    except Exception as e:
+        print(f"Error generando el informe: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": "No se pudo generar el informe. Revisa los logs del backend."}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5050, debug=True, use_reloader=False)

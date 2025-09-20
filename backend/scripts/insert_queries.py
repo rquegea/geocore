@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- NUEVAS QUERIES SOLICITADAS ---
-QUERIES = [
+QUERIES = [ 
     # === Grupo 1: Prompts Generales y de Competencia ===
     # Prompts sobre Currículum y Programas
     ("¿Qué escuelas superiores o centros privados en España ofrecen programas para escribir guiones y formación audiovisual práctica?", "The Core School", "Curriculum & Programs", "es"),
