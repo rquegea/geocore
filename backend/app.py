@@ -14,12 +14,13 @@ import re
 import unicodedata
 from difflib import SequenceMatcher
 from src.engines.openai_engine import fetch_response
+from src.engines.report_prompts import get_executive_summary_prompt, get_market_analysis_prompt, get_brand_analysis_prompt, get_recommendations_prompt
 from time import time
 import io
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import Paragraph
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import Paragraph, Table, TableStyle, Image
 from reportlab.lib.units import inch
 from reportlab.graphics.shapes import Drawing, Rect, String
 from reportlab.graphics import renderPDF
@@ -27,6 +28,7 @@ from reportlab.graphics.charts.piecharts import Pie
 from reportlab.graphics.charts.lineplots import LinePlot
 from reportlab.graphics.widgets.markers import makeMarker
 from reportlab.lib import colors
+import matplotlib.pyplot as plt
 
 load_dotenv()
 
@@ -184,11 +186,64 @@ def get_db_connection():
 
 
 # ───────────────────── Motor de informes (helpers) ─────────────────────
+def _aggregate_data_for_report_mock(filters):
+    """Recopila y resume todos los datos necesarios para el informe desde la BD."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Esta función debe ser implementada con consultas SQL reales a tu base de datos
+    # A continuación, se muestra una estructura de datos simulada como ejemplo.
+    aggregated_data = {
+        "start_date": (filters or {}).get('start_date', 'N/A')[:10],
+        "end_date": (filters or {}).get('end_date', 'N/A')[:10],
+        "kpis": {
+            "visibility_score": 34.5, "visibility_delta": -2.1,
+            "sentiment_avg": 0.61, "sov_score": 28.9,
+            "total_mentions": 1240
+        },
+        "time_series": {
+            "dates": [f"Día {i+1}" for i in range(7)],
+            "visibility": [10, 12, 15, 11, 14, 18, 15],
+            "sentiment": [0.4, 0.5, 0.6, 0.45, 0.55, 0.7, 0.6]
+        },
+        "competitor_ranking": [
+            ["1", "ECAM", "45.1%", "Becas, Precio"],
+            ["2", "The Core School", "28.9%", "VFX, Prácticas"],
+            ["3", "U-tad", "15.3%", "Videojuegos, Ingeniería"]
+        ],
+        "top_positive_themes": [
+            ["VFX", "0.85", "150 menciones"],
+            ["Salidas Profesionales", "0.78", "120 menciones"]
+        ],
+        "top_negative_themes": [
+            ["Precio del Máster", "-0.65", "80 menciones"],
+            ["Proceso de Admisión", "-0.40", "65 menciones"]
+        ],
+        "emerging_trends": ["Interés en producción virtual", "Demanda de perfiles híbridos (arte y tecnología)"],
+        "top_opportunities": ["Capitalizar el interés creciente en VFX.", "Lanzar campaña sobre el éxito laboral de alumni."],
+        "top_risks": ["Competencia agresiva en precios y becas.", "Percepción de que la formación es solo para cine."],
+        "key_quotes": [
+            "Me encantaría estudiar en The Core, pero el máster es demasiado caro para mí.",
+            "Las prácticas que ofrecen en empresas top son el principal motivo por el que los elijo."
+        ]
+    }
+
+    cur.close()
+    conn.close()
+    return aggregated_data
+
+
 def _aggregate_data_for_report(filters):
-    """
-    Recopila y resume todos los datos necesarios para el informe desde la BD.
-    NOTA: Esta es una simulación. Deberías reemplazarla con tus propias consultas SQL.
-    """
+    """Wrapper que intenta agregar desde BD y cae a MOCK si hay error."""
+    try:
+        return _aggregate_data_for_report_db(filters)
+    except Exception as e:
+        print(f"[WARN] Fallback a MOCK por error en agregado DB: {e}")
+        return _aggregate_data_for_report_mock(filters)
+
+
+def _aggregate_data_for_report_db(filters):
+    """Agrega datos reales desde la base de datos (menciones, insights, KPIs)."""
     # Normaliza filtros
     brand = os.getenv('DEFAULT_BRAND', 'The Core School')
     start_s = (filters or {}).get('start_date')
@@ -228,7 +283,7 @@ def _aggregate_data_for_report(filters):
     total_responses = len(rows)
 
     # Conteos por marca (SOV y visibilidad)
-    from collections import defaultdict
+    from collections import defaultdict, Counter
     brand_counts = defaultdict(int)
     brand_sentiments = defaultdict(list)
 
@@ -285,7 +340,6 @@ def _aggregate_data_for_report(filters):
         {" AND q.topic = %s" if (topic and topic != 'all') else ''}
     """, tuple([start_dt, end_dt] + ([topic] if (topic and topic != 'all') else [])))
     insights_rows = cur.fetchall()
-    from collections import Counter
     opp, risk, trend, quotes = Counter(), Counter(), Counter(), []
     for (payload,) in insights_rows:
         if not isinstance(payload, dict):
@@ -299,13 +353,6 @@ def _aggregate_data_for_report(filters):
         for q in (payload.get('quotes') or []):
             if isinstance(q, str):
                 quotes.append(q)
-
-    top_opportunities = [t for t, _ in opp.most_common(5)]
-    top_risks = [t for t, _ in risk.most_common(5)]
-    emerging_trends = [t for t, _ in trend.most_common(5)]
-    key_quotes = quotes[:5]
-
-    cur.close(); conn.close()
 
     aggregated_data = {
         "start_date": start_dt.strftime('%Y-%m-%d'),
@@ -321,10 +368,10 @@ def _aggregate_data_for_report(filters):
         "competitor_themes": {},
         "top_positive_themes": [],
         "top_negative_themes": [],
-        "emerging_trends": emerging_trends,
-        "top_opportunities": top_opportunities,
-        "top_risks": top_risks,
-        "key_quotes": key_quotes,
+        "emerging_trends": [t for t, _ in trend.most_common(5)],
+        "top_opportunities": [t for t, _ in opp.most_common(5)],
+        "top_risks": [t for t, _ in risk.most_common(5)],
+        "key_quotes": quotes[:5],
         "sov_chart_data": sov_list[:5],
         "visibility_timeseries": [
             {"date": d.strftime('%Y-%m-%d'), "value": round(v, 1)}
@@ -332,7 +379,107 @@ def _aggregate_data_for_report(filters):
         ],
     }
 
+    cur.close(); conn.close()
     return aggregated_data
+
+
+def _generate_charts_as_image(data):
+    """Genera un gráfico de Visibilidad vs. Sentimiento y lo guarda en un buffer de memoria."""
+    fig, ax1 = plt.subplots(figsize=(7, 3.5))
+
+    ax1.set_xlabel('Días del Periodo')
+    ax1.set_ylabel('Visibilidad (%)', color='tab:blue')
+    ax1.plot(data['time_series']['dates'], data['time_series']['visibility'], color='tab:blue', marker='o', label='Visibilidad')
+    ax1.tick_params(axis='y', labelcolor='tab:blue')
+
+    ax2 = ax1.twinx()
+    ax2.set_ylabel('Sentimiento Promedio', color='tab:green')
+    ax2.plot(data['time_series']['dates'], data['time_series']['sentiment'], color='tab:green', marker='x', linestyle='--', label='Sentimiento')
+    ax2.tick_params(axis='y', labelcolor='tab:green')
+    ax2.set_ylim(-1, 1)
+
+    fig.tight_layout()
+
+    img_buffer = io.BytesIO()
+    plt.savefig(img_buffer, format='PNG', dpi=150)
+    plt.close(fig)
+    img_buffer.seek(0)
+    return img_buffer
+
+
+def _create_pdf_report_consulting(content, data):
+    """Construye un PDF completo en memoria, con un estilo de consultoría."""
+    buffer = io.BytesIO()
+    p = canvas.Canvas(buffer, pagesize=letter)
+    width, height = letter
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name='Justify', alignment=4))
+
+    def write_paragraph(text, x, y, style_name='Justify', font_size=10):
+        style = styles[style_name]
+        style.fontSize = font_size
+        para = Paragraph(text.replace('\n', '<br/>'), style)
+        w, h = para.wrapOn(p, width - x - inch, height)
+        if y - h < inch:
+            p.showPage(); y = height - inch
+        para.drawOn(p, x, y - h)
+        return y - h - (font_size * 1.2)
+
+    y = height - inch
+
+    # Sección 1: Resumen Ejecutivo
+    p.setFont("Helvetica-Bold", 16)
+    p.drawString(inch, y, content['executive_summary']['title'])
+    y -= 20
+    p.setFont("Helvetica", 10)
+    p.drawString(inch, y, f"Periodo de Análisis: {data.get('start_date','N/A')} - {data.get('end_date','N/A')}")
+    y -= 30
+    y = write_paragraph(f"<i><b>Headline:</b> {content['executive_summary']['headline']}</i>", inch, y, font_size=11)
+    y -= 10
+    y = write_paragraph("<b>Hallazgos Clave:</b><br/>- " + "<br/>- ".join(content['executive_summary']['key_findings']), inch, y)
+    y = write_paragraph(f"<b>Evaluación General:</b><br/>{content['executive_summary']['overall_assessment']}", inch, y)
+    y -= 20
+
+    p.showPage(); y = height - inch
+
+    # Sección 2: Análisis de Mercado
+    market = content['market_analysis']
+    p.setFont("Helvetica-Bold", 14)
+    p.drawString(inch, y, market['title'])
+    y -= 30
+    y = write_paragraph(f"<b>Posición en el Mercado:</b><br/>{market['market_position']}", inch, y)
+    y = write_paragraph(f"<b>Estrategias de Competidores:</b><br/>{market['competitor_strategies']}", inch, y)
+    y = write_paragraph(f"<b>Tendencias Emergentes:</b><br/>{market['emerging_trends']}", inch, y)
+    y -= 20
+
+    # Sección 3: Análisis de Marca
+    brand = content['brand_analysis']
+    p.setFont("Helvetica-Bold", 14)
+    p.drawString(inch, y, brand['title'])
+    y -= 30
+    y = write_paragraph(f"<b>Fortalezas de Marca:</b><br/>{brand['brand_strengths']}", inch, y)
+    y = write_paragraph(f"<b>Debilidades de Marca:</b><br/>{brand['brand_weaknesses']}", inch, y)
+    y = write_paragraph(f"<b>Voz del Mercado:</b><br/>{brand['voice_of_the_market']}", inch, y)
+    y -= 20
+
+    if y < inch * 3: p.showPage(); y = height - inch
+
+    # Sección 4: Recomendaciones
+    recom = content['recommendations']
+    p.setFont("Helvetica-Bold", 14)
+    p.drawString(inch, y, recom['title'])
+    y -= 30
+    y = write_paragraph(f"<b>Perspectiva de Mercado:</b><br/>{recom['market_outlook']}", inch, y)
+    for lever in recom['strategic_levers']:
+        y = write_paragraph(f"<b>{lever['lever_title']}</b>", inch, y, font_size=12)
+        y = write_paragraph(lever['description'], inch + 0.2*inch, y)
+        actions_text = "- " + "<br/>- ".join(lever['recommended_actions'])
+        y = write_paragraph(f"<b>Acciones Recomendadas:</b><br/>{actions_text}", inch + 0.2*inch, y)
+        y -= 15
+
+    p.save()
+    buffer.seek(0)
+    return buffer
 
 
 def create_nielsen_style_prompt(aggregated_data):
@@ -1186,12 +1333,12 @@ def get_mentions():
 
         base_query = f"""
         SELECT 
-            m.id, m.engine, m.source, m.response, m.sentiment, m.emotion,
-            m.confidence_score, m.source_title, m.source_url, m.language,
-            m.created_at, q.query as query_text,
-            m.summary, m.key_topics, m.generated_insight_id
+            m.id, m.engine, m.source, m.response, m.sentiment, m.created_at,
+            m.key_topics, LOWER(COALESCE(m.source_title,'')) AS title,
+            i.payload
         FROM mentions m
         JOIN queries q ON m.query_id = q.id
+        LEFT JOIN insights i ON i.id = m.generated_insight_id
         WHERE {where_sql}
         ORDER BY m.created_at DESC LIMIT %s OFFSET %s
         """
@@ -1203,15 +1350,10 @@ def get_mentions():
             mentions.append({
                 "id": row[0], "engine": row[1], "source": row[2],
                 "response": row[3], "sentiment": float(row[4] or 0.0),
-                "emotion": row[5] or "neutral",
-                "confidence_score": float(row[6] or 0.0),
-                "source_title": row[7], "source_url": row[8],
-                "language": row[9] or "unknown",
-                "created_at": row[10].isoformat() if row[10] else None,
-                "query": row[11],
-                "summary": row[12],
-                "key_topics": row[13] or [],
-                "generated_insight_id": row[14]
+                "created_at": row[5].isoformat() if row[5] else None,
+                "key_topics": row[6] or [],
+                "title": row[7], "source_url": row[8],
+                "language": row[9] or "unknown"
             })
 
         count_query = f"""
@@ -2725,37 +2867,45 @@ def archive_mention(mention_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/reports/generate', methods=['POST', 'OPTIONS'])
+@app.route('/api/reports/generate', methods=['POST'])
 def generate_report_endpoint():
     try:
-        # Responder al preflight CORS
-        if request.method == 'OPTIONS':
-            return ('', 200)
         filters = request.get_json()
         if not filters:
             return jsonify({"error": "Filtros no proporcionados"}), 400
 
-        # 1. Recopilar y agregar datos de la base de datos
         aggregated_data = _aggregate_data_for_report(filters)
 
-        # 2. Generar contenido del informe con IA
-        prompt = create_nielsen_style_prompt(aggregated_data)
-        report_content_str = fetch_response(prompt, model="gpt-4o")
+        # --- Cadena de Analistas Virtuales ---
+        summary_prompt = get_executive_summary_prompt(aggregated_data)
+        summary_content_str = fetch_response(summary_prompt, model="gpt-4o")
+        summary_content = json.loads(summary_content_str.split("```json\n")[1].split("\n```")[0] if "```json" in summary_content_str else summary_content_str)
 
-        # Limpieza por si la IA devuelve el JSON dentro de un bloque de código
-        if "```json" in report_content_str:
-            report_content_str = report_content_str.split("```json\n")[1].split("\n```")[0]
+        market_prompt = get_market_analysis_prompt(aggregated_data)
+        market_content_str = fetch_response(market_prompt, model="gpt-4o")
+        market_content = json.loads(market_content_str.split("```json\n")[1].split("\n```")[0] if "```json" in market_content_str else market_content_str)
 
-        report_content = json.loads(report_content_str)
+        brand_prompt = get_brand_analysis_prompt(aggregated_data)
+        brand_content_str = fetch_response(brand_prompt, model="gpt-4o")
+        brand_content = json.loads(brand_content_str.split("```json\n")[1].split("\n```")[0] if "```json" in brand_content_str else brand_content_str)
 
-        # 3. Construir el archivo PDF
-        pdf_buffer = _create_pdf_report(report_content, aggregated_data)
+        recom_prompt = get_recommendations_prompt(aggregated_data)
+        recom_content_str = fetch_response(recom_prompt, model="gpt-4o")
+        recom_content = json.loads(recom_content_str.split("```json\n")[1].split("\n```")[0] if "```json" in recom_content_str else recom_content_str)
 
-        # 4. Enviar el PDF como respuesta para descargar
+        full_report_content = {
+            **summary_content,
+            **market_content,
+            **brand_content,
+            **recom_content
+        }
+
+        pdf_buffer = _create_pdf_report_consulting(full_report_content, aggregated_data)
+
         return send_file(
             pdf_buffer,
             as_attachment=True,
-            download_name=f"Informe_Inteligencia_{datetime.now().strftime('%Y-%m-%d')}.pdf",
+            download_name=f"Informe_Consultoria_{datetime.now().strftime('%Y-%m-%d')}.pdf",
             mimetype='application/pdf'
         )
     except Exception as e:
