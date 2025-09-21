@@ -408,6 +408,8 @@ def _aggregate_data_for_report_db(filters):
     own_sov = next((it["sov"] for it in sov_list if it["name"] == primary_brand), 0.0)
     sov_gap_vs_leader = round(max(top_sov - own_sov, 0.0), 1)
     sov_leader_name = sov_list[0]["name"] if sov_list else None
+    # Líder competitivo distinto de la marca propia (para serie temporal)
+    competitor_leader_name = next((it["name"] for it in sov_list if it["name"] != primary_brand), None)
 
     # Oportunidades / Riesgos / Tendencias / Citas desde insights
     cur.execute(f"""
@@ -460,6 +462,14 @@ def _aggregate_data_for_report_db(filters):
             "dates": [d.strftime('%Y-%m-%d') for d in days_sorted],
             "visibility": [round(v, 1) for v in series_visibility],
             "sentiment": [round(v, 2) for v in series_sentiment],
+        },
+        # Serie temporal de menciones del competidor líder (si no somos nosotros)
+        "competitor_series": {
+            "name": competitor_leader_name,
+            "counts": [
+                (competitor_daily_counts.get(competitor_leader_name, {}) or {}).get(d, 0)
+                for d in days_sorted
+            ] if competitor_leader_name else [],
         },
         # Correlaciones tema→sentimiento (coeficiente de Pearson simplificado si aplica)
         "topic_sentiment_correlations": _topic_sentiment_correlation(topic_counts, topic_sent_sum),
@@ -641,6 +651,193 @@ def _aggregate_data_for_report_db(filters):
     except Exception:
         aggregated_data["sentiment_comparison"] = []
 
+    # Intención del usuario (informacional, comparativa, transaccional)
+    try:
+        cur = get_db_connection().cursor()
+        cur.execute(f"""
+            SELECT COALESCE(m.query_text, q.query) AS qtext
+            FROM mentions m
+            JOIN queries q ON m.query_id = q.id
+            WHERE {where_sql}
+        """, tuple(params))
+        intent_counts = {"informacional": 0, "comparativa": 0, "transaccional": 0}
+        examples = {"informacional": [], "comparativa": [], "transaccional": []}
+        import re as _re
+        def _classify_intent(txt: str) -> str:
+            t = (txt or '').lower()
+            if _re.search(r"\b(vs|versus|comparar|comparaci[oó]n|mejor\s+(escuela|universidad|centro))\b", t):
+                return "comparativa"
+            if _re.search(r"\b(precio|coste|costo|beca|becas|financiaci[oó]n|matr[ií]cula|inscripci[oó]n|admis[ií]n|solicitar|aplicar|apply|comprar)\b", t):
+                return "transaccional"
+            return "informacional"
+        for (qtext,) in cur.fetchall():
+            intent = _classify_intent(qtext)
+            intent_counts[intent] = intent_counts.get(intent, 0) + 1
+            if len(examples[intent]) < 3 and qtext:
+                examples[intent].append(qtext[:140])
+        cur.close()
+        total_i = max(sum(intent_counts.values()), 1)
+        aggregated_data["user_intent"] = {
+            "distribution": [
+                {"intent": k, "count": v, "pct": round((v/total_i)*100.0, 1)}
+                for k, v in intent_counts.items()
+            ],
+            "examples": examples,
+        }
+    except Exception:
+        aggregated_data["user_intent"] = {"distribution": [], "examples": {}}
+
+    # Serie temporal de SOV por temas clave (para la marca propia)
+    try:
+        # Selección de top temas por volumen total en el periodo
+        top_topics = [t for t, _ in sorted(topic_counts.items(), key=lambda x: x[1], reverse=True) if t][:5]
+        # Limitar a 3 para legibilidad del gráfico
+        top_topics = top_topics[:3]
+        from collections import defaultdict as _dd
+        topic_day_total = _dd(lambda: _dd(int))
+        topic_day_own = _dd(lambda: _dd(int))
+        # Reiterar filas ya cargadas para construir contadores por día y tema
+        for _id, key_topics, resp, title, payload, senti, created_at in rows:
+            d_day = created_at.date() if created_at else start_dt.date()
+            detected = _detect_brands(key_topics, resp, title, payload)
+            topics_iter = []
+            try:
+                if isinstance(key_topics, (list, tuple)):
+                    topics_iter = [str(t).strip().lower() for t in key_topics if t]
+            except Exception:
+                topics_iter = []
+            for t in topics_iter:
+                if t not in top_topics:
+                    continue
+                topic_day_total[t][d_day] += 1
+                if primary_brand in detected:
+                    topic_day_own[t][d_day] += 1
+        topic_sov_timeseries = []
+        for t in top_topics:
+            sov_series = []
+            for d in days_sorted:
+                tot = max(topic_day_total[t].get(d, 0), 1)
+                own = topic_day_own[t].get(d, 0)
+                sov_series.append(round((own / tot) * 100.0, 1))
+            topic_sov_timeseries.append({
+                "topic": t,
+                "dates": [d.strftime('%Y-%m-%d') for d in days_sorted],
+                "values": sov_series,
+            })
+        aggregated_data["topic_sov_timeseries"] = topic_sov_timeseries
+    except Exception:
+        aggregated_data["topic_sov_timeseries"] = []
+
+    # Resumen de alertas clave
+    try:
+        alerts = []
+        # Alerta: sentimiento muy negativo en un tema relevante
+        for name, score_str, cnt_str in (aggregated_data.get("top_negative_themes") or [])[:5]:
+            try:
+                score = float(score_str)
+                cnt = int((cnt_str or '0').split()[0])
+            except Exception:
+                score = 0.0; cnt = 0
+            if score <= -0.5 and cnt >= 10:
+                alerts.append(f"Alerta: El sentimiento sobre '{name}' cayó por debajo de -0.5 (promedio {score:.2f}, {cnt} menciones)")
+        # Alerta: picos competitivos vinculados a caídas de sentimiento
+        if aggregated_data.get("correlation_events"):
+            ev = aggregated_data["correlation_events"][0]
+            alerts.append(
+                f"Alerta: Caída de sentimiento el {ev.get('date')} coincide con pico de '{ev.get('competitor')}' ({ev.get('competitor_mentions')} menciones)"
+            )
+        # Alerta: nuevo competidor en top 5 vs periodo previo
+        try:
+            prev_start = start_dt - (end_dt - start_dt)
+            prev_end = start_dt
+            c2 = get_db_connection().cursor()
+            c2.execute("""
+                SELECT m.id, m.key_topics, LOWER(COALESCE(m.response,'')) AS resp,
+                       LOWER(COALESCE(m.source_title,'')) AS title, m.sentiment, m.created_at
+                FROM mentions m
+                JOIN queries q ON m.query_id = q.id
+                WHERE m.created_at >= %s AND m.created_at < %s
+            """, (prev_start, prev_end))
+            prev_rows = c2.fetchall(); c2.close()
+            from collections import defaultdict as __dd
+            prev_counts = __dd(int)
+            for _id, key_topics, resp, title, senti, created_at in prev_rows:
+                for bn in _detect_brands(key_topics, resp, title, None):
+                    prev_counts[bn] += 1
+            prev_total = max(sum(prev_counts.values()), 1)
+            prev_sov = sorted([
+                {"name": bn, "sov": (cnt/prev_total)*100.0} for bn, cnt in prev_counts.items()
+            ], key=lambda x: x["sov"], reverse=True)
+            curr_top5 = {r["name"] for r in aggregated_data.get("competitor_ranking", [])[:5] if r.get("name")}
+            prev_top5 = {it["name"] for it in prev_sov[:5]}
+            newcomers = [n for n in curr_top5 if (n not in prev_top5 and n != primary_brand)]
+            for n in newcomers:
+                alerts.append(f"Alerta: Nuevo competidor '{n}' ha entrado en el top 5 de SOV")
+        except Exception:
+            pass
+        aggregated_data["alerts_summary"] = alerts[:6]
+    except Exception:
+        aggregated_data["alerts_summary"] = []
+
+    # Insight comparativo destacado (dos métricas y breve análisis)
+    try:
+        k = aggregated_data.get("kpis", {})
+        leader = aggregated_data.get("kpis", {}).get("sov_leader_name")
+        own_vis = float(k.get("visibility_score", 0.0))
+        leader_sov = float(k.get("sov_score", 0.0))
+        gap = float(k.get("sov_gap_vs_leader", 0.0))
+        analysis = (
+            f"La visibilidad de {primary_brand} es {own_vis:.1f}% mientras el SOV de {leader or 'el líder'} es {leader_sov:.1f}%. "
+            + (f"Brecha de {gap:.1f} pts a cerrar con acciones de contenido en los temas ganadores." if leader else "")
+        )
+        aggregated_data["comparative_highlight"] = {
+            "title": "Análisis Comparativo Destacado",
+            "metric_labels": [f"Visibilidad {primary_brand}", f"SOV {leader or 'Líder'}"],
+            "metric_values": [round(own_vis,1), round(leader_sov,1)],
+            "analysis_text": analysis,
+        }
+    except Exception:
+        aggregated_data["comparative_highlight"] = None
+
+    # Benchmarking de contenido competitivo (debilidades de competidores y acciones)
+    try:
+        weakness_map = {}
+        for _id, key_topics, resp, title, payload, senti, created_at in rows:
+            try:
+                s_val = float(senti) if isinstance(senti, (int, float)) else 0.0
+            except Exception:
+                s_val = 0.0
+            if s_val >= -0.2:
+                continue
+            detected = _detect_brands(key_topics, resp, title, payload)
+            topics_iter = []
+            try:
+                if isinstance(key_topics, (list, tuple)):
+                    topics_iter = [str(t).strip() for t in key_topics if t]
+            except Exception:
+                topics_iter = []
+            for bn in detected:
+                if bn == primary_brand:
+                    continue
+                for t in topics_iter:
+                    key = (bn, t)
+                    weakness_map[key] = weakness_map.get(key, 0) + 1
+        # Ordenar por conteo desc y limitar
+        ordered = sorted(weakness_map.items(), key=lambda x: x[1], reverse=True)[:8]
+        suggestions = []
+        for (bn, t), cnt in ordered:
+            title_sug = f"Así son las {t} en {primary_brand}: de la teoría a la práctica"
+            if "precio" in t.lower() or "beca" in t.lower():
+                title_sug = f"Transparencia en {primary_brand}: precios, becas y financiación explicados"
+            suggestions.append({
+                "competitor": bn, "theme": t, "count": cnt,
+                "suggestion_title": title_sug,
+                "suggestion_text": f"Se detectaron {cnt} menciones negativas sobre '{t}' en {bn}. Publicar contenido que muestre fortalezas reales de {primary_brand} en este tema."
+            })
+        aggregated_data["content_competitive"] = suggestions
+    except Exception:
+        aggregated_data["content_competitive"] = []
+
     return aggregated_data
 
 
@@ -666,6 +863,90 @@ def _generate_charts_as_image(data):
     plt.close(fig)
     img_buffer.seek(0)
     return img_buffer
+
+
+def _generate_competitor_vs_sentiment_image(dates, competitor_counts, sentiment):
+    """Gráfico de líneas: menciones del competidor líder vs. sentimiento diario."""
+    try:
+        if not dates or not competitor_counts or not sentiment:
+            return None
+        fig, ax1 = plt.subplots(figsize=(7, 2.6))
+        x = list(range(1, len(dates) + 1))
+        ax1.plot(x, competitor_counts, color='#d62728', marker='o', label='Menciones competidor')
+        ax1.set_ylabel('Menciones competidor', color='#d62728')
+        ax1.tick_params(axis='y', labelcolor='#d62728')
+        ax2 = ax1.twinx()
+        ax2.plot(x, sentiment, color='#2ca02c', linestyle='--', marker='x', label='Sentimiento')
+        ax2.set_ylabel('Sentimiento', color='#2ca02c')
+        ax2.tick_params(axis='y', labelcolor='#2ca02c')
+        ax2.set_ylim(-1, 1)
+        ax1.set_xlabel('Días del periodo')
+        fig.tight_layout()
+        img_buffer = io.BytesIO()
+        plt.savefig(img_buffer, format='PNG', dpi=150)
+        plt.close(fig)
+        img_buffer.seek(0)
+        return img_buffer
+    except Exception:
+        return None
+
+
+def _generate_sentiment_histogram_image(hist_data):
+    """Genera un histograma visual del sentimiento a partir de bins agregados."""
+    try:
+        if not hist_data:
+            return None
+        bins = [str(it.get('bin', '')) for it in hist_data]
+        counts = [int(it.get('count', 0)) for it in hist_data]
+        fig, ax = plt.subplots(figsize=(6.0, 2.2))
+        ax.bar(range(len(counts)), counts, color='#7b6cff')
+        ax.set_xticks(range(len(bins)))
+        ax.set_xticklabels(bins, rotation=45, ha='right', fontsize=7)
+        ax.set_ylabel('Menciones', fontsize=8)
+        ax.set_title('Histograma de Sentimiento', fontsize=10)
+        fig.tight_layout()
+        img_buffer = io.BytesIO()
+        plt.savefig(img_buffer, format='PNG', dpi=150)
+        plt.close(fig)
+        img_buffer.seek(0)
+        return img_buffer
+    except Exception:
+        return None
+
+
+def _generate_topic_sentiment_heatmap_image(correlations):
+    """Genera un heatmap (barra divergente) de tema→sentimiento promedio (-1 a 1)."""
+    try:
+        if not correlations:
+            return None
+        # Ordena por valor para un gradiente legible
+        corr_sorted = sorted(correlations, key=lambda x: float(x[1]))
+        topics = [str(t) for t, _ in corr_sorted]
+        values = [float(v) for _, v in corr_sorted]
+
+        import matplotlib.colors as mcolors
+        cmap = plt.get_cmap('RdYlGn')
+        norm = mcolors.Normalize(vmin=-1.0, vmax=1.0)
+        colors = [cmap(norm(v)) for v in values]
+
+        height = max(2.0, 0.32 * len(topics) + 0.8)
+        fig, ax = plt.subplots(figsize=(6.2, height))
+        y = list(range(len(topics)))
+        ax.barh(y, values, color=colors)
+        ax.set_yticks(y)
+        ax.set_yticklabels(topics, fontsize=8)
+        ax.set_xlim(-1.0, 1.0)
+        ax.axvline(0.0, color='grey', linewidth=0.8)
+        ax.set_xlabel('Sentimiento promedio', fontsize=9)
+        ax.set_title('Correlación Tema → Sentimiento', fontsize=11)
+        fig.tight_layout()
+        img_buffer = io.BytesIO()
+        plt.savefig(img_buffer, format='PNG', dpi=150)
+        plt.close(fig)
+        img_buffer.seek(0)
+        return img_buffer
+    except Exception:
+        return None
 
 
 def _create_pdf_report_consulting(content, data):
@@ -810,7 +1091,72 @@ def _create_pdf_report_consulting(content, data):
     except Exception:
         pass
 
+    # Tablas: Top temas positivos / negativos
+    try:
+        if y < inch * 2:
+            p.showPage(); y = height - inch
+        p.setFont("Helvetica-Bold", 14)
+        p.drawString(inch, y, "Temas por Sentimiento")
+        y -= 22
+        pos = [["Tema", "Sentimiento", "Menciones"]] + (data.get('top_positive_themes') or [])
+        neg = [["Tema", "Sentimiento", "Menciones"]] + (data.get('top_negative_themes') or [])
+        tpos = Table(pos, colWidths=[3.2*inch, 1.2*inch, 1.2*inch])
+        tpos.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+            ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('ALIGN', (1,1), (-1,-1), 'RIGHT'),
+        ]))
+        tneg = Table(neg, colWidths=[3.2*inch, 1.2*inch, 1.2*inch])
+        tneg.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+            ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('ALIGN', (1,1), (-1,-1), 'RIGHT'),
+        ]))
+        w1, h1 = tpos.wrapOn(p, (width - 2*inch) / 2 - 6, height)
+        w2, h2 = tneg.wrapOn(p, (width - 2*inch) / 2 - 6, height)
+        tpos.drawOn(p, inch, y - h1)
+        tneg.drawOn(p, inch + (width - 2*inch) / 2 + 6, y - h2)
+        y -= max(h1, h2) + 10
+    except Exception:
+        pass
+
     if y < inch * 3: p.showPage(); y = height - inch
+
+    # Sección nueva: Intención del Usuario
+    try:
+        intents = data.get('user_intent') or {}
+        dist = intents.get('distribution') or []
+        exs = intents.get('examples') or {}
+        if dist:
+            p.setFont("Helvetica-Bold", 14)
+            p.drawString(inch, y, "Intención del Usuario")
+            y -= 22
+            rows = [["Intención", "Menciones", "%"]] + [[d.get('intent',''), str(d.get('count','')), f"{d.get('pct',0):.1f}%"] for d in dist]
+            tbl = Table(rows, colWidths=[2.2*inch, 1.2*inch, 1.0*inch])
+            tbl.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+                ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('ALIGN', (1,1), (-1,-1), 'RIGHT'),
+            ]))
+            w, h = tbl.wrapOn(p, width - 2*inch, height)
+            if y - h < inch:
+                p.showPage(); y = height - inch
+            tbl.drawOn(p, inch, y - h)
+            y -= (h + 10)
+            # ejemplos rápidos
+            bullets = []
+            for k in ["informacional", "comparativa", "transaccional"]:
+                ex = exs.get(k) or []
+                if ex:
+                    bullets.append(f"<b>{k.title()}:</b> " + " | ".join(ex))
+            if bullets:
+                y = write_paragraph("<br/>".join(bullets), inch, y)
+                y -= 8
+    except Exception:
+        pass
 
     # Sección 4: Recomendaciones
     recom = content['recommendations']
@@ -853,6 +1199,120 @@ def _create_pdf_report_consulting(content, data):
                 p.showPage(); y = height - inch
             ctbl.drawOn(p, inch, y - h)
             y -= (h + 20)
+    except Exception:
+        pass
+
+    # Sección: Evolución de SOV por temas clave (series)
+    try:
+        topic_series = data.get('topic_sov_timeseries') or []
+        if topic_series:
+            if y < inch * 2:
+                p.showPage(); y = height - inch
+            p.setFont("Helvetica-Bold", 14)
+            p.drawString(inch, y, "Evolución SOV por Temas Clave")
+            y -= 18
+            # Genera un gráfico simple con matplotlib para hasta 3 series
+            try:
+                import matplotlib.pyplot as _plt
+                fig, ax = _plt.subplots(figsize=(6.8, 2.2))
+                for serie in topic_series[:3]:
+                    xs = list(range(1, len(serie.get('values') or []) + 1))
+                    ax.plot(xs, serie.get('values') or [], label=str(serie.get('topic')))
+                ax.set_ylabel('SOV (%)')
+                ax.set_xlabel('Días del periodo')
+                ax.legend(fontsize=7, loc='upper left', ncol=3)
+                fig.tight_layout()
+                img_buffer = io.BytesIO()
+                _plt.savefig(img_buffer, format='PNG', dpi=150)
+                _plt.close(fig)
+                img_buffer.seek(0)
+                img = ImageReader(img_buffer)
+                p.drawImage(img, inch, y - 170, width=width - 2*inch, height=150, mask='auto')
+                y -= 175
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # Sección: Resumen de Alertas Clave
+    try:
+        alerts = data.get('alerts_summary') or []
+        if alerts:
+            if y < inch * 2:
+                p.showPage(); y = height - inch
+            p.setFont("Helvetica-Bold", 14)
+            p.drawString(inch, y, "Resumen de Alertas Clave")
+            y -= 18
+            bullets = "- " + "\n- ".join(alerts[:6])
+            y = write_paragraph(bullets, inch, y)
+            y -= 10
+    except Exception:
+        pass
+
+    # Sección: Análisis Comparativo Destacado
+    try:
+        comp = data.get('comparative_highlight') or {}
+        if comp:
+            if y < inch * 2:
+                p.showPage(); y = height - inch
+            p.setFont("Helvetica-Bold", 14)
+            p.drawString(inch, y, comp.get('title', 'Análisis Comparativo Destacado'))
+            y -= 18
+            # Mini gráfico barras 2 columnas
+            labels = comp.get('metric_labels') or []
+            values = comp.get('metric_values') or []
+            try:
+                import matplotlib.pyplot as _plt
+                fig, ax = _plt.subplots(figsize=(4.0, 1.8))
+                ax.bar(range(len(values)), values, color=['#1f77b4', '#ff7f0e'])
+                ax.set_xticks(range(len(values)))
+                ax.set_xticklabels(labels, rotation=15, ha='right', fontsize=8)
+                ax.set_ylim(0, max(100, max(values or [0]) + 5))
+                fig.tight_layout()
+                img_buffer = io.BytesIO()
+                _plt.savefig(img_buffer, format='PNG', dpi=150)
+                _plt.close(fig)
+                img_buffer.seek(0)
+                img = ImageReader(img_buffer)
+                p.drawImage(img, inch, y - 130, width=300, height=110, mask='auto')
+                y -= 135
+            except Exception:
+                pass
+            analysis_text = comp.get('analysis_text') or ''
+            if analysis_text:
+                y = write_paragraph(analysis_text, inch, y)
+                y -= 8
+    except Exception:
+        pass
+
+    # Sección: Análisis de Contenido Competitivo (benchmarking y oportunidades)
+    try:
+        items = data.get('content_competitive') or []
+        if items:
+            if y < inch * 2:
+                p.showPage(); y = height - inch
+            p.setFont("Helvetica-Bold", 14)
+            p.drawString(inch, y, "Análisis de Contenido Competitivo y Oportunidades")
+            y -= 18
+            header = [["Competidor", "Debilidad Detectada", "#", "Acción de Contenido"]]
+            rows = header + [[it.get('competitor',''), it.get('theme',''), str(it.get('count',0)), it.get('suggestion_title','')] for it in items[:8]]
+            tbl = Table(rows, colWidths=[1.6*inch, 2.3*inch, 0.5*inch, 2.2*inch])
+            tbl.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+                ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('ALIGN', (2,1), (2,-1), 'RIGHT'),
+            ]))
+            w, h = tbl.wrapOn(p, width - 2*inch, height)
+            if y - h < inch:
+                p.showPage(); y = height - inch
+            tbl.drawOn(p, inch, y - h)
+            y -= (h + 8)
+            # texto guía
+            first = items[0] if items else None
+            if first and first.get('suggestion_text'):
+                y = write_paragraph(first.get('suggestion_text'), inch, y)
+                y -= 6
     except Exception:
         pass
 
@@ -1053,6 +1513,14 @@ def _create_pdf_report(content, data):
             corr_text = "- " + "<br/>- ".join(corr_ins)
             y = write_paragraph(corr_text, M, y)
         y -= 10
+        # Heatmap tema→sentimiento
+        hm_buf = _generate_topic_sentiment_heatmap_image(data.get('topic_sentiment_correlations') or [])
+        if hm_buf:
+            img = ImageReader(hm_buf)
+            img_h = 16 + 12 * min(12, len(data.get('topic_sentiment_correlations') or []))
+            img_h = max(160, min(420, img_h))
+            p.drawImage(img, M, y - img_h, width=width - 2*M, height=img_h, mask='auto')
+            y -= img_h + 8
         # Sub-sección: Anomalías
         anomalies = (content.get('anomaly_analysis', {}) or {}).get('anomalies') or []
         if anomalies:
@@ -1122,6 +1590,26 @@ def _create_pdf_report(content, data):
     except Exception:
         pass
 
+    # 4-bis. Competidor líder vs. sentimiento
+    try:
+        comp = data.get('competitor_series') or {}
+        dates = data.get('time_series', {}).get('dates') or []
+        counts = comp.get('counts') or []
+        sent = data.get('time_series', {}).get('sentiment') or []
+        if comp.get('name') and counts:
+            if y < inch * 2:
+                p.showPage(); y = height - inch
+            p.setFont("Helvetica-Bold", 12)
+            p.drawString(M, y, f"Competidor líder vs. Sentimiento: {comp.get('name')}")
+            y -= 16
+            img_buf = _generate_competitor_vs_sentiment_image(dates, counts, sent)
+            if img_buf:
+                img = ImageReader(img_buf)
+                p.drawImage(img, M, y - 180, width=width - 2*M, height=170, mask='auto')
+                y -= 180
+    except Exception:
+        pass
+
     # 5. Solapamientos Riesgos-Competidores
     try:
         overlaps = data.get('overlap_events', [])
@@ -1187,18 +1675,11 @@ def _create_pdf_report(content, data):
 
             # Histograma de sentimiento (tabla compacta)
             hist = dists.get('sentiment_hist') or []
-            if hist:
-                rows = [["Bin", "#"]] + [[b.get('bin',''), str(b.get('count',''))] for b in hist]
-                t3 = Table(rows, colWidths=[3.0*inch, 1.4*inch])
-                t3.setStyle(TableStyle([
-                    ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
-                    ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
-                    ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                    ('ALIGN', (1,1), (1,-1), 'RIGHT'),
-                ]))
-                w, h = t3.wrapOn(p, (width - 2*M) / 2 - 6, height)
-                t3.drawOn(p, M, y - h)
-                y -= h + 10
+            img_buf = _generate_sentiment_histogram_image(hist)
+            if img_buf:
+                img = ImageReader(img_buf)
+                p.drawImage(img, M, y - 160, width=width - 2*M, height=150, mask='auto')
+                y -= 160
     except Exception:
         pass
 
