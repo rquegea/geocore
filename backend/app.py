@@ -19,6 +19,7 @@ from src.engines.report_prompts import (
     get_deep_dive_analysis_prompt,
     get_recommendations_prompt,
     get_methodology_prompt,
+    get_correlation_anomalies_prompt,
 )
 from time import time
 import io
@@ -460,6 +461,10 @@ def _aggregate_data_for_report_db(filters):
             "visibility": [round(v, 1) for v in series_visibility],
             "sentiment": [round(v, 2) for v in series_sentiment],
         },
+        # Correlaciones tema→sentimiento (coeficiente de Pearson simplificado si aplica)
+        "topic_sentiment_correlations": _topic_sentiment_correlation(topic_counts, topic_sent_sum),
+        # Días outlier por sentimiento (threshold dinámico por desviación estándar)
+        "outlier_days": _detect_outlier_days(days_sorted, series_sentiment),
     }
 
     # Calcular Top 5 temas positivos/negativos a partir de key_topics
@@ -509,6 +514,54 @@ def _aggregate_data_for_report_db(filters):
         aggregated_data["correlation_events"] = correlation_events[:5]
     except Exception:
         aggregated_data["correlation_events"] = []
+
+    # Solapamientos: días con riesgos citados y picos de un competidor
+    try:
+        # Construye mapa de riesgos por día desde insights_rows
+        risk_by_day = defaultdict(lambda: defaultdict(int))
+        # Reutiliza la consulta previa de insights agregados pero con fechas
+        cur = get_db_connection().cursor()
+        cur.execute(
+            f"""
+            SELECT i.payload, i.created_at
+            FROM insights i
+            JOIN queries q ON i.query_id = q.id
+            WHERE i.created_at >= %s AND i.created_at < %s
+            {" AND q.topic = %s" if (topic and topic != 'all') else ''}
+            """,
+            tuple([start_dt, end_dt] + ([topic] if (topic and topic != 'all') else []))
+        )
+        for payload, created_at in cur.fetchall():
+            if not isinstance(payload, dict):
+                continue
+            d_day = (created_at.date() if created_at else start_dt.date())
+            for rtxt in (payload.get('risks') or []):
+                if not rtxt:
+                    continue
+                risk_by_day[d_day][rtxt] += 1
+        cur.close()
+
+        overlap_events = []
+        for comp, by_day in competitor_daily_counts.items():
+            for d, cnt in by_day.items():
+                if cnt <= 0:
+                    continue
+                risks_today = risk_by_day.get(d, {})
+                if not risks_today:
+                    continue
+                # Top 1-2 riesgos del día
+                top_risks = sorted(risks_today.items(), key=lambda x: x[1], reverse=True)[:2]
+                overlap_events.append({
+                    "date": d.strftime('%Y-%m-%d'),
+                    "competitor": comp,
+                    "competitor_mentions": cnt,
+                    "risks": [t for t, _ in top_risks],
+                })
+        # Limita y ordena por menciones del competidor desc
+        overlap_events.sort(key=lambda x: x.get('competitor_mentions', 0), reverse=True)
+        aggregated_data["overlap_events"] = overlap_events[:8]
+    except Exception:
+        aggregated_data["overlap_events"] = []
 
     # ── SOV por modelo de IA y por tema ─────────────────────────────────
     try:
@@ -566,6 +619,16 @@ def _aggregate_data_for_report_db(filters):
     except Exception:
         aggregated_data["sov_by_model"] = []
         aggregated_data["sov_by_topic"] = []
+
+    # Distribuciones densas en datos para el Analista de Correlaciones y Anomalías
+    try:
+        aggregated_data["distributions"] = {
+            "sentiment_hist": _histogram([s for vals in brand_sentiments.values() for s in vals], bins=10, range_min=-1.0, range_max=1.0),
+            "mentions_by_engine": _dict_counts(total_by_engine),
+            "mentions_by_topic": _dict_counts(total_by_topic),
+        }
+    except Exception:
+        aggregated_data["distributions"] = {"sentiment_hist": [], "mentions_by_engine": [], "mentions_by_topic": []}
 
     # Comparativa de sentimiento por marca
     try:
@@ -983,13 +1046,41 @@ def _create_pdf_report(content, data):
     # 3. Análisis de Correlaciones
     try:
         p.setFont("Helvetica-Bold", 14)
-        p.drawString(M, y, "3. Análisis de Correlaciones y Diagnóstico")
+        p.drawString(M, y, "3. Correlaciones, Solapamientos y Diagnóstico")
         y -= 25
         corr_ins = content.get('correlation_analysis', {}).get('insights') or []
         if corr_ins:
             corr_text = "- " + "<br/>- ".join(corr_ins)
             y = write_paragraph(corr_text, M, y)
         y -= 10
+        # Sub-sección: Anomalías
+        anomalies = (content.get('anomaly_analysis', {}) or {}).get('anomalies') or []
+        if anomalies:
+            p.setFont("Helvetica-Bold", 11)
+            p.drawString(M, y, "Anomalías y Señales Tempranas")
+            y -= 16
+            an_text = "- " + "<br/>- ".join(anomalies[:6])
+            y = write_paragraph(an_text, M, y)
+            y -= 6
+        # Mini-tabla: Días outlier (desde data)
+        outliers = (data.get('outlier_days') or [])[:6]
+        if outliers:
+            p.setFont("Helvetica-Bold", 11)
+            p.drawString(M, y, "Días Atípicos (z-score)")
+            y -= 14
+            table = [["Fecha", "Sentimiento", "z"]] + [[o.get('date'), str(o.get('sentiment')), str(o.get('z'))] for o in outliers]
+            tbl = Table(table, colWidths=[1.6*inch, 1.2*inch, 0.8*inch])
+            tbl.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+                ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('ALIGN', (1,1), (-1,-1), 'RIGHT'),
+            ]))
+            w, h = tbl.wrapOn(p, width - 2*M, 100)
+            if y - h < inch:
+                p.showPage(); y = height - inch
+            tbl.drawOn(p, M, y - h)
+            y -= (h + 8)
     except Exception:
         pass
 
@@ -1028,6 +1119,86 @@ def _create_pdf_report(content, data):
             d.add(pie)
             renderPDF.draw(d, p, width - M - pie_w, y - pie_h + 18)
             y -= pie_h + 12
+    except Exception:
+        pass
+
+    # 5. Solapamientos Riesgos-Competidores
+    try:
+        overlaps = data.get('overlap_events', [])
+        if overlaps:
+            if y < inch * 2:
+                p.showPage(); y = height - inch
+            p.setFont("Helvetica-Bold", 14)
+            p.drawString(M, y, "5. Solapamientos: Riesgos y Picos de Competidores")
+            y -= 22
+            rows = [["Fecha", "Competidor", "Menciones", "Riesgos Citados"]]
+            for ev in overlaps[:12]:
+                rows.append([
+                    ev.get('date',''), ev.get('competitor',''), str(ev.get('competitor_mentions','')),
+                    ", ".join(ev.get('risks', [])[:3])
+                ])
+            otbl = Table(rows, colWidths=[1.2*inch, 2.0*inch, 1.2*inch, 3.0*inch])
+            otbl.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+                ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('ALIGN', (2,1), (2,-1), 'RIGHT'),
+            ]))
+            w, h = otbl.wrapOn(p, width - 2*inch, height)
+            if y - h < inch:
+                p.showPage(); y = height - inch
+            otbl.drawOn(p, M, y - h)
+            y -= (h + 16)
+    except Exception:
+        pass
+
+    # 6. Distribuciones (Data-Rich)
+    try:
+        dists = data.get('distributions') or {}
+        if dists:
+            if y < inch * 2:
+                p.showPage(); y = height - inch
+            p.setFont("Helvetica-Bold", 14)
+            p.drawString(M, y, "6. Distribuciones y Sesgos de Origen")
+            y -= 22
+            # Conteos por Motor
+            mb_engine = [["Motor", "Menciones"]] + (dists.get('mentions_by_engine') or [])
+            t1 = Table(mb_engine, colWidths=[3.0*inch, 1.4*inch])
+            t1.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+                ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('ALIGN', (1,1), (1,-1), 'RIGHT'),
+            ]))
+            w, h = t1.wrapOn(p, (width - 2*M) / 2 - 6, height)
+            t1.drawOn(p, M, y - h)
+            # Conteos por Tema
+            mb_topic = [["Tema", "Menciones"]] + (dists.get('mentions_by_topic') or [])
+            t2 = Table(mb_topic, colWidths=[3.0*inch, 1.4*inch])
+            t2.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+                ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('ALIGN', (1,1), (1,-1), 'RIGHT'),
+            ]))
+            w2, h2 = t2.wrapOn(p, (width - 2*M) / 2 - 6, height)
+            t2.drawOn(p, M + (width - 2*M) / 2 + 6, y - h2)
+            y -= max(h, h2) + 10
+
+            # Histograma de sentimiento (tabla compacta)
+            hist = dists.get('sentiment_hist') or []
+            if hist:
+                rows = [["Bin", "#"]] + [[b.get('bin',''), str(b.get('count',''))] for b in hist]
+                t3 = Table(rows, colWidths=[3.0*inch, 1.4*inch])
+                t3.setStyle(TableStyle([
+                    ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+                    ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
+                    ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                    ('ALIGN', (1,1), (1,-1), 'RIGHT'),
+                ]))
+                w, h = t3.wrapOn(p, (width - 2*M) / 2 - 6, height)
+                t3.drawOn(p, M, y - h)
+                y -= h + 10
     except Exception:
         pass
 
@@ -1093,6 +1264,73 @@ def _detect_brands(topics_list, resp_text, title_text, payload):
             if canon not in found:
                 found.append(canon)
     return found
+
+# ───────────── Helpers estadísticos para el analista ─────────────
+def _histogram(values, bins=10, range_min=-1.0, range_max=1.0):
+    try:
+        if not values:
+            return []
+        step = (range_max - range_min) / max(bins, 1)
+        hist = [0 for _ in range(bins)]
+        for v in values:
+            if v is None:
+                continue
+            try:
+                x = float(v)
+            except Exception:
+                continue
+            idx = int((x - range_min) / step)
+            if idx < 0:
+                idx = 0
+            if idx >= bins:
+                idx = bins - 1
+            hist[idx] += 1
+        edges = [range_min + i * step for i in range(bins + 1)]
+        return [{"bin": f"{edges[i]:.2f}..{edges[i+1]:.2f}", "count": hist[i]} for i in range(bins)]
+    except Exception:
+        return []
+
+
+def _dict_counts(d):
+    try:
+        items = sorted(d.items(), key=lambda x: x[1], reverse=True)
+        return [[str(k), int(v)] for k, v in items]
+    except Exception:
+        return []
+
+
+def _topic_sentiment_correlation(topic_counts, topic_sent_sum):
+    try:
+        out = []
+        for t, cnt in topic_counts.items():
+            if cnt < 3:
+                continue
+            avg_s = topic_sent_sum.get(t, 0.0) / max(cnt, 1)
+            out.append([t, float(f"{avg_s:.4f}")])
+        out.sort(key=lambda x: x[1])
+        # Devuelve colas: negativas y positivas
+        left = out[:10]
+        right = out[-10:] if len(out) > 10 else []
+        return left + right
+    except Exception:
+        return []
+
+
+def _detect_outlier_days(days_sorted, series_sentiment):
+    try:
+        if not days_sorted or not series_sentiment or len(series_sentiment) < 3:
+            return []
+        import statistics
+        mu = statistics.mean(series_sentiment)
+        sigma = statistics.pstdev(series_sentiment) or 0.0001
+        outliers = []
+        for d, s in zip(days_sorted, series_sentiment):
+            z = (s - mu) / sigma
+            if abs(z) >= 1.5:
+                outliers.append({"date": d.strftime('%Y-%m-%d'), "sentiment": round(s, 3), "z": round(z, 2)})
+        return outliers[:10]
+    except Exception:
+        return []
 
 def ensure_taxonomy_table():
     """Crea la tabla de taxonomía si no existe."""
@@ -3203,7 +3441,13 @@ def generate_report_endpoint():
         _log_ai_call('deep_dive', deep_prompt, d_raw, d_meta)
         deep_content = _clean_model_json(d_raw) or {}
 
-        recom_input = {**aggregated_data, **summary_content, **deep_content}
+        # Nuevo analista de correlaciones y anomalías
+        corr_prompt = get_correlation_anomalies_prompt(aggregated_data)
+        c_raw, c_meta = fetch_response_with_metadata(corr_prompt, model="gpt-4o")
+        _log_ai_call('correlations_anomalies', corr_prompt, c_raw, c_meta)
+        corr_content = _clean_model_json(c_raw) or {}
+
+        recom_input = {**aggregated_data, **summary_content, **deep_content, **corr_content}
         recom_prompt = get_recommendations_prompt(recom_input)
         r_raw, r_meta = fetch_response_with_metadata(recom_prompt, model="gpt-4o")
         _log_ai_call('recommendations', recom_prompt, r_raw, r_meta)
@@ -3214,7 +3458,7 @@ def generate_report_endpoint():
         _log_ai_call('methodology', meth_prompt, m_raw, m_meta)
         meth_content = _clean_model_json(m_raw) or {}
 
-        full_report_content = {**summary_content, **deep_content, **recom_content, **meth_content}
+        full_report_content = {**summary_content, **deep_content, **corr_content, **recom_content, **meth_content}
 
         pdf_buffer = _create_pdf_report_consulting(full_report_content, aggregated_data)
 

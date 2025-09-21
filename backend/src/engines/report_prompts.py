@@ -71,7 +71,7 @@ def get_recommendations_prompt(data):
 
 def get_methodology_prompt():
     """Generador de texto para el apéndice."""
-    return f"""
+    return """
     **ROL:** Eres un experto en metodología de datos para una consultora.
     **TAREA:** Redacta un texto breve y claro para el apéndice de un informe que explique la metodología utilizada.
     **RESPONDE ÚNICAMENTE CON ESTE JSON:**
@@ -80,6 +80,53 @@ def get_methodology_prompt():
             "title": "Apéndice: Metodología",
             "text": "El presente informe se basa en un análisis cuantitativo y cualitativo de datos recopilados entre las fechas especificadas. Las menciones de marca y competidores se obtienen a través de consultas sistemáticas a un panel de Grandes Modelos de Lenguaje (LLMs), incluyendo GPT-4, Perplexity y otros, así como el análisis de resultados de búsqueda tradicionales (SERP).<br/><br/><b>Share of Voice (SOV):</b> Se calcula como el porcentaje de menciones de una marca sobre el total de menciones de todas las marcas analizadas en el mismo periodo.<br/><br/><b>Sentimiento:</b> Cada mención es procesada por un modelo de análisis de sentimiento que asigna una puntuación de -1 (muy negativo) a +1 (muy positivo). El sentimiento promedio representa la media de estas puntuaciones.<br/><br/><b>Extracción de Insights:</b> Un modelo de IA adicional analiza el contenido de cada mención para identificar y categorizar oportunidades, riesgos, tendencias y otros elementos de negocio relevantes."
         }}
+    }}
+    """
+
+
+def get_correlation_anomalies_prompt(data):
+    """Analista de Correlaciones y Anomalías: "descubrir lo indescubrible".
+
+    Este analista recibe datos enriquecidos con distribuciones, correlaciones,
+    solapamientos (overlaps) entre riesgos y competencia y detecciones de anomalías.
+    Debe producir hallazgos contundentes y verificables con foco en causalidad plausible
+    y señales tempranas.
+    """
+    return f"""
+    **ROL:** Eres un Analista de Correlaciones y Anomalías de élite. Tu trabajo es encontrar patrones sorprendentes, contradicciones y señales no obvias que otros pasarían por alto.
+    **INSTRUCCIONES:**
+    - Examina correlaciones entre series (visibilidad/sentimiento vs. picos de competidores, correlación tema→sentimiento, etc.).
+    - Analiza distribuciones (histograma de sentimiento, fuentes y motores) para detectar colas pesadas o sesgos.
+    - Identifica solapamientos entre riesgos y menciones de competidores (por días/eventos) y su posible causalidad.
+    - Prioriza insights que sean accionables y contraintuitivos. Evita obviedades.
+    - Cita siempre el dato/tabla que respalda el insight (nombre de la sección/clave).
+
+    **DATOS COMPLETOS:** {json.dumps(data, indent=2, ensure_ascii=False)}
+
+    **RESPONDE ÚNICAMENTE CON ESTE JSON:**
+    {{
+      "correlation_analysis": {{
+        "title": "Correlaciones y Solapamientos Relevantes",
+        "insights": [
+          "Insight que conecte una caída de sentimiento con el pico de un competidor (cita 'correlation_events').",
+          "Insight sobre un tema cuyo volumen correlaciona inversamente con el sentimiento (cita 'topic_sentiment_correlations').",
+          "Insight sobre fuentes o motores que sesgan el tono (cita 'distributions')."
+        ],
+        "implications": [
+          "Implicación estratégica #1 basada en los datos.",
+          "Implicación estratégica #2 basada en los datos."
+        ]
+      }},
+      "anomaly_analysis": {{
+        "title": "Anomalías y Señales Tempranas",
+        "anomalies": [
+          "Anomalía concreta con fecha, métrica y magnitud (cita 'outlier_days').",
+          "Otra anomalía o contradicción aparente (cita la distribución o correlación relevante)."
+        ],
+        "watchlist": [
+          "Variables/temas a vigilar en el próximo periodo con razón específica."
+        ]
+      }}
     }}
     """
 
