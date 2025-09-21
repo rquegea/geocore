@@ -13,8 +13,13 @@ from dotenv import load_dotenv
 import re
 import unicodedata
 from difflib import SequenceMatcher
-from src.engines.openai_engine import fetch_response
-from src.engines.report_prompts import get_executive_summary_prompt, get_market_analysis_prompt, get_brand_analysis_prompt, get_recommendations_prompt
+from src.engines.openai_engine import fetch_response, fetch_response_with_metadata
+from src.engines.report_prompts import (
+    get_executive_summary_prompt,
+    get_deep_dive_analysis_prompt,
+    get_recommendations_prompt,
+    get_methodology_prompt,
+)
 from time import time
 import io
 from reportlab.pdfgen import canvas
@@ -28,7 +33,10 @@ from reportlab.graphics.charts.piecharts import Pie
 from reportlab.graphics.charts.lineplots import LinePlot
 from reportlab.graphics.widgets.markers import makeMarker
 from reportlab.lib import colors
+import matplotlib
+matplotlib.use('Agg')  # Evita backends GUI (NSWindow) en macOS/entornos no interactivos
 import matplotlib.pyplot as plt
+from reportlab.lib.utils import ImageReader
 
 load_dotenv()
 
@@ -43,6 +51,36 @@ def _env(*names: str, default: str | int | None = None):
         if v is not None and v != "":
             return v
     return default
+
+def _clean_model_json(text: str) -> dict:
+    try:
+        raw = (text or '').strip()
+        if raw.startswith('```json') and raw.endswith('```'):
+            raw = raw[7:-3].strip()
+        if raw.startswith('```') and raw.endswith('```'):
+            raw = raw[3:-3].strip()
+        return json.loads(raw)
+    except Exception:
+        # Fallback seguro
+        return {}
+
+def _log_ai_call(kind: str, prompt: str, raw: str, meta: dict) -> None:
+    try:
+        logs_dir = os.path.join(os.path.dirname(__file__), 'logs')
+        os.makedirs(logs_dir, exist_ok=True)
+        path = os.path.join(logs_dir, 'ai_calls.log')
+        entry = {
+            'ts': datetime.utcnow().isoformat(),
+            'kind': kind,
+            'model': meta.get('model_name'),
+            'meta': {k: meta.get(k) for k in ['input_tokens','output_tokens','price_usd','engine_request_id']},
+            'prompt': prompt,
+            'raw': raw,
+        }
+        with open(path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + '\n')
+    except Exception:
+        pass
 
 # Caché simple en memoria para resultados de agrupación por IA (TTL configurable)
 _GROUPS_CACHE: dict[str, tuple[float, list[dict]]] = {}
@@ -286,7 +324,11 @@ def _aggregate_data_for_report_db(filters):
     from collections import defaultdict, Counter
     brand_counts = defaultdict(int)
     brand_sentiments = defaultdict(list)
+    competitor_daily_counts = defaultdict(lambda: defaultdict(int))  # brand -> day -> count
 
+    by_day_sentiments = defaultdict(list)
+    topic_counts = defaultdict(int)
+    topic_sent_sum = defaultdict(float)
     for _id, key_topics, resp, title, payload, senti, created_at in rows:
         detected = _detect_brands(key_topics, resp, title, payload)
         seen = set()
@@ -297,6 +339,26 @@ def _aggregate_data_for_report_db(filters):
             brand_counts[bn] += 1
             if isinstance(senti, (int, float)):
                 brand_sentiments[bn].append(float(senti))
+            # Conteo diario por competidor
+            d_day = created_at.date() if created_at else start_dt.date()
+            if bn != brand:
+                competitor_daily_counts[bn][d_day] += 1
+        # Sentimiento promedio por día (global del periodo)
+        d_sent = created_at.date() if created_at else start_dt.date()
+        if isinstance(senti, (int, float)):
+            by_day_sentiments[d_sent].append(float(senti))
+        # Agregado de temas a partir de key_topics
+        try:
+            if isinstance(key_topics, (list, tuple)):
+                for t in key_topics:
+                    if not t:
+                        continue
+                    topic = str(t).strip().lower()
+                    topic_counts[topic] += 1
+                    if isinstance(senti, (int, float)):
+                        topic_sent_sum[topic] += float(senti)
+        except Exception:
+            pass
 
     def avg(xs):
         return (sum(xs) / max(len(xs), 1)) if xs else 0.0
@@ -314,10 +376,11 @@ def _aggregate_data_for_report_db(filters):
         if primary_brand in _detect_brands(key_topics, resp, title, payload):
             by_day_brand[d] += 1
     days_sorted = sorted(by_day_total.keys())
-    series_vals = [ (by_day_brand[d] / max(by_day_total[d], 1)) * 100.0 for d in days_sorted ]
-    if len(series_vals) >= 2:
-        mid = len(series_vals) // 2
-        delta = round((sum(series_vals[mid:]) / max(len(series_vals[mid:]), 1)) - (sum(series_vals[:mid]) / max(len(series_vals[:mid]), 1)), 1)
+    series_visibility = [ (by_day_brand[d] / max(by_day_total[d], 1)) * 100.0 for d in days_sorted ]
+    series_sentiment = [ (sum(by_day_sentiments.get(d, [])) / max(len(by_day_sentiments.get(d, [])), 1)) if by_day_sentiments.get(d) else 0.0 for d in days_sorted ]
+    if len(series_visibility) >= 2:
+        mid = len(series_visibility) // 2
+        delta = round((sum(series_visibility[mid:]) / max(len(series_visibility[mid:]), 1)) - (sum(series_visibility[:mid]) / max(len(series_visibility[:mid]), 1)), 1)
     else:
         delta = 0.0
 
@@ -329,7 +392,21 @@ def _aggregate_data_for_report_db(filters):
         if cnt > 0:
             sov_list.append({"name": canon, "sov": sov})
     sov_list.sort(key=lambda x: x["sov"], reverse=True)
-    competitor_ranking = [ {"rank": i+1, "name": it["name"], "sov": f"{it['sov']:.1f}%"} for i, it in enumerate(sov_list[:10]) ]
+    competitor_ranking = [
+        {
+            "rank": i+1,
+            "name": it["name"],
+            "sov": f"{it['sov']:.1f}%",
+            "mentions": brand_counts.get(it["name"], 0),
+        }
+        for i, it in enumerate(sov_list[:10])
+    ]
+
+    # GAP frente al líder de SOV
+    top_sov = sov_list[0]["sov"] if sov_list else 0.0
+    own_sov = next((it["sov"] for it in sov_list if it["name"] == primary_brand), 0.0)
+    sov_gap_vs_leader = round(max(top_sov - own_sov, 0.0), 1)
+    sov_leader_name = sov_list[0]["name"] if sov_list else None
 
     # Oportunidades / Riesgos / Tendencias / Citas desde insights
     cur.execute(f"""
@@ -363,9 +440,13 @@ def _aggregate_data_for_report_db(filters):
             "visibility_delta": delta,
             "sentiment_avg": sentiment_avg,
             "sov_score": (sov_list[0]["sov"] if sov_list else 0.0),
+            "sov_leader_name": sov_leader_name,
+            "sov_gap_vs_leader": sov_gap_vs_leader,
+            "total_mentions": total_responses,
         },
         "competitor_ranking": competitor_ranking,
         "competitor_themes": {},
+        # Temas top por sentimiento
         "top_positive_themes": [],
         "top_negative_themes": [],
         "emerging_trends": [t for t, _ in trend.most_common(5)],
@@ -373,13 +454,130 @@ def _aggregate_data_for_report_db(filters):
         "top_risks": [t for t, _ in risk.most_common(5)],
         "key_quotes": quotes[:5],
         "sov_chart_data": sov_list[:5],
-        "visibility_timeseries": [
-            {"date": d.strftime('%Y-%m-%d'), "value": round(v, 1)}
-            for d, v in zip(days_sorted, series_vals)
-        ],
+        # Series temporales para gráficos
+        "time_series": {
+            "dates": [d.strftime('%Y-%m-%d') for d in days_sorted],
+            "visibility": [round(v, 1) for v in series_visibility],
+            "sentiment": [round(v, 2) for v in series_sentiment],
+        },
     }
 
-    cur.close(); conn.close()
+    # Calcular Top 5 temas positivos/negativos a partir de key_topics
+    try:
+        topic_avg = []
+        for t, cnt in topic_counts.items():
+            if cnt < 3:
+                continue
+            avg_s = topic_sent_sum[t] / max(cnt, 1)
+            topic_avg.append((t, avg_s, cnt))
+        topic_avg.sort(key=lambda x: x[1], reverse=True)
+        aggregated_data["top_positive_themes"] = [
+            [name, f"{score:.2f}", f"{cnt} menciones"] for name, score, cnt in topic_avg[:5]
+        ]
+        topic_avg.sort(key=lambda x: x[1])
+        aggregated_data["top_negative_themes"] = [
+            [name, f"{score:.2f}", f"{cnt} menciones"] for name, score, cnt in topic_avg[:5]
+        ]
+    except Exception:
+        pass
+
+    # Correlaciones simples: caídas fuertes de sentimiento y pico de un competidor el mismo día
+    try:
+        correlation_events = []
+        # Detecta caídas > 0.2 respecto al día anterior
+        for idx in range(1, len(days_sorted)):
+            d = days_sorted[idx]
+            prev = days_sorted[idx - 1]
+            s_today = series_sentiment[idx]
+            s_prev = series_sentiment[idx - 1]
+            if (s_prev - s_today) >= 0.2:
+                # busca competidor con más menciones ese día
+                best_comp = None
+                best_cnt = 0
+                for comp, by_day in competitor_daily_counts.items():
+                    c = by_day.get(d, 0)
+                    if c > best_cnt:
+                        best_cnt = c
+                        best_comp = comp
+                if best_comp and best_cnt > 0:
+                    correlation_events.append({
+                        "date": d.strftime('%Y-%m-%d'),
+                        "competitor": best_comp,
+                        "competitor_mentions": best_cnt,
+                        "sentiment_drop": round(s_prev - s_today, 2),
+                    })
+        aggregated_data["correlation_events"] = correlation_events[:5]
+    except Exception:
+        aggregated_data["correlation_events"] = []
+
+    # ── SOV por modelo de IA y por tema ─────────────────────────────────
+    try:
+        cur = get_db_connection().cursor()
+        cur.execute(
+            f"""
+            SELECT m.engine, q.topic,
+                   m.key_topics,
+                   LOWER(COALESCE(m.response,'')) AS resp,
+                   LOWER(COALESCE(m.source_title,'')) AS title
+            FROM mentions m
+            JOIN queries q ON m.query_id = q.id
+            WHERE m.created_at >= %s AND m.created_at < %s
+            """,
+            (start_dt, end_dt),
+        )
+        rows_et = cur.fetchall()
+        cur.close()
+
+        counts_by_engine_brand = defaultdict(lambda: defaultdict(int))
+        counts_by_topic_brand = defaultdict(lambda: defaultdict(int))
+        total_by_engine = defaultdict(int)
+        total_by_topic = defaultdict(int)
+
+        for engine, topic, key_topics, resp, title in rows_et:
+            detected = _detect_brands(key_topics, resp, title, None)
+            if not detected:
+                continue
+            seen = set()
+            for bn in detected:
+                if bn in seen:
+                    continue
+                seen.add(bn)
+                counts_by_engine_brand[engine][bn] += 1
+                counts_by_topic_brand[topic][bn] += 1
+                total_by_engine[engine] += 1
+                total_by_topic[topic] += 1
+
+        sov_by_model = []
+        for engine, brand_map in counts_by_engine_brand.items():
+            tot = max(total_by_engine.get(engine, 0), 1)
+            items = sorted(brand_map.items(), key=lambda x: x[1], reverse=True)[:6]
+            for bn, cnt in items:
+                sov_by_model.append([str(engine or 'unknown'), bn, f"{(cnt/tot)*100:.1f}%"]) 
+
+        sov_by_topic = []
+        for topic, brand_map in counts_by_topic_brand.items():
+            tot = max(total_by_topic.get(topic, 0), 1)
+            items = sorted(brand_map.items(), key=lambda x: x[1], reverse=True)[:6]
+            for bn, cnt in items:
+                sov_by_topic.append([str(topic or 'unknown'), bn, f"{(cnt/tot)*100:.1f}%"]) 
+
+        aggregated_data["sov_by_model"] = sov_by_model[:30]
+        aggregated_data["sov_by_topic"] = sov_by_topic[:30]
+    except Exception:
+        aggregated_data["sov_by_model"] = []
+        aggregated_data["sov_by_topic"] = []
+
+    # Comparativa de sentimiento por marca
+    try:
+        sentiment_comp = [
+            [bn, f"{(sum(vals)/max(len(vals),1)):.2f}"]
+            for bn, vals in brand_sentiments.items() if vals
+        ]
+        sentiment_comp.sort(key=lambda x: float(x[1]), reverse=True)
+        aggregated_data["sentiment_comparison"] = sentiment_comp[:10]
+    except Exception:
+        aggregated_data["sentiment_comparison"] = []
+
     return aggregated_data
 
 
@@ -440,27 +638,114 @@ def _create_pdf_report_consulting(content, data):
     y = write_paragraph(f"<b>Evaluación General:</b><br/>{content['executive_summary']['overall_assessment']}", inch, y)
     y -= 20
 
+    # Inserta gráfico de tendencia (Visibilidad y Sentimiento)
+    try:
+        chart_buf = _generate_charts_as_image(data)
+        if chart_buf:
+            img = ImageReader(chart_buf)
+            p.drawImage(img, inch, y - 200, width=width - 2*inch, height=180, mask='auto')
+            y -= 200
+    except Exception:
+        pass
+
+    # Tabla de KPIs
+    try:
+        k = data.get('kpis', {})
+        table_data = [
+            ["KPI", "Valor"],
+            ["Visibilidad (%)", f"{k.get('visibility_score', 0):.1f}"],
+            ["Δ Visibilidad", f"{k.get('visibility_delta', 0):+.1f} pts"],
+            ["Sentimiento", f"{k.get('sentiment_avg', 0):.2f}"],
+            ["SOV líder", f"{k.get('sov_score', 0):.1f}%"],
+            ["Brecha vs líder (SOV)", f"{k.get('sov_gap_vs_leader', 0):.1f} pts"],
+            ["Total menciones", f"{k.get('total_mentions', 0)}"],
+        ]
+        tbl = Table(table_data, colWidths=[2.8*inch, 2.8*inch])
+        tbl.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.black),
+            ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ]))
+        w, h = tbl.wrapOn(p, width - 2*inch, height)
+        if y - h < inch:
+            p.showPage(); y = height - inch
+        tbl.drawOn(p, inch, y - h)
+        y -= (h + 20)
+    except Exception:
+        pass
+
     p.showPage(); y = height - inch
 
-    # Sección 2: Análisis de Mercado
-    market = content['market_analysis']
+    # Sección 2: Análisis Granular (Deep Dive)
+    deep = content.get('deep_dive_analysis') or {}
     p.setFont("Helvetica-Bold", 14)
-    p.drawString(inch, y, market['title'])
+    p.drawString(inch, y, deep.get('title', 'Análisis Granular'))
     y -= 30
-    y = write_paragraph(f"<b>Posición en el Mercado:</b><br/>{market['market_position']}", inch, y)
-    y = write_paragraph(f"<b>Estrategias de Competidores:</b><br/>{market['competitor_strategies']}", inch, y)
-    y = write_paragraph(f"<b>Tendencias Emergentes:</b><br/>{market['emerging_trends']}", inch, y)
-    y -= 20
 
-    # Sección 3: Análisis de Marca
-    brand = content['brand_analysis']
-    p.setFont("Helvetica-Bold", 14)
-    p.drawString(inch, y, brand['title'])
-    y -= 30
-    y = write_paragraph(f"<b>Fortalezas de Marca:</b><br/>{brand['brand_strengths']}", inch, y)
-    y = write_paragraph(f"<b>Debilidades de Marca:</b><br/>{brand['brand_weaknesses']}", inch, y)
-    y = write_paragraph(f"<b>Voz del Mercado:</b><br/>{brand['voice_of_the_market']}", inch, y)
-    y -= 20
+    # Tabla: SOV por Modelo de IA
+    try:
+        header = [["Modelo IA", "Marca", "SOV"]]
+        rows = header + (data.get('sov_by_model') or [])
+        tbl = Table(rows, colWidths=[2.0*inch, 3.0*inch, 1.4*inch])
+        tbl.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+            ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ]))
+        w, h = tbl.wrapOn(p, width - 2*inch, height)
+        if y - h < inch:
+            p.showPage(); y = height - inch
+        tbl.drawOn(p, inch, y - h)
+        y -= (h + 12)
+        if deep.get('visibility_by_model'):
+            y = write_paragraph(f"<b>Lectura:</b> {deep['visibility_by_model']}", inch, y)
+    except Exception:
+        pass
+
+    # Tabla: SOV por Tema
+    try:
+        header = [["Tema", "Marca", "SOV"]]
+        rows = header + (data.get('sov_by_topic') or [])
+        tbl = Table(rows, colWidths=[2.0*inch, 3.0*inch, 1.4*inch])
+        tbl.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+            ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ]))
+        w, h = tbl.wrapOn(p, width - 2*inch, height)
+        if y - h < inch:
+            p.showPage(); y = height - inch
+        tbl.drawOn(p, inch, y - h)
+        y -= (h + 12)
+        if deep.get('visibility_by_topic'):
+            y = write_paragraph(f"<b>Lectura:</b> {deep['visibility_by_topic']}", inch, y)
+    except Exception:
+        pass
+
+    # Tabla: Comparativa de Sentimiento por Marca
+    try:
+        header = [["Marca", "Sentimiento Promedio"]]
+        rows = header + (data.get('sentiment_comparison') or [])
+        tbl = Table(rows, colWidths=[4.0*inch, 2.0*inch])
+        tbl.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+            ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ]))
+        w, h = tbl.wrapOn(p, width - 2*inch, height)
+        if y - h < inch:
+            p.showPage(); y = height - inch
+        tbl.drawOn(p, inch, y - h)
+        y -= (h + 12)
+        if deep.get('sentiment_comparison'):
+            y = write_paragraph(f"<b>Lectura:</b> {deep['sentiment_comparison']}", inch, y)
+    except Exception:
+        pass
 
     if y < inch * 3: p.showPage(); y = height - inch
 
@@ -476,6 +761,37 @@ def _create_pdf_report_consulting(content, data):
         actions_text = "- " + "<br/>- ".join(lever['recommended_actions'])
         y = write_paragraph(f"<b>Acciones Recomendadas:</b><br/>{actions_text}", inch + 0.2*inch, y)
         y -= 15
+
+    # Sección 4-bis: Correlaciones clave
+    try:
+        corr = data.get('correlation_events', [])
+        if corr:
+            if y < inch * 2:
+                p.showPage(); y = height - inch
+            p.setFont("Helvetica-Bold", 14)
+            p.drawString(inch, y, "Análisis de Correlaciones")
+            y -= 24
+            rows = [["Fecha", "Competidor", "Menciones", "Caída Sent."]]
+            for ev in corr:
+                rows.append([
+                    ev.get('date',''), ev.get('competitor',''),
+                    str(ev.get('competitor_mentions','')),
+                    str(ev.get('sentiment_drop','')),
+                ])
+            ctbl = Table(rows, colWidths=[1.2*inch, 2.0*inch, 1.2*inch, 1.2*inch])
+            ctbl.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+                ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+            ]))
+            w, h = ctbl.wrapOn(p, width - 2*inch, height)
+            if y - h < inch:
+                p.showPage(); y = height - inch
+            ctbl.drawOn(p, inch, y - h)
+            y -= (h + 20)
+    except Exception:
+        pass
 
     p.save()
     buffer.seek(0)
@@ -2876,29 +3192,29 @@ def generate_report_endpoint():
 
         aggregated_data = _aggregate_data_for_report(filters)
 
-        # --- Cadena de Analistas Virtuales ---
+        # --- Cadena de Analistas Virtuales (versión final) ---
         summary_prompt = get_executive_summary_prompt(aggregated_data)
-        summary_content_str = fetch_response(summary_prompt, model="gpt-4o")
-        summary_content = json.loads(summary_content_str.split("```json\n")[1].split("\n```")[0] if "```json" in summary_content_str else summary_content_str)
+        s_raw, s_meta = fetch_response_with_metadata(summary_prompt, model="gpt-4o")
+        _log_ai_call('executive_summary', summary_prompt, s_raw, s_meta)
+        summary_content = _clean_model_json(s_raw) or {}
 
-        market_prompt = get_market_analysis_prompt(aggregated_data)
-        market_content_str = fetch_response(market_prompt, model="gpt-4o")
-        market_content = json.loads(market_content_str.split("```json\n")[1].split("\n```")[0] if "```json" in market_content_str else market_content_str)
+        deep_prompt = get_deep_dive_analysis_prompt(aggregated_data)
+        d_raw, d_meta = fetch_response_with_metadata(deep_prompt, model="gpt-4o")
+        _log_ai_call('deep_dive', deep_prompt, d_raw, d_meta)
+        deep_content = _clean_model_json(d_raw) or {}
 
-        brand_prompt = get_brand_analysis_prompt(aggregated_data)
-        brand_content_str = fetch_response(brand_prompt, model="gpt-4o")
-        brand_content = json.loads(brand_content_str.split("```json\n")[1].split("\n```")[0] if "```json" in brand_content_str else brand_content_str)
+        recom_input = {**aggregated_data, **summary_content, **deep_content}
+        recom_prompt = get_recommendations_prompt(recom_input)
+        r_raw, r_meta = fetch_response_with_metadata(recom_prompt, model="gpt-4o")
+        _log_ai_call('recommendations', recom_prompt, r_raw, r_meta)
+        recom_content = _clean_model_json(r_raw) or {}
 
-        recom_prompt = get_recommendations_prompt(aggregated_data)
-        recom_content_str = fetch_response(recom_prompt, model="gpt-4o")
-        recom_content = json.loads(recom_content_str.split("```json\n")[1].split("\n```")[0] if "```json" in recom_content_str else recom_content_str)
+        meth_prompt = get_methodology_prompt()
+        m_raw, m_meta = fetch_response_with_metadata(meth_prompt, model="gpt-4o")
+        _log_ai_call('methodology', meth_prompt, m_raw, m_meta)
+        meth_content = _clean_model_json(m_raw) or {}
 
-        full_report_content = {
-            **summary_content,
-            **market_content,
-            **brand_content,
-            **recom_content
-        }
+        full_report_content = {**summary_content, **deep_content, **recom_content, **meth_content}
 
         pdf_buffer = _create_pdf_report_consulting(full_report_content, aggregated_data)
 
