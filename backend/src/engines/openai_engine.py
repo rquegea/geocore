@@ -72,32 +72,25 @@ Contexto de Negocio: Estás analizando datos para 'The Core School', escuela sup
 entretenimiento y artes audiovisuales (cine, videojuegos, animación, producción). Interpreta las consultas pensando en
 captación de alumnos, reputación de marca y posicionamiento en el sector educativo.
 
-Eres un **analista senior de inteligencia de mercado**.
+Eres un **analista senior de inteligencia de mercado**. Tu tarea es destilar el siguiente contenido en insights estructurados.
 
-1️⃣ Lee atentamente el CONTENIDO.
-2️⃣ Identifica **todas las MARCAS o productos** citados.
-3️⃣ Cuenta cuántas veces aparece cada marca.
-4️⃣ Evalúa el **sentimiento promedio** hacia cada marca (−1 a 1).
-5️⃣ Detecta **competidores** relevantes.
-6️⃣ Extrae **insights accionables** en: opportunities, risks, pain_points, trends.
-7️⃣ Añade **hasta 3 QUOTES** literales (≤ 200 caracteres) que representen el tono.
-8️⃣ Identifica los temas más importantes (top_themes) y su frecuencia (topic_frequency).
-9️⃣ Si se citan dominios (ej. forbes.com), anótalos en source_mentions.
-🔟 Extrae "calls_to_action", público objetivo (audience_targeting) y productos/features.
+**INSTRUCCIONES:**
+1.  Lee el CONTENIDO y extrae los insights clave.
+2.  Para "opportunities" y "risks", añade una clave "impact" con valor "Alto", "Medio" o "Bajo". Basa el impacto en la urgencia, el coste potencial o el beneficio mencionado.
+3.  Sé conciso y directo.
 
-Devuelve SOLO un objeto **JSON** con este formato EXACTO:
-
+**FORMATO JSON ESTRICTO (SOLO EL JSON):**
 {{
   "brands": [{{"name": "...", "mentions": <int>, "sentiment_avg": <float>}}],
   "competitors": ["...", "..."],
-  "opportunities": ["...", "..."],
-  "risks": ["...", "..."],
+  "opportunities": [{{"opportunity": "Descripción de la oportunidad.", "impact": "Alto"}}, {{"...": "..."}}],
+  "risks": [{{"risk": "Descripción del riesgo.", "impact": "Bajo"}}, {{"...": "..."}}],
   "pain_points": ["...", "..."],
   "trends": ["...", "..."],
   "quotes": ["...", "..."],
   "top_themes": ["...", "..."],
-  "topic_frequency": {{"keyword": <int>}},
-  "source_mentions": {{"domain": <int>}},
+  "topic_frequency": {{}},
+  "source_mentions": {{}},
   "calls_to_action": ["...", "..."],
   "audience_targeting": ["...", "..."],
   "products_or_features": ["...", "..."]

@@ -5,19 +5,26 @@ def get_executive_summary_prompt(data):
     """Analista Ejecutivo: KPIs y Resumen Ejecutivo."""
     return f"""
     **ROL:** Eres un Analista Principal en una consultora estratégica de primer nivel (McKinsey, BCG). Tu audiencia es el C-suite de "The Core School". Tu lenguaje debe ser conciso, basado en datos y enfocado en el impacto de negocio.
-    **TAREA:** Analiza los datos de mercado proporcionados para redactar un Resumen Ejecutivo de alto impacto que vaya directo a las conclusiones clave.
-    **DATOS CLAVE:** {json.dumps(data, indent=2, ensure_ascii=False)}
-    **RESPONDE ÚNICAMENTE CON ESTE JSON:**
+    **TAREA:** Analiza los datos de mercado proporcionados para redactar un Resumen Ejecutivo de alto impacto que vaya directo a las conclusiones clave. No resumas los datos, interprétalos.
+
+    **EJEMPLOS DE TONO Y ESTILO:**
+    - **Headline Agudo:** "CES domina la conversación online, dejando a The Core School con una brecha de visibilidad del 49% que requiere acción inmediata."
+    - **Hallazgo Profundo:** "Pérdida de Visibilidad en Temas Clave: A pesar de un sentimiento general positivo (0.62), nuestra visibilidad ha caído, especialmente en temas de alto interés como 'Carreras Audiovisuales', donde CES nos supera ampliamente."
+    - **Evaluación Concluyente:** "Conclusión: Urge un cambio de estrategia. La actual estrategia de contenidos no está logrando competir eficazmente con CES. Es imperativo lanzar una campaña de posicionamiento en los temas de mayor oportunidad para revertir esta tendencia."
+
+    **DATOS CLAVE DEL PERIODO:** {json.dumps(data, indent=2, ensure_ascii=False)}
+
+    **RESPONDE ÚNICAMENTE CON ESTE FORMATO JSON:**
     {{
       "executive_summary": {{
         "title": "Informe Ejecutivo de Inteligencia de Mercado y Estrategia",
-        "headline": "Genera un titular de una sola frase que resuma el insight más crítico del periodo. Debe ser impactante y directo.",
+        "headline": "Genera un titular de una sola frase que resuma el insight más crítico del periodo. Debe ser impactante, directo y basado en los datos más relevantes (ej. la brecha de SOV, una caída de sentimiento, etc.).",
         "key_findings": [
-          "Hallazgo #1 sobre Visibilidad y Reputación: Describe la conclusión más importante sobre nuestra visibilidad y reputación, usando datos específicos como el sentimiento promedio y la evolución temporal.",
-          "Hallazgo #2 sobre Posición Competitiva: Describe la conclusión más relevante sobre nuestra posición competitiva, mencionando al competidor principal y su cuota de SOV.",
-          "Hallazgo #3 sobre Percepción de la Audiencia: Describe la conclusión principal sobre la voz del mercado, contrastando los temas positivos más fuertes contra los puntos de dolor más recurrentes."
+          "Hallazgo #1 sobre Visibilidad y Reputación: Conecta la visibilidad y el sentimiento. Por ejemplo, si la visibilidad baja a pesar de un buen sentimiento, explícalo. Usa datos específicos.",
+          "Hallazgo #2 sobre Posición Competitiva: Analiza la brecha con el líder. Menciona el nombre del competidor principal y la diferencia en SOV. Señala el área o tema donde esta brecha es más pronunciada.",
+          "Hallazgo #3 sobre Percepción de la Audiencia: Contrasta el tema más positivo con el más negativo. Explica qué nos dice esto sobre lo que el mercado valora de nosotros y cuáles son sus principales preocupaciones."
         ],
-        "overall_assessment": "Ofrece una evaluación final y concluyente. ¿Hemos ganado o perdido terreno en el mercado durante este periodo y cuáles son las razones fundamentales (basadas en los datos) detrás de este cambio?"
+        "overall_assessment": "Ofrece una evaluación final y concluyente. ¿Hemos ganado o perdido terreno en el mercado durante este periodo y cuáles son las razones fundamentales (basadas en los datos) detrás de este cambio? Termina con una frase que cree urgencia o señale el siguiente paso lógico."
       }}
     }}
     """
@@ -42,26 +49,33 @@ def get_deep_dive_analysis_prompt(data):
 
 
 def get_recommendations_prompt(data):
-    """Estratega y Planificador."""
+    """Estratega y Planificador: convierte insights en un plan de acción SMART."""
     return f"""
-    **ROL:** Eres un Consultor de Estrategia Senior de BCG/Bain. Tu trabajo es destilar todo el análisis previo (incluyendo el deep dive) en un plan de acción ejecutivo.
-    **TAREA:** Basándote en todo el contexto, define las perspectivas futuras y las recomendaciones estratégicas.
-    **DATOS COMPLETOS:** {json.dumps(data, indent=2, ensure_ascii=False)}
-    **RESPONDE ÚNICAMENTE CON ESTE JSON:**
+    **ROL:** Eres un Consultor de Estrategia Senior de BCG/Bain. Tu trabajo es destilar todo el análisis previo en un plan de acción ejecutivo, claro y medible. Tu audiencia es la dirección de "The Core School".
+
+    **TAREA:** Basándote en el análisis completo, define un Plan de Acción Estratégico. Para cada recomendación, sigue el formato SMART (Específica, Medible, Alcanzable, Relevante, con Plazo).
+
+    **DATOS COMPLETOS DEL ANÁLISIS:** {json.dumps(data, indent=2, ensure_ascii=False)}
+
+    **RESPONDE ÚNICAMENTE CON ESTE FORMATO JSON:**
     {{
-      "recommendations": {{
-        "title": "Perspectivas y Recomendaciones Estratégicas",
+      "strategic_action_plan": {{
+        "title": "Plan de Acción Estratégico",
         "market_outlook": "Basado en las tendencias y el análisis competitivo, ofrece un breve pronóstico del mercado para los próximos 6-12 meses.",
-        "strategic_levers": [
+        "strategic_recommendations": [
           {{
-            "lever_title": "Capitalizar en Oportunidad Principal: [Genera un nombre para la oportunidad más importante]",
-            "description": "Explica por qué esta es la oportunidad de mayor impacto, conectándola directamente con los hallazgos del análisis de marca, mercado y el 'deep dive' por tema/modelo.",
-            "recommended_actions": ["Acción de Marketing/Ventas específica y medible.", "Acción de Producto/Académica a corto plazo.", "Acción de Comunicación/PR para reforzar el posicionamiento."]
+            "recommendation": "Capitalizar la Oportunidad Principal: [Describe la acción específica, ej: 'Lanzar campaña de marketing de contenidos sobre el éxito laboral de los alumni en VFX.']",
+            "details": "Justifica por qué esta acción aborda la oportunidad más importante detectada en el análisis.",
+            "kpis": "Define 1-2 KPIs para medir el éxito. Ej: 'Aumentar el SOV en el tema 'VFX' en 10 puntos; generar un 15% más de leads para programas de VFX.'",
+            "timeline": "Define un plazo realista. Ej: 'Próximo trimestre (Q4 2025)." ,
+            "priority": "Estima la prioridad. Ej: 'Alta'"
           }},
           {{
-            "lever_title": "Mitigar el Riesgo más Crítico: [Genera un nombre para el riesgo más urgente]",
-            "description": "Describe el riesgo más significativo y su potencial impacto negativo, basándote en los datos de debilidades y competencia.",
-            "recommended_actions": ["Acción inmediata para contener el riesgo.", "Acción a medio plazo para resolver la causa raíz."]
+            "recommendation": "Mitigar el Riesgo más Crítico: [Describe la acción específica, ej: 'Crear una página de destino sobre transparencia de precios y becas.']",
+            "details": "Explica cómo esta acción aborda directamente el riesgo o 'pain point' más urgente encontrado en el análisis.",
+            "kpis": "Define 1-2 KPIs. Ej: 'Reducir el sentimiento negativo en el tema 'Precios' en 0.3 puntos; aumentar el tiempo de permanencia en la página de precios en un 30%." ,
+            "timeline": "Define un plazo. Ej: 'Próximos 45 días.'",
+            "priority": "Estima la prioridad. Ej: 'Crítica'"
           }}
         ]
       }}
@@ -92,39 +106,32 @@ def get_correlation_anomalies_prompt(data):
     Debe producir hallazgos contundentes y verificables con foco en causalidad plausible
     y señales tempranas.
     """
+
+
+def get_competitive_analysis_prompt(data):
+    """Analista Competitivo: SOV, posicionamiento y debilidades."""
     return f"""
-    **ROL:** Eres un Analista de Correlaciones y Anomalías de élite. Tu trabajo es encontrar patrones sorprendentes, contradicciones y señales no obvias que otros pasarían por alto.
-    **INSTRUCCIONES:**
-    - Examina correlaciones entre series (visibilidad/sentimiento vs. picos de competidores, correlación tema→sentimiento, etc.).
-    - Analiza distribuciones (histograma de sentimiento, fuentes y motores) para detectar colas pesadas o sesgos.
-    - Identifica solapamientos entre riesgos y menciones de competidores (por días/eventos) y su posible causalidad.
-    - Prioriza insights que sean accionables y contraintuitivos. Evita obviedades.
-    - Cita siempre el dato/tabla que respalda el insight (nombre de la sección/clave).
+    **ROL:** Eres un Analista de Inteligencia Competitiva. Tu objetivo es analizar el posicionamiento de 'The Core School' frente a sus competidores. Sé directo, analítico y enfócate en insights accionables.
 
-    **DATOS COMPLETOS:** {json.dumps(data, indent=2, ensure_ascii=False)}
+    **DATOS DE MERCADO:** {json.dumps(data, indent=2, ensure_ascii=False)}
 
-    **RESPONDE ÚNICAMENTE CON ESTE JSON:**
+    **RESPONDE ÚNICAMENTE CON ESTE FORMATO JSON:**
     {{
-      "correlation_analysis": {{
-        "title": "Correlaciones y Solapamientos Relevantes",
-        "insights": [
-          "Insight que conecte una caída de sentimiento con el pico de un competidor (cita 'correlation_events').",
-          "Insight sobre un tema cuyo volumen correlaciona inversamente con el sentimiento (cita 'topic_sentiment_correlations').",
-          "Insight sobre fuentes o motores que sesgan el tono (cita 'distributions')."
-        ],
-        "implications": [
-          "Implicación estratégica #1 basada en los datos.",
-          "Implicación estratégica #2 basada en los datos."
-        ]
-      }},
-      "anomaly_analysis": {{
-        "title": "Anomalías y Señales Tempranas",
-        "anomalies": [
-          "Anomalía concreta con fecha, métrica y magnitud (cita 'outlier_days').",
-          "Otra anomalía o contradicción aparente (cita la distribución o correlación relevante)."
-        ],
-        "watchlist": [
-          "Variables/temas a vigilar en el próximo periodo con razón específica."
+      "competitive_landscape": {{
+        "title": "Análisis del Panorama Competitivo",
+        "overall_positioning": "Describe la posición general de The Core School en el mercado basándote en el ranking de SOV y el sentimiento comparativo. ¿Somos líderes, contendientes, o estamos rezagados?",
+        "leader_analysis": "Analiza al competidor líder ('{data.get('kpis', {}).get('sov_leader_name', 'N/A')}'). ¿Cuáles son sus fortalezas clave según los datos de SOV por tema?",
+        "competitor_weaknesses": [
+            {{
+                "competitor": "Nombre del competidor principal (ej. CES)",
+                "theme": "El tema específico donde muestran debilidad (sentimiento negativo).",
+                "analysis": "Explica por qué esta debilidad es una oportunidad estratégica para nosotros. Conecta el 'pain point' de su audiencia con una fortaleza nuestra."
+            }},
+            {{
+                "competitor": "Nombre de otro competidor relevante",
+                "theme": "Otro tema donde muestran debilidad.",
+                "analysis": "Describe cómo podemos posicionar nuestro contenido para capturar el interés de la audiencia insatisfecha de este competidor."
+            }}
         ]
       }}
     }}

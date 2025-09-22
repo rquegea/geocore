@@ -17,6 +17,7 @@ from src.engines.openai_engine import fetch_response, fetch_response_with_metada
 from src.engines.report_prompts import (
     get_executive_summary_prompt,
     get_deep_dive_analysis_prompt,
+    get_competitive_analysis_prompt,
     get_recommendations_prompt,
     get_methodology_prompt,
     get_correlation_anomalies_prompt,
@@ -273,12 +274,8 @@ def _aggregate_data_for_report_mock(filters):
 
 
 def _aggregate_data_for_report(filters):
-    """Wrapper que intenta agregar desde BD y cae a MOCK si hay error."""
-    try:
-        return _aggregate_data_for_report_db(filters)
-    except Exception as e:
-        print(f"[WARN] Fallback a MOCK por error en agregado DB: {e}")
-        return _aggregate_data_for_report_mock(filters)
+    """Agrega datos reales desde la base de datos (menciones, insights, KPIs)."""
+    return _aggregate_data_for_report_db(filters)
 
 
 def _aggregate_data_for_report_db(filters):
@@ -452,6 +449,9 @@ def _aggregate_data_for_report_db(filters):
         # Temas top por sentimiento
         "top_positive_themes": [],
         "top_negative_themes": [],
+        # Materia prima para gráficos de temas
+        "topic_counts": {k: int(v) for k, v in topic_counts.items()},
+        "topic_sent_sum": {k: float(v) for k, v in topic_sent_sum.items()},
         "emerging_trends": [t for t, _ in trend.most_common(5)],
         "top_opportunities": [t for t, _ in opp.most_common(5)],
         "top_risks": [t for t, _ in risk.most_common(5)],
@@ -839,6 +839,68 @@ def _aggregate_data_for_report_db(filters):
         aggregated_data["content_competitive"] = []
 
     return aggregated_data
+def _generate_sentiment_by_topic_chart(positive_themes, negative_themes):
+    """Genera un gráfico de barras horizontales para el sentimiento por tema."""
+    try:
+        # Combinar y limitar temas
+        themes = positive_themes[:5] + negative_themes[:5]
+        if not themes:
+            return None
+
+        theme_names = [t[0] for t in themes]
+        sentiments = [float(t[1]) for t in themes]
+        colors_list = ['#2ca02c' if s > 0 else '#d62728' for s in sentiments]
+
+        fig, ax = plt.subplots(figsize=(7, max(2, 0.4 * len(themes))))
+        y_pos = range(len(themes))
+        ax.barh(y_pos, sentiments, color=colors_list, align='center')
+        ax.set_yticks(list(y_pos))
+        ax.set_yticklabels(theme_names, fontsize=8)
+        ax.invert_yaxis()  # Muestra el más positivo arriba
+        ax.set_xlabel('Sentimiento Promedio')
+        ax.set_title('Sentimiento por Tema Clave', fontsize=12)
+        ax.axvline(0, color='grey', linewidth=0.5)
+        ax.set_xlim([-1, 1])
+
+        fig.tight_layout()
+        img_buffer = io.BytesIO()
+        plt.savefig(img_buffer, format='PNG', dpi=150)
+        plt.close(fig)
+        img_buffer.seek(0)
+        return img_buffer
+    except Exception as e:
+        print(f"Error generando gráfico de sentimiento por tema: {e}")
+        return None
+
+
+def _generate_word_cloud_image(topic_counts, positive=True):
+    """Genera una nube de palabras para temas positivos o negativos."""
+    try:
+        from wordcloud import WordCloud
+
+        # Filtrar temas por sentimiento
+        filtered_topics = {
+            topic: count
+            for topic, count, sentiment in topic_counts
+            if (positive and sentiment > 0.1) or (not positive and sentiment < -0.1)
+        }
+
+        if not filtered_topics:
+            return None
+
+        wc = WordCloud(width=350, height=180, background_color="white", colormap="viridis" if positive else "Reds")
+        wc.generate_from_frequencies(filtered_topics)
+
+        img_buffer = io.BytesIO()
+        wc.to_image().save(img_buffer, format='PNG')
+        img_buffer.seek(0)
+        return img_buffer
+    except ImportError:
+        print("WARN: WordCloud no instalado. Omitiendo nubes de palabras. Instalar con: pip install wordcloud")
+        return None
+    except Exception as e:
+        print(f"Error generando nube de palabras: {e}")
+        return None
 
 
 def _generate_charts_as_image(data):
@@ -957,6 +1019,15 @@ def _create_pdf_report_consulting(content, data):
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name='Justify', alignment=4))
 
+    # Margen y helper de cabecera/pie
+    M = inch
+    def draw_header_footer():
+        try:
+            p.setFont("Helvetica", 8)
+            p.drawRightString(width - M, 0.6*inch, f"Página {p.getPageNumber()}")
+        except Exception:
+            pass
+
     def write_paragraph(text, x, y, style_name='Justify', font_size=10):
         style = styles[style_name]
         style.fontSize = font_size
@@ -1021,6 +1092,76 @@ def _create_pdf_report_consulting(content, data):
         pass
 
     p.showPage(); y = height - inch
+
+    # --- NUEVO: Sección de Diagnóstico de Visibilidad y Reputación ---
+    draw_header_footer()
+    p.setFont("Helvetica-Bold", 14)
+    p.drawString(M, y, "2. Diagnóstico de Visibilidad y Reputación")
+    y -= 30
+
+    # Gráfico de Sentimiento por Tema
+    try:
+        pos_themes = data.get('top_positive_themes', [])
+        neg_themes = data.get('top_negative_themes', [])
+        sentiment_chart_buf = _generate_sentiment_by_topic_chart(pos_themes, neg_themes)
+        if sentiment_chart_buf:
+            img = ImageReader(sentiment_chart_buf)
+            img_height = min(250, 20 + 20 * (len(pos_themes) + len(neg_themes)))
+            p.drawImage(img, M, y - img_height, width=width - 2*M, height=img_height - 10, preserveAspectRatio=True)
+            y -= (img_height + 15)
+    except Exception as e:
+        print(f"Error al dibujar gráfico de sentimiento: {e}")
+
+    # Nubes de Palabras
+    try:
+        topic_sentiment_data = [
+            (t, data['topic_counts'][t], data['topic_sent_sum'][t] / data['topic_counts'][t])
+            for t in (data.get('topic_counts') or {})
+            if data['topic_counts'].get(t)
+        ]
+        pos_cloud_buf = _generate_word_cloud_image(topic_sentiment_data, positive=True)
+        neg_cloud_buf = _generate_word_cloud_image(topic_sentiment_data, positive=False)
+        if pos_cloud_buf and neg_cloud_buf:
+            if y < 220:
+                p.showPage(); y = height - inch; draw_header_footer()
+            p.setFont("Helvetica-Bold", 11)
+            p.drawString(M, y, "Temas Positivos Dominantes")
+            p.drawString(width/2 + 0.5*inch, y, "Temas Negativos Recurrentes")
+            y -= 200
+            pos_img = ImageReader(pos_cloud_buf)
+            neg_img = ImageReader(neg_cloud_buf)
+            p.drawImage(pos_img, M, y, width=3.5*inch, height=180, preserveAspectRatio=True)
+            p.drawImage(neg_img, width/2 + 0.5*inch, y, width=3.5*inch, height=180, preserveAspectRatio=True)
+            y -= 20
+    except Exception as e:
+        print(f"Error al dibujar nubes de palabras: {e}")
+
+
+    # --- NUEVO: Sección de Análisis Competitivo ---
+    p.showPage(); y = height - inch
+    draw_header_footer()
+    comp_landscape = content.get('competitive_landscape', {})
+    p.setFont("Helvetica-Bold", 14)
+    p.drawString(M, y, comp_landscape.get('title', '3. Análisis del Panorama Competitivo'))
+    y -= 30
+
+    y = write_paragraph(f"<b>Posicionamiento General:</b><br/>{comp_landscape.get('overall_positioning', 'N/A')}", M, y)
+    y -= 10
+    y = write_paragraph(f"<b>Análisis del Líder ({data.get('kpis', {}).get('sov_leader_name', 'N/A')}):</b><br/>{comp_landscape.get('leader_analysis', 'N/A')}", M, y)
+    y -= 15
+
+    p.setFont("Helvetica-Bold", 12)
+    p.drawString(M, y, "Oportunidades frente a Debilidades de Competidores")
+    y -= 20
+
+    for weakness in comp_landscape.get('competitor_weaknesses', [])[:8]:
+        if y < inch * 2:
+            p.showPage(); y = height - inch; draw_header_footer()
+        text = f"<b>Competidor:</b> {weakness.get('competitor', 'N/A')}<br/>"
+        text += f"<b>Tema de Debilidad:</b> {weakness.get('theme', 'N/A')}<br/>"
+        text += f"<b>Análisis Estratégico:</b> {weakness.get('analysis', 'N/A')}"
+        y = write_paragraph(text, M, y)
+        y -= 15
 
     # Sección 2: Análisis Granular (Deep Dive)
     deep = content.get('deep_dive_analysis') or {}
@@ -1682,6 +1823,31 @@ def _create_pdf_report(content, data):
                 y -= 160
     except Exception:
         pass
+
+    # --- NUEVO: Sección del Plan de Acción Estratégico ---
+    p.showPage(); y = height - inch
+    draw_header_footer()
+    plan = content.get('strategic_action_plan', {})
+    p.setFont("Helvetica-Bold", 14)
+    p.drawString(M, y, plan.get('title', '4. Plan de Acción Estratégico'))
+    y -= 30
+
+    y = write_paragraph(f"<b>Perspectiva de Mercado:</b><br/>{plan.get('market_outlook', 'N/A')}", M, y)
+    y -= 20
+
+    recommendations = plan.get('strategic_recommendations', [])
+    for i, rec in enumerate(recommendations):
+        if y < inch * 2.5:
+            p.showPage(); y = height - inch; draw_header_footer()
+        p.setFont("Helvetica-Bold", 12)
+        p.drawString(M, y, f"Recomendación #{i+1}: {rec.get('recommendation', 'N/A')}")
+        y -= 20
+        rec_text = f"<b>Detalles:</b> {rec.get('details', 'N/A')}<br/><br/>"
+        rec_text += f"<b>KPIs de seguimiento:</b> {rec.get('kpis', 'N/A')}<br/>"
+        rec_text += f"<b>Plazo estimado:</b> {rec.get('timeline', 'N/A')}<br/>"
+        rec_text += f"<b>Prioridad:</b> {rec.get('priority', 'N/A')}"
+        y = write_paragraph(rec_text, M + 0.2*inch, y)
+        y -= 20
 
     # Cierre con cabecera/pie dibujados
     draw_header_footer()
@@ -3922,13 +4088,19 @@ def generate_report_endpoint():
         _log_ai_call('deep_dive', deep_prompt, d_raw, d_meta)
         deep_content = _clean_model_json(d_raw) or {}
 
+        # --- NUEVO: Analista Competitivo ---
+        comp_prompt = get_competitive_analysis_prompt(aggregated_data)
+        comp_raw, comp_meta = fetch_response_with_metadata(comp_prompt, model="gpt-4o")
+        _log_ai_call('competitive_analysis', comp_prompt, comp_raw, comp_meta)
+        comp_content = _clean_model_json(comp_raw) or {}
+
         # Nuevo analista de correlaciones y anomalías
         corr_prompt = get_correlation_anomalies_prompt(aggregated_data)
         c_raw, c_meta = fetch_response_with_metadata(corr_prompt, model="gpt-4o")
         _log_ai_call('correlations_anomalies', corr_prompt, c_raw, c_meta)
         corr_content = _clean_model_json(c_raw) or {}
 
-        recom_input = {**aggregated_data, **summary_content, **deep_content, **corr_content}
+        recom_input = {**aggregated_data, **summary_content, **deep_content, **comp_content, **corr_content}
         recom_prompt = get_recommendations_prompt(recom_input)
         r_raw, r_meta = fetch_response_with_metadata(recom_prompt, model="gpt-4o")
         _log_ai_call('recommendations', recom_prompt, r_raw, r_meta)
@@ -3939,7 +4111,7 @@ def generate_report_endpoint():
         _log_ai_call('methodology', meth_prompt, m_raw, m_meta)
         meth_content = _clean_model_json(m_raw) or {}
 
-        full_report_content = {**summary_content, **deep_content, **corr_content, **recom_content, **meth_content}
+        full_report_content = {**summary_content, **deep_content, **comp_content, **corr_content, **recom_content, **meth_content}
 
         pdf_buffer = _create_pdf_report_consulting(full_report_content, aggregated_data)
 
