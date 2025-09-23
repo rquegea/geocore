@@ -1040,17 +1040,22 @@ def _create_pdf_report_consulting(content, data):
 
     y = height - inch
 
-    # Sección 1: Resumen Ejecutivo
+    # Sección 1: Resumen Ejecutivo (defensiva)
+    exec_sum = (content.get('executive_summary') or {}) if isinstance(content, dict) else {}
     p.setFont("Helvetica-Bold", 16)
-    p.drawString(inch, y, content['executive_summary']['title'])
+    p.drawString(inch, y, exec_sum.get('title', '1. Resumen Ejecutivo'))
     y -= 20
     p.setFont("Helvetica", 10)
     p.drawString(inch, y, f"Periodo de Análisis: {data.get('start_date','N/A')} - {data.get('end_date','N/A')}")
     y -= 30
-    y = write_paragraph(f"<i><b>Headline:</b> {content['executive_summary']['headline']}</i>", inch, y, font_size=11)
+    headline = exec_sum.get('headline') or 'Sin titular disponible.'
+    y = write_paragraph(f"<i><b>Headline:</b> {headline}</i>", inch, y, font_size=11)
     y -= 10
-    y = write_paragraph("<b>Hallazgos Clave:</b><br/>- " + "<br/>- ".join(content['executive_summary']['key_findings']), inch, y)
-    y = write_paragraph(f"<b>Evaluación General:</b><br/>{content['executive_summary']['overall_assessment']}", inch, y)
+    key_findings = exec_sum.get('key_findings') or []
+    if key_findings:
+        y = write_paragraph("<b>Hallazgos Clave:</b><br/>- " + "<br/>- ".join(key_findings), inch, y)
+    overall = exec_sum.get('overall_assessment') or 'N/A'
+    y = write_paragraph(f"<b>Evaluación General:</b><br/>{overall}", inch, y)
     y -= 20
 
     # Inserta gráfico de tendencia (Visibilidad y Sentimiento)
@@ -1299,18 +1304,21 @@ def _create_pdf_report_consulting(content, data):
     except Exception:
         pass
 
-    # Sección 4: Recomendaciones
-    recom = content['recommendations']
-    p.setFont("Helvetica-Bold", 14)
-    p.drawString(inch, y, recom['title'])
-    y -= 30
-    y = write_paragraph(f"<b>Perspectiva de Mercado:</b><br/>{recom['market_outlook']}", inch, y)
-    for lever in recom['strategic_levers']:
-        y = write_paragraph(f"<b>{lever['lever_title']}</b>", inch, y, font_size=12)
-        y = write_paragraph(lever['description'], inch + 0.2*inch, y)
-        actions_text = "- " + "<br/>- ".join(lever['recommended_actions'])
-        y = write_paragraph(f"<b>Acciones Recomendadas:</b><br/>{actions_text}", inch + 0.2*inch, y)
-        y -= 15
+    # Sección 4 (legacy): Recomendaciones - opcional
+    recom = content.get('recommendations') or {}
+    if isinstance(recom, dict) and recom:
+        p.setFont("Helvetica-Bold", 14)
+        p.drawString(inch, y, recom.get('title', '4. Recomendaciones'))
+        y -= 30
+        y = write_paragraph(f"<b>Perspectiva de Mercado:</b><br/>{recom.get('market_outlook', 'N/A')}", inch, y)
+        for lever in recom.get('strategic_levers', []):
+            y = write_paragraph(f"<b>{lever.get('lever_title','')}", inch, y, font_size=12)
+            y = write_paragraph(lever.get('description', ''), inch + 0.2*inch, y)
+            actions = lever.get('recommended_actions', []) or []
+            if actions:
+                actions_text = "- " + "<br/>- ".join(actions)
+                y = write_paragraph(f"<b>Acciones Recomendadas:</b><br/>{actions_text}", inch + 0.2*inch, y)
+            y -= 15
 
     # Sección 4-bis: Correlaciones clave
     try:

@@ -39,6 +39,10 @@ def fetch_response(
     Usa gpt-4o-mini por defecto por ser rápido y económico.
     """
     try:
+        user_content = prompt if isinstance(prompt, str) else json.dumps(prompt, ensure_ascii=False)
+        if not user_content or user_content.strip() == "":
+            logger.error("fetch_response: prompt vacío o None; evitando llamada al modelo.")
+            return ""
         res = client.chat.completions.create(
             model=model,
             messages=[
@@ -50,7 +54,7 @@ def fetch_response(
                         "(cine, videojuegos, animación, producción). Prioriza exactitud, JSON válido y contexto de negocio."
                     ),
                 },
-                {"role": "user", "content": prompt},
+                {"role": "user", "content": user_content},
             ],
             temperature=temperature,
             max_tokens=max_tokens,
@@ -126,11 +130,24 @@ def fetch_response_with_metadata(
     Igual que fetch_response pero además devuelve metadatos útiles para observabilidad.
     """
     try:
+        user_content = prompt if isinstance(prompt, str) else json.dumps(prompt, ensure_ascii=False)
+        if not user_content or user_content.strip() == "":
+            logger.error("fetch_response_with_metadata: prompt vacío o None; evitando llamada al modelo.")
+            return "", {
+                "model_name": model,
+                "api_status_code": 400,
+                "engine_request_id": None,
+                "input_tokens": None,
+                "output_tokens": None,
+                "price_usd": None,
+                "error_category": "client_error",
+                "error": "empty_prompt",
+            }
         res = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": "Eres un asistente útil. Sigue exactamente las instrucciones del usuario."},
-                {"role": "user", "content": prompt},
+                {"role": "user", "content": user_content},
             ],
             temperature=temperature,
             max_tokens=max_tokens,

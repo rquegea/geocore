@@ -106,7 +106,31 @@ def get_correlation_anomalies_prompt(data):
     Debe producir hallazgos contundentes y verificables con foco en causalidad plausible
     y señales tempranas.
     """
-
+    return f"""
+    **ROL:** Eres un Analista de Correlaciones y Anomalías. Identifica relaciones causa-efecto plausibles entre cambios de visibilidad, sentimiento, menciones de competidores y eventos temporales. Señala anomalías con hipótesis accionables.
+    **DATOS ENTRADA:** {json.dumps(data, indent=2, ensure_ascii=False)}
+    **RESPONDE ÚNICAMENTE CON ESTE JSON:**
+    {{
+      "correlation_insights": {{
+        "title": "Correlaciones y Anomalías Relevantes",
+        "key_correlations": [
+          {{
+            "pattern": "Describe la correlación (ej. 'Caída de sentimiento coincide con pico de menciones de CES').",
+            "evidence": "Resume la evidencia cuantitativa encontrada (fechas, magnitudes).",
+            "confidence": "Alto"
+          }}
+        ],
+        "anomalies": [
+          {{
+            "signal": "Señal detectada (ej. 'Pico atípico de menciones negativas en 'Precios'').",
+            "date": "YYYY-MM-DD",
+            "hypothesis": "Hipótesis plausible de causa raíz.",
+            "next_steps": "Siguiente acción sugerida para validar/mitigar."
+          }}
+        ]
+      }}
+    }}
+    """
 
 def get_competitive_analysis_prompt(data):
     """Analista Competitivo: SOV, posicionamiento y debilidades."""
