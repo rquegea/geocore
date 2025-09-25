@@ -13,6 +13,52 @@ class ReportPDF(FPDF):
         self.set_font("Helvetica", size=8)
         self.cell(0, 10, f"Página {self.page_no()}", 0, 0, "C")
 
+    # --- Nueva tabla de Oportunidades Competitivas ---
+    def write_competitive_opportunities_table(self, opportunities_data: List[Dict[str, str]]):
+        if not opportunities_data:
+            return
+        self.add_page()
+        self.set_font("Helvetica", "B", 14)
+        self.cell(0, 10, "Análisis de Contenido Competitivo y Oportunidades", 0, 1, "C")
+        self.ln(3)
+
+        headers = ["Competidor", "Debilidad Detectada", "#", "Acción de Contenido"]
+        col_widths = [40, 60, 12, 78]
+
+        self.set_font("Helvetica", "B", 9)
+        self.set_fill_color(230, 230, 230)
+        for h, w in zip(headers, col_widths):
+            self.cell(w, 7, _sanitize(h), 1, 0, 'C', True)
+        self.ln()
+
+        self.set_font("Helvetica", size=9)
+        for row in opportunities_data:
+            comp = _sanitize(str(row.get("Competidor", "")))
+            topic = _sanitize(str(row.get("Debilidad Detectada", "")))
+            count = _sanitize(str(row.get("#", "")))
+            action = _sanitize(str(row.get("Acción de Contenido", "")))
+
+            x, y = self.get_x(), self.get_y()
+            h = 6
+            # Competidor
+            self.multi_cell(col_widths[0], h, comp, border=1)
+            x1 = self.get_x(); y1 = self.get_y()
+            self.set_xy(x + col_widths[0], y)
+            # Debilidad
+            self.multi_cell(col_widths[1], h, topic, border=1)
+            x2 = self.get_x(); y2 = self.get_y()
+            self.set_xy(x + col_widths[0] + col_widths[1], y)
+            # Conteo
+            self.multi_cell(col_widths[2], h, count, border=1, align='C')
+            x3 = self.get_x(); y3 = self.get_y()
+            self.set_xy(x + col_widths[0] + col_widths[1] + col_widths[2], y)
+            # Acción
+            self.multi_cell(col_widths[3], h, action, border=1)
+            y4 = self.get_y()
+            # Ajustar a la mayor altura
+            max_y = max(y1, y2, y3, y4)
+            self.set_xy(x, max_y)
+
 
 def _sanitize(text: str) -> str:
     """Convierte comillas curvas y otros caracteres Unicode comunes a ASCII apto para Helvetica.
@@ -196,6 +242,18 @@ def build_pdf(content: Dict) -> bytes:
     # Página 1: Dashboard Ejecutivo (2 columnas)
     pdf.add_page()
     add_title(pdf, content.get("title") or "Dashboard Ejecutivo")
+    # Titular y bullets clave si existen
+    strategic = content.get("strategic", {}) if isinstance(content.get("strategic"), dict) else {}
+    headline = (strategic.get("headline") or "").strip()
+    key_points = strategic.get("key_findings") or []
+    if headline:
+        pdf.set_font("Helvetica", "B", 13)
+        pdf.multi_cell(0, 7, _sanitize(headline))
+        pdf.ln(2)
+    if key_points:
+        pdf.set_font("Helvetica", size=10)
+        for kp in key_points[:4]:
+            add_paragraph(pdf, f"- {kp}")
     page_width = pdf.w - 2 * pdf.l_margin
     col_w = page_width / 2.0
     y0 = pdf.get_y()
@@ -235,6 +293,11 @@ def build_pdf(content: Dict) -> bytes:
             pdf.image(img_tb, w=col_w - 6)
         except Exception:
             pass
+
+    # Tabla detallada de oportunidades competitivas (si existe)
+    opps = content.get("competitive_opportunities") or []
+    if opps:
+        pdf.write_competitive_opportunities_table(opps)
 
     # Página 3+: Clusters
     clusters = content.get("clusters") or []

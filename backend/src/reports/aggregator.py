@@ -15,6 +15,7 @@ try:
     from sklearn.cluster import KMeans
 except Exception:  # pragma: no cover
     KMeans = None  # type: ignore
+from src.engines.openai_engine import fetch_response
 
 
 def _db_url() -> str:
@@ -644,6 +645,21 @@ def get_full_report_data(
         # Clusters
         clusters = aggregate_clusters_for_report(session, project_id, start_date=start_date, end_date=end_date, max_rows=max_rows)
 
+        # Oportunidades competitivas (tabla)
+        def _resolve_main_brand(sess: Session, pid: int) -> str:
+            row = sess.execute(text("SELECT COALESCE(brand, topic, 'Unknown') FROM queries WHERE id=:pid"), {"pid": pid}).first()
+            return str(row[0]) if row and row[0] is not None else "Unknown"
+
+        main_brand = _resolve_main_brand(session, project_id)
+        competitive_opps = get_competitive_opportunities(
+            session,
+            project_id,
+            start_date=start_date or "1970-01-01",
+            end_date=end_date or "2999-12-31",
+            main_brand=main_brand,
+            top_n=10,
+        )
+
         return {
             "project_id": project_id,
             "kpis": kpis,
@@ -655,6 +671,80 @@ def get_full_report_data(
             "topics_bottom5": bottom5,
             "sov": sov_trends,
             "clusters": clusters,
+            "competitive_opportunities": competitive_opps,
         }
     finally:
         session.close()
+
+
+def get_competitive_opportunities(
+    session: Session,
+    project_id: int,
+    *,
+    start_date: str,
+    end_date: str,
+    main_brand: str,
+    top_n: int = 10,
+) -> List[Dict[str, Any]]:
+    """
+    Detecta oportunidades competitivas: temas donde los competidores (no la marca principal)
+    tienen presencia significativa, y genera una acción de contenido para capitalizarlas.
+    """
+    sql = text(
+        """
+        SELECT
+          COALESCE(q.brand, q.topic, 'Unknown') AS brand_name,
+          COALESCE((i.payload->>'category'), COALESCE(q.category, q.topic, 'Desconocida')) AS topic,
+          COUNT(*) AS mention_count
+        FROM mentions m
+        JOIN queries q ON q.id = m.query_id
+        LEFT JOIN insights i ON i.id = m.generated_insight_id
+        WHERE q.id = :project_id
+          AND m.created_at >= CAST(:start_date AS date)
+          AND m.created_at < (CAST(:end_date AS date) + INTERVAL '1 day')
+        GROUP BY 1, 2
+        ORDER BY mention_count DESC
+        LIMIT 50
+        """
+    )
+    rows = session.execute(sql, {
+        "project_id": int(project_id),
+        "start_date": start_date,
+        "end_date": end_date,
+    }).mappings().all()
+
+    candidates: List[Dict[str, Any]] = []
+    for r in rows:
+        brand_name = str(r.get("brand_name") or "Unknown")
+        if brand_name == (main_brand or "Unknown"):
+            continue
+        topic = str(r.get("topic") or "Desconocida")
+        cnt = int(r.get("mention_count") or 0)
+        candidates.append({"Competidor": brand_name, "Debilidad Detectada": topic, "#": cnt})
+
+    # Top N por conteo
+    candidates.sort(key=lambda x: x.get("#", 0), reverse=True)
+    selected = candidates[:max(1, min(top_n, len(candidates)))]
+
+    # Generar acción de contenido con IA
+    enriched: List[Dict[str, Any]] = []
+    for item in selected:
+        competitor = item["Competidor"]
+        weakness_topic = item["Debilidad Detectada"]
+        prompt = (
+            f"Eres un estratega de contenidos. Un competidor llamado '{competitor}' tiene fuerte presencia en el tema "
+            f"'{weakness_topic}'. Propón una acción de contenido concreta para que '{main_brand}' capitalice esta situación. "
+            f"Devuelve una única idea en una frase, clara y accionable."
+        )
+        try:
+            idea = fetch_response(prompt, model="gpt-4o-mini", temperature=0.3, max_tokens=80)
+        except Exception:
+            idea = ""  # Fallback silencioso
+        enriched.append({
+            "Competidor": competitor,
+            "Debilidad Detectada": weakness_topic,
+            "#": item["#"],
+            "Acción de Contenido": (idea or "Producir una pieza diferenciadora enfocado en el tema.").strip(),
+        })
+
+    return enriched
