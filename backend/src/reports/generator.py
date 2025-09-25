@@ -29,11 +29,15 @@ def _build_executive_summary_text(kpis: Dict) -> str:
 
 
 def generate_report(project_id: int) -> bytes:
-    # 1) Agregación de datos desde BD
-    kpis = aggregator.get_kpi_summary(project_id)
-    evo = aggregator.get_sentiment_evolution(project_id)
-    by_cat = aggregator.get_sentiment_by_category(project_id)
-    top5, bottom5 = aggregator.get_topics_by_sentiment(project_id)
+    # 1) Agregación de datos desde BD (sesión explícita)
+    session = aggregator.get_session()
+    try:
+        kpis = aggregator.get_kpi_summary(session, project_id)
+        evo = aggregator.get_sentiment_evolution(session, project_id)
+        by_cat = aggregator.get_sentiment_by_category(session, project_id)
+        top5, bottom5 = aggregator.get_topics_by_sentiment(session, project_id)
+    finally:
+        session.close()
 
     # 2) Gráficos
     images = {
