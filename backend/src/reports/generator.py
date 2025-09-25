@@ -1,8 +1,10 @@
-from typing import Dict, List
+from typing import Dict, List, Any
 
 from . import aggregator
 from . import plotter
 from . import pdf_writer
+from ..engines.openai_engine import fetch_response
+from ..engines import strategic_prompts as s_prompts
 
 
 def _build_kpi_rows(kpis: Dict) -> List[List[str]]:
@@ -14,116 +16,170 @@ def _build_kpi_rows(kpis: Dict) -> List[List[str]]:
     ]
 
 
-def _build_executive_summary_text(kpis: Dict) -> str:
-    tm = int(kpis.get("total_mentions", 0) or 0)
-    s = float(kpis.get("sentiment_avg", 0.0) or 0.0)
-    sov = float(kpis.get("sov", 0.0) or 0.0)
-    brand = kpis.get("brand_name", "La marca")
-    tono = "positivo" if s > 0.2 else ("neutral" if -0.2 <= s <= 0.2 else "negativo")
-    return (
-        f"{brand} acumuló {tm} menciones en el periodo. El tono agregado fue {tono} (\n"
-        f"sentimiento medio {s:.2f}). En cuota de conversación, registra un SOV del {sov:.1f}% respecto\n"
-        f"al conjunto de marcas analizadas. Se recomienda reforzar contenidos en los temas con\n"
-        f"sentimiento positivo alto y abordar los de menor desempeño."
-    )
+def _extract_insights_to_json(aggregated: Dict[str, Any]) -> Dict[str, Any]:
+    prompt = s_prompts.get_insight_extraction_prompt(aggregated)
+    raw = fetch_response(prompt, model="gpt-4o", temperature=0.2, max_tokens=2048)
+    if not raw:
+        return {}
+    try:
+        text = raw.strip()
+        if text.startswith("```json"):
+            text = text[len("```json"):].strip()
+            if text.endswith("```"):
+                text = text[:-3].strip()
+        import json
+        data = json.loads(text)
+        # Normalizar claves a las esperadas por el generador estratégico
+        return {
+            "executive_summary_points": data.get("key_findings", [])[:3] if isinstance(data.get("key_findings"), list) else [],
+            "key_findings": data.get("key_findings", []),
+            "opportunities": data.get("opportunities", []),
+            "risks": data.get("risks", []),
+            "strategic_recommendations": data.get("recommendations", []),
+        }
+    except Exception:
+        return {}
+
+
+def _generate_strategic_content(insights_json: Dict[str, Any], aggregated: Dict[str, Any]) -> Dict[str, str]:
+    sections: Dict[str, str] = {}
+    # Resumen ejecutivo (a partir de KPIs enriquecidos)
+    try:
+        exec_prompt = s_prompts.get_executive_summary_prompt(aggregated)
+        sections["executive_summary"] = fetch_response(exec_prompt, model="gpt-4o", temperature=0.3, max_tokens=900)
+    except Exception:
+        sections["executive_summary"] = ""
+    # Plan de acción estratégico
+    try:
+        plan_prompt = s_prompts.get_strategic_plan_prompt({
+            "opportunities": insights_json.get("opportunities", []),
+            "risks": insights_json.get("risks", []),
+            "recommendations": insights_json.get("strategic_recommendations", []),
+        })
+        sections["action_plan"] = fetch_response(plan_prompt, model="gpt-4o", temperature=0.3, max_tokens=1100)
+    except Exception:
+        sections["action_plan"] = ""
+    return sections
 
 
 def generate_report(project_id: int) -> bytes:
-    # 1) Agregación de datos desde BD (sesión explícita)
+    # 1) Agregación mejorada (KPIs + SOV + tendencias)
     session = aggregator.get_session()
     try:
         kpis = aggregator.get_kpi_summary(session, project_id)
         evo = aggregator.get_sentiment_evolution(session, project_id)
         by_cat = aggregator.get_sentiment_by_category(session, project_id)
         top5, bottom5 = aggregator.get_topics_by_sentiment(session, project_id)
+        # Intento de SOV/trends adicional (sin fechas explícitas)
+        sov_trends = aggregator.get_share_of_voice_and_trends(session, project_id)
     finally:
         session.close()
 
-    # 2) Gráficos
+    # 2) Preparar estructura agregada para IA estratégica
+    aggregated: Dict[str, Any] = {
+        "kpis": {
+            "total_mentions": kpis.get("total_mentions"),
+            "average_sentiment": kpis.get("sentiment_avg"),
+            "share_of_voice": kpis.get("sov"),
+            "sov_by_category": sov_trends.get("current", {}).get("sov_by_category", {}),
+            "competitor_mentions": sov_trends.get("current", {}).get("competitor_mentions", {}),
+        },
+        "client_name": kpis.get("brand_name"),
+        "time_series": {
+            "sentiment_per_day": [{"date": d, "average": s} for d, s in evo],
+        },
+        "trends": sov_trends.get("trends", {}),
+    }
+
+    # 3) Extracción de insights (JSON)
+    insights_json = _extract_insights_to_json(aggregated)
+
+    # 4) Contenido estratégico narrativo
+    strategic_sections = _generate_strategic_content(insights_json, aggregated)
+
+    # 5) Gráficos existentes
     images = {
         "sentiment_evolution": plotter.plot_sentiment_evolution(evo),
         "sentiment_by_category": plotter.plot_sentiment_by_category(by_cat),
         "topics_top_bottom": plotter.plot_topics_top_bottom(top5, bottom5),
-        # Para el SOV usamos el reparto de cuentas por marca; el pie reflejará % automáticamente
         "sov_pie": plotter.plot_sov_pie([(name, cnt) for name, cnt in kpis.get("sov_table", [])[:6]]),
     }
 
-    # 3) Construcción del PDF sección por sección
-    kpi_rows = _build_kpi_rows(kpis)
-    executive_summary = _build_executive_summary_text(kpis)
+    # 6) Construcción de PDF priorizando contenido estratégico + anexo visual
+    content_for_pdf: Dict[str, Any] = {
+        "strategic": strategic_sections,
+        "kpi_rows": _build_kpi_rows(kpis),
+        "images": images,
+        "annex": {
+            "evolution_text": "",
+            "category_text": "",
+            "topics_text": "",
+        },
+    }
 
-    # Insights explicativos
-    evo_text = ""
-    if evo:
-        try:
+    # Textos analíticos breves para el anexo
+    try:
+        if evo:
             first_s = evo[0][1]
             last_s = evo[-1][1]
             delta = last_s - first_s
             trend_word = "mejora" if delta > 0.05 else ("empeora" if delta < -0.05 else "se mantiene estable")
             min_day, min_val = min(evo, key=lambda x: x[1])
             max_day, max_val = max(evo, key=lambda x: x[1])
-            evo_text = (
-                f"El sentimiento {trend_word} a lo largo del periodo (Δ={delta:.2f}). "
-                f"Mínimo en {min_day} ({min_val:.2f}) y máximo en {max_day} ({max_val:.2f})."
+            content_for_pdf["annex"]["evolution_text"] = (
+                f"El sentimiento {trend_word} (Δ={delta:.2f}). Mínimo en {min_day} ({min_val:.2f}) y máximo en {max_day} ({max_val:.2f})."
             )
-        except Exception:
-            evo_text = "Resumen no disponible por datos insuficientes."
-
-    cat_text = ""
-    if by_cat:
-        try:
+    except Exception:
+        pass
+    try:
+        if by_cat:
             best_cat, best_v = max(by_cat.items(), key=lambda x: x[1])
             worst_cat, worst_v = min(by_cat.items(), key=lambda x: x[1])
-            cat_text = (
-                f"Mejor categoría: {best_cat} ({best_v:.2f}). "
-                f"Peor categoría: {worst_cat} ({worst_v:.2f}). "
-                f"Priorizar comunicación en fortalezas y mitigar debilidades."
+            content_for_pdf["annex"]["category_text"] = (
+                f"Mejor categoría: {best_cat} ({best_v:.2f}). Peor: {worst_cat} ({worst_v:.2f})."
             )
-        except Exception:
-            cat_text = ""
-
-    topics_text = ""
-    if top5 or bottom5:
-        try:
+    except Exception:
+        pass
+    try:
+        if top5 or bottom5:
             top_str = ", ".join([f"{t} ({v:.2f})" for t, v in top5])
             bot_str = ", ".join([f"{t} ({v:.2f})" for t, v in bottom5])
-            topics_text = (
-                f"Temas con mayor sentimiento: {top_str}.\n"
-                f"Temas con menor sentimiento: {bot_str}."
+            content_for_pdf["annex"]["topics_text"] = (
+                f"Top temas: {top_str}. Bottom: {bot_str}."
             )
-        except Exception:
-            topics_text = ""
+    except Exception:
+        pass
 
+    # 7) Renderizado final
     pdf = pdf_writer.ReportPDF(orientation="P", unit="mm", format="A4")
     pdf.set_auto_page_break(auto=True, margin=12)
     pdf.add_page()
 
-    # Portada / Título
-    pdf_writer.add_title(pdf, "Informe de Inteligencia Estratégica")
-    pdf_writer.add_paragraph(pdf, executive_summary)
+    # Secciones estratégicas
+    pdf_writer.add_title(pdf, "Resumen Ejecutivo")
+    pdf_writer.add_paragraph(pdf, strategic_sections.get("executive_summary", ""))
+
+    pdf_writer.add_title(pdf, "Plan de Acción Estratégico")
+    pdf_writer.add_paragraph(pdf, strategic_sections.get("action_plan", ""))
 
     # KPIs y SOV
     pdf_writer.add_title(pdf, "KPIs Principales y Share of Voice")
-    pdf_writer.add_table(pdf, kpi_rows)
+    pdf_writer.add_table(pdf, content_for_pdf["kpi_rows"])
     pdf_writer.add_image(pdf, images.get("sov_pie"))
 
-    # Análisis de Sentimiento Global
-    pdf_writer.add_title(pdf, "Análisis de Sentimiento Global")
+    # Anexo
+    pdf_writer.add_title(pdf, "Anexo: Análisis Detallado y Visualizaciones")
     pdf_writer.add_image(pdf, images.get("sentiment_evolution"))
-    if evo_text:
-        pdf_writer.add_paragraph(pdf, evo_text)
+    if content_for_pdf["annex"].get("evolution_text"):
+        pdf_writer.add_paragraph(pdf, content_for_pdf["annex"]["evolution_text"])
 
-    # Desglose por Categoría
-    pdf_writer.add_title(pdf, "Análisis por Categoría")
     pdf_writer.add_image(pdf, images.get("sentiment_by_category"))
-    if cat_text:
-        pdf_writer.add_paragraph(pdf, cat_text)
+    if content_for_pdf["annex"].get("category_text"):
+        pdf_writer.add_paragraph(pdf, content_for_pdf["annex"]["category_text"])
 
-    # Temas Relevantes (Top/Bottom)
-    pdf_writer.add_title(pdf, "Temas Relevantes")
     pdf_writer.add_image(pdf, images.get("topics_top_bottom"))
-    if topics_text:
-        pdf_writer.add_paragraph(pdf, topics_text)
+    if content_for_pdf["annex"].get("topics_text"):
+        pdf_writer.add_paragraph(pdf, content_for_pdf["annex"]["topics_text"])
 
     return bytes(pdf.output(dest="S").encode("latin-1"))
 

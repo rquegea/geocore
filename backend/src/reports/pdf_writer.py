@@ -53,22 +53,29 @@ def build_pdf(content: Dict) -> bytes:
     pdf.set_auto_page_break(auto=True, margin=12)
     pdf.add_page()
 
+    # Encabezado
     title = content.get("title") or "Informe de Inteligencia Estratégica"
     add_title(pdf, title)
-    add_paragraph(pdf, content.get("summary") or "")
 
-    add_title(pdf, "Evolución del Sentimiento")
-    add_image(pdf, content.get("images", {}).get("sentiment_evolution"))
+    # 1) Contenido estratégico primero
+    strategic = content.get("strategic", {}) if isinstance(content.get("strategic"), dict) else {}
+    if strategic.get("executive_summary"):
+        add_title(pdf, "Resumen Ejecutivo")
+        add_paragraph(pdf, strategic.get("executive_summary", ""))
+    if strategic.get("action_plan"):
+        add_title(pdf, "Plan de Acción Estratégico")
+        add_paragraph(pdf, strategic.get("action_plan", ""))
 
-    add_title(pdf, "Sentimiento por Categoría")
-    add_image(pdf, content.get("images", {}).get("sentiment_by_category"))
-
-    add_title(pdf, "Temas por Sentimiento")
-    add_image(pdf, content.get("images", {}).get("topics_top_bottom"))
-
-    add_title(pdf, "KPIs y Share of Voice")
+    # 2) KPIs y SOV
+    add_title(pdf, "KPIs Principales y Share of Voice")
     add_table(pdf, content.get("kpi_rows") or [])
     add_image(pdf, content.get("images", {}).get("sov_pie"))
+
+    # 3) Anexo: visualizaciones y análisis detallado
+    add_title(pdf, "Anexo: Análisis Detallado y Visualizaciones")
+    add_image(pdf, content.get("images", {}).get("sentiment_evolution"))
+    add_image(pdf, content.get("images", {}).get("sentiment_by_category"))
+    add_image(pdf, content.get("images", {}).get("topics_top_bottom"))
 
     return bytes(pdf.output(dest="S").encode("latin-1"))
 

@@ -1236,7 +1236,7 @@ def _create_pdf_report_consulting(content, data):
         k = data.get('kpis', {})
         table_data = [
             ["KPI", "Valor"],
-            ["Visibilidad (%)", f"{k.get('visibility_score', 0):.1f}"],
+            ["Visibilidad (%)", f"{k.get('visibility_score', 0):.1f}%"],
             ["Δ Visibilidad", f"{k.get('visibility_delta', 0):+.1f} pts"],
             ["Sentimiento", f"{k.get('sentiment_avg', 0):.2f}"],
             ["SOV líder", f"{k.get('sov_score', 0):.1f}%"],
