@@ -4291,28 +4291,37 @@ def generate_report_endpoint():
 
         aggregated_data = _aggregate_data_for_report(filters)
 
-        # ===== Deep Research (dos capas) =====
-        # Capa 1: Estratega → identificar 3-4 temas críticos a partir de KPIs/series
-        try:
-            strategist_prompt = (
-                "Eres un Estratega Senior. A partir de los datos agregados, identifica una lista de 3-4 'temas críticos' "
-                "(oportunidad mayor, riesgo mayor, mejor sentimiento, peor sentimiento). "
-                "Devuelve SOLO un JSON con: {\"temas\":[\"tema1\",\"tema2\",...]}"
-            )
-            from src.engines.openai_engine import fetch_response_with_metadata
-            import json as _json
-            s_topics_raw, s_topics_meta = fetch_response_with_metadata(
-                strategist_prompt + "\n\nDATOS:\n" + _json.dumps(aggregated_data, ensure_ascii=False),
-                model="gpt-4o"
-            )
-            _log_ai_call('strategist_topics', strategist_prompt, s_topics_raw, s_topics_meta)
-            try:
-                cleaned = _clean_model_json(s_topics_raw) or {}
-                temas_criticos = list((cleaned or {}).get('temas') or [])[:4]
-            except Exception:
-                temas_criticos = []
-        except Exception:
-            temas_criticos = []
+        # ===== Nuevo: Analista Principal (sustituye Estratega) =====
+        # Genera narrativa y decide los 3 temas de deep dive en una única llamada
+        from src.engines.openai_engine import fetch_response_with_metadata
+        from src.engines.strategic_prompts import get_main_analyst_prompt
+        main_prompt = get_main_analyst_prompt(aggregated_data)
+        main_raw, main_meta = fetch_response_with_metadata(main_prompt, model="gpt-4o")
+        _log_ai_call('main_analyst', main_prompt, main_raw, main_meta)
+        main_json = _clean_model_json(main_raw) or {}
+        informe = (main_json.get('informe') or {}) if isinstance(main_json, dict) else {}
+        # Mapear a las estructuras usadas por el PDF consultoría
+        summary_content = {
+            'executive_summary': {
+                'title': '1. Resumen Ejecutivo',
+                'headline': informe.get('headline') or '',
+                'key_findings': [],
+                'overall_assessment': informe.get('evaluacion_general') or ''
+            }
+        }
+        deep_content = {
+            'deep_dive_analysis': {
+                'title': 'Análisis Profundo',
+                'visibility_by_model': '',
+                'visibility_by_topic': '',
+                'sentiment_comparison': '',
+            }
+        }
+        # Insertar el análisis extenso como parte del executive_summary.overall_assessment si existe
+        if informe.get('analisis_profundo'):
+            summary_content['executive_summary']['overall_assessment'] += ("\n\n" + str(informe.get('analisis_profundo')))
+        # Temas para la capa 2
+        temas_criticos = list((main_json.get('deep_dive_temas') or [])[:3]) if isinstance(main_json, dict) else []
 
         # Capa 2: Investigador → deep dive por cada tema crítico sobre menciones completas
         deep_dives = []
@@ -4335,17 +4344,7 @@ def generate_report_endpoint():
 
         aggregated_data.setdefault('deep_dives', deep_dives)
 
-        # --- Cadena de Analistas Virtuales (versión final) ---
-        # Pasamos el corpus para que los prompts puedan incorporar citas breves
-        summary_prompt = get_executive_summary_prompt(aggregated_data)
-        s_raw, s_meta = fetch_response_with_metadata(summary_prompt, model="gpt-4o")
-        _log_ai_call('executive_summary', summary_prompt, s_raw, s_meta)
-        summary_content = _clean_model_json(s_raw) or {}
-
-        deep_prompt = get_deep_dive_analysis_prompt(aggregated_data)
-        d_raw, d_meta = fetch_response_with_metadata(deep_prompt, model="gpt-4o")
-        _log_ai_call('deep_dive', deep_prompt, d_raw, d_meta)
-        deep_content = _clean_model_json(d_raw) or {}
+        # --- La narrativa principal ya viene del Analista Principal ---
 
         # --- NUEVO: Analista Competitivo ---
         comp_prompt = get_competitive_analysis_prompt(aggregated_data)

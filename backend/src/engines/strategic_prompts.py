@@ -35,6 +35,47 @@ def get_detailed_category_prompt(category_name: str, category_data: list, all_su
     return prompt
 
 
+def get_main_analyst_prompt(aggregated_data: dict) -> str:
+    """
+    Prompt del Analista Principal (Capa 1 unificada): integra KPIs + texto para producir
+    un único JSON con narrativa y selección de 3 temas para deep dive.
+
+    Salida esperada (JSON estricto, sin markdown):
+    {
+      "informe": {
+        "headline": "...",
+        "evaluacion_general": "...",
+        "analisis_profundo": "..."
+      },
+      "deep_dive_temas": ["tema 1", "tema 2", "tema 3"]
+    }
+    """
+    data_json = json.dumps(aggregated_data, ensure_ascii=False, indent=2, default=str)
+    return (
+        "Actúa como Analista Principal (Chief Insights Analyst) especializado en educación superior. "
+        "Tu misión es LEER y RAZONAR sobre todos los datos cuantitativos y cualitativos disponibles "
+        "para redactar la narrativa ejecutiva del informe y decidir los 3 temas más importantes para investigar en profundidad.\n\n"
+        "INSTRUCCIONES CLAVE:\n"
+        "1) Integra KPIs (tendencias, SOV, sentimiento) con temas positivos/negativos y competidores.\n"
+        "2) Explica causas probables (el porqué) de los patrones observados; sé específico y profesional.\n"
+        "3) Selecciona 3 temas para deep dive que aporten máxima validación con menciones en bruto. Prioriza impacto de negocio.\n"
+        "4) Responde EXCLUSIVAMENTE con el JSON pedido. SIN markdown, SIN comentarios, SIN texto adicional.\n\n"
+        "DATOS PARA ANALIZAR (JSON):\n"
+        f"{data_json}\n\n"
+        "FORMATO DE SALIDA (JSON ESTRICTO):\n"
+        "{\n"
+        "  \"informe\": {\n"
+        "    \"headline\": \"Titular conciso que conecte dato + porqué\",\n"
+        "    \"evaluacion_general\": \"Evaluación ejecutiva clara del periodo (qué pasó y por qué).\",\n"
+        "    \"analisis_profundo\": \"Narrativa de 2-4 párrafos conectando KPIs con temas, competidores y citas.\"\n"
+        "  },\n"
+        "  \"deep_dive_temas\": [\n"
+        "    \"Tema 1\", \"Tema 2\", \"Tema 3\"\n"
+        "  ]\n"
+        "}"
+    )
+
+
 def get_insight_extraction_prompt(aggregated_data: dict) -> str:
     data_json = json.dumps(aggregated_data, ensure_ascii=False, default=str)
     return (
