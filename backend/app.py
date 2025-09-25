@@ -317,7 +317,7 @@ def _aggregate_data_for_report_db(filters):
     if source and source != 'all':
         where.append("m.source = %s"); params.append(source)
     if topic and topic != 'all':
-        where.append("q.topic = %s"); params.append(topic)
+        where.append("COALESCE(q.category, q.topic) = %s"); params.append(topic)
     if category and category != 'all':
         where.append("q.category = %s"); params.append(category)
     if client_id:
@@ -435,7 +435,7 @@ def _aggregate_data_for_report_db(filters):
     where_i = ["i.created_at >= %s AND i.created_at < %s"]
     params_i = [start_dt, end_dt]
     if topic and topic != 'all':
-        where_i.append("q.topic = %s"); params_i.append(topic)
+        where_i.append("COALESCE(q.category, q.topic) = %s"); params_i.append(topic)
     if category and category != 'all':
         where_i.append("q.category = %s"); params_i.append(category)
     if client_id:
@@ -2729,7 +2729,7 @@ def get_mentions():
             where_clauses.append("m.source = %s")
             params.append(filters['source'])
         if filters.get('topic') and filters['topic'] != 'all':
-            where_clauses.append("q.topic = %s")
+            where_clauses.append("COALESCE(q.category, q.topic) = %s")
             params.append(filters['topic'])
         # status filter (default active)
         if filters.get('status') and filters['status'] != 'all':
@@ -2803,7 +2803,7 @@ def get_visibility():
         if filters.get('source') and filters['source'] != 'all':
             where.append("m.source = %s"); params.append(filters['source'])
         if filters.get('topic') and filters['topic'] != 'all':
-            where.append("q.topic = %s"); params.append(filters['topic'])
+            where.append("COALESCE(q.category, q.topic) = %s"); params.append(filters['topic'])
         where_sql = " AND ".join(where)
 
         synonyms = [s.lower() for s in BRAND_SYNONYMS.get(brand, [brand.lower()])]
@@ -2946,7 +2946,7 @@ def get_visibility_ranking():
             where.append("m.source = %s"); params.append(filters['source'])
         # Filtro directo por topic (desde queries)
         if filters.get('topic') and filters['topic'] != 'all':
-            where.append("q.topic = %s"); params.append(filters['topic'])
+            where.append("COALESCE(q.category, q.topic) = %s"); params.append(filters['topic'])
         where_sql = " AND ".join(where)
 
         # Helper: trae payloads de insights para el rango indicado
@@ -3571,17 +3571,21 @@ def get_dashboard_kpis():
 def get_topics():
     """Lista de temas (topics) de las queries configuradas."""
     try:
-        # Siempre derivar los topics a partir de lo que realmente existe en BD (fuente de verdad)
-        # para garantizar que los filtros tengan resultados incluso si hay una taxonomía
-        # diferente (por ejemplo etiquetas en español).
+        # Fuente de verdad dinámica: DISTINCT COALESCE(category, topic) desde queries
         conn = get_db_connection(); cur = conn.cursor()
-        # Devolver tanto topics (compat) como categories nuevas
-        cur.execute("SELECT COALESCE(category, topic) FROM queries WHERE enabled = TRUE AND COALESCE(category, topic) <> ''")
-        raw_topics = [row[0] for row in cur.fetchall()]
+        cur.execute(
+            """
+            SELECT DISTINCT TRIM(COALESCE(category, topic)) AS topic
+            FROM queries
+            WHERE enabled = TRUE
+              AND COALESCE(category, topic) IS NOT NULL
+              AND TRIM(COALESCE(category, topic)) <> ''
+            ORDER BY topic
+            """
+        )
+        topics = [row[0] for row in cur.fetchall()]
         cur.close(); conn.close()
 
-        # Devolver directamente los topics únicos tal y como están en BD
-        topics = sorted(list({t for t in raw_topics}))
         return jsonify({"topics": topics})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
