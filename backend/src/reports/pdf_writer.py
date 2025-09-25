@@ -14,15 +14,42 @@ class ReportPDF(FPDF):
         self.cell(0, 10, f"Página {self.page_no()}", 0, 0, "C")
 
 
+def _sanitize(text: str) -> str:
+    """Convierte comillas curvas y otros caracteres Unicode comunes a ASCII apto para Helvetica.
+    Elimina caracteres fuera de latin-1 para evitar FPDFUnicodeEncodingException.
+    """
+    if not isinstance(text, str):
+        text = str(text)
+    # Reemplazos comunes
+    replacements = {
+        "“": '"',  # U+201C
+        "”": '"',  # U+201D
+        "‘": "'",  # U+2018
+        "’": "'",  # U+2019
+        "–": "-",   # U+2013
+        "—": "-",   # U+2014
+        "…": "...", # U+2026
+        "\xa0": " ",  # NBSP
+        "•": "- ",
+    }
+    for k, v in replacements.items():
+        text = text.replace(k, v)
+    try:
+        text = text.encode("latin-1", errors="ignore").decode("latin-1")
+    except Exception:
+        pass
+    return text
+
+
 def add_title(pdf: ReportPDF, text: str):
     pdf.set_font("Helvetica", "B", 16)
-    pdf.cell(0, 10, text, 0, 1, "L")
+    pdf.cell(0, 10, _sanitize(text), 0, 1, "L")
     pdf.ln(2)
 
 
 def add_paragraph(pdf: ReportPDF, text: str):
     pdf.set_font("Helvetica", size=11)
-    pdf.multi_cell(0, 6, text)
+    pdf.multi_cell(0, 6, _sanitize(text))
     pdf.ln(1)
 
 
@@ -43,7 +70,7 @@ def add_table(pdf: ReportPDF, rows: List[List[str]]):
     pdf.set_font("Helvetica", size=10)
     for r_idx, row in enumerate(rows):
         for i, cell in enumerate(row):
-            pdf.multi_cell(col_widths[i], 6, str(cell), border=1, ln=3, max_line_height=pdf.font_size)
+            pdf.multi_cell(col_widths[i], 6, _sanitize(str(cell)), border=1, ln=3, max_line_height=pdf.font_size)
         pdf.ln(0)
     pdf.ln(3)
 
@@ -151,9 +178,16 @@ def build_strategic_pdf(
         if isinstance(citas, list) and citas:
             add_title(pdf, "Citas destacadas")
             for c in citas[:8]:
-                add_paragraph(pdf, f"\u201C{str(c)}\u201D")
+                add_paragraph(pdf, '"' + _sanitize(str(c)) + '"')
 
-    return bytes(pdf.output(dest="S").encode("latin-1"))
+    # fpdf2 puede devolver bytearray cuando dest="S"; convertir de forma segura a bytes
+    out = pdf.output(dest="S")
+    if isinstance(out, (bytes, bytearray)):
+        return bytes(out)
+    try:
+        return bytes(str(out).encode("latin-1"))
+    except Exception:
+        return bytes(str(out).encode("utf-8", errors="ignore"))
 
 def build_pdf(content: Dict) -> bytes:
     pdf = ReportPDF(orientation="P", unit="mm", format="A4")
@@ -211,6 +245,12 @@ def build_pdf(content: Dict) -> bytes:
             except Exception:
                 continue
 
-    return bytes(pdf.output(dest="S").encode("latin-1"))
+    out = pdf.output(dest="S")
+    if isinstance(out, (bytes, bytearray)):
+        return bytes(out)
+    try:
+        return bytes(str(out).encode("latin-1"))
+    except Exception:
+        return bytes(str(out).encode("utf-8", errors="ignore"))
 
 

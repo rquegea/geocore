@@ -3140,40 +3140,70 @@ def get_insight_by_id(insight_id):
 def get_insights():
     try:
         filters = parse_filters(request)
-        limit = int(request.args.get('limit', 50))
-        offset = int(request.args.get('offset', 0))
+        # Parámetros opcionales
+        limit = int(request.args.get('limit', 1000))
+        brand = filters.get('brand')
 
-        conn = get_db_connection(); cur = conn.cursor()
-        where_clauses = ["m.created_at >= %s AND m.created_at < %s"]
-        params = [filters['start_date'], filters['end_date']]
-        if filters.get('model') and filters['model'] != 'all':
-            where_clauses.append("m.engine = %s"); params.append(filters['model'])
-        if filters.get('source') and filters['source'] != 'all':
-            where_clauses.append("m.source = %s"); params.append(filters['source'])
-        if filters.get('topic') and filters['topic'] != 'all':
-            where_clauses.append("q.topic = %s"); params.append(filters['topic'])
-        if filters.get('brand'):
-            where_clauses.append("COALESCE(q.brand, '') = %s"); params.append(filters['brand'])
+        # Resolver project_id a partir de la marca si no se pasa explícito
+        project_id = request.args.get('project_id', None)
+        if project_id is None:
+            try:
+                conn = get_db_connection(); cur = conn.cursor()
+                cur.execute("SELECT id FROM queries WHERE COALESCE(brand, topic) = %s ORDER BY id ASC LIMIT 1", (brand,))
+                row = cur.fetchone()
+                cur.close(); conn.close()
+                project_id = int(row[0]) if row else 1
+            except Exception:
+                project_id = 1
+        else:
+            project_id = int(project_id)
 
-        where_sql = " AND ".join(where_clauses)
-        sql = f"""
-            SELECT i.id, i.query_id, i.payload, i.created_at
-            FROM insights i
-            JOIN mentions m ON i.id = m.generated_insight_id
-            JOIN queries q ON i.query_id = q.id
-            WHERE {where_sql}
-            ORDER BY i.created_at DESC
-            LIMIT %s OFFSET %s
-        """
-        cur.execute(sql, params + [limit, offset])
-        rows = cur.fetchall()
-        insights = [
-            {"id": r[0], "query_id": r[1], "payload": r[2], "created_at": r[3].isoformat() if r[3] else None}
-            for r in rows
-        ]
+        from src.reports import aggregator as agg
+        session = agg.get_session()
+        try:
+            clusters = agg.aggregate_clusters_for_report(
+                session,
+                project_id,
+                start_date=filters.get('start_date').strftime('%Y-%m-%d') if filters.get('start_date') else None,
+                end_date=(filters.get('end_date') - timedelta(days=1)).strftime('%Y-%m-%d') if filters.get('end_date') else None,
+                max_rows=max(100, min(5000, limit)),
+            )
+        finally:
+            session.close()
 
-        cur.close(); conn.close()
-        return jsonify({"insights": insights, "pagination": {"limit": limit, "offset": offset, "count": len(insights)}})
+        # Enriquecer con un nombre de tema simple (heurística: primeras palabras del primer ejemplo)
+        def _label_topic(cluster_obj: dict) -> str:
+            try:
+                examples = cluster_obj.get('example_mentions') or []
+                if not examples:
+                    return "(tema)"
+                summary = (examples[0].get('summary') or '').strip()
+                if not summary:
+                    return "(tema)"
+                words = summary.split()
+                return " ".join(words[:8])
+            except Exception:
+                return "(tema)"
+
+        clusters_out = []
+        for c in clusters or []:
+            clusters_out.append({
+                "cluster_id": c.get("cluster_id"),
+                "topic_name": _label_topic(c),
+                "volume": c.get("count", 0),
+                "avg_sentiment": c.get("avg_sentiment", 0.0),
+                "top_sources": c.get("top_sources", []),
+                "examples": c.get("example_mentions", []),
+            })
+
+        return jsonify({
+            "project_id": project_id,
+            "period": {
+                "start": filters.get('start_date').isoformat() if filters.get('start_date') else None,
+                "end": filters.get('end_date').isoformat() if filters.get('end_date') else None,
+            },
+            "clusters": clusters_out,
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -4287,99 +4317,50 @@ def generate_report_endpoint():
             'brand_id': payload.get('brand_id'),
             'category': payload.get('category') or payload.get('prompt_category'),
         }
-        # Modo de prueba para no gastar tokens
         test_mode = bool(payload.get('test_mode', False))
         if not filters:
             return jsonify({"error": "Filtros no proporcionados"}), 400
 
-        aggregated_data = _aggregate_data_for_report(filters)
+        # 1) Obtener clusters (eficiente, sin cargar texto crudo)
+        from src.reports import aggregator as agg
+        session = agg.get_session()
+        try:
+            # Resolver proyecto/brand
+            brand_name = payload.get('brand') or os.getenv('DEFAULT_BRAND', 'The Core School')
+            conn = get_db_connection(); cur = conn.cursor()
+            cur.execute("SELECT id FROM queries WHERE COALESCE(brand, topic) = %s ORDER BY id ASC LIMIT 1", (brand_name,))
+            row = cur.fetchone(); cur.close(); conn.close()
+            project_id = int(row[0]) if row else 1
 
-        # 1) Corpus global de menciones (todas las queries, periodo)
-        from src.reports.aggregator import get_all_mentions_for_period
-        start_s = aggregated_data.get('start_date')
-        end_s = aggregated_data.get('end_date')
-        corpus = get_all_mentions_for_period(
-            limit=120,
-            start_date=start_s,
-            end_date=end_s,
-            client_id=filters.get('client_id'),
-            brand_id=filters.get('brand_id'),
-        )
+            clusters = agg.aggregate_clusters_for_report(
+                session,
+                project_id,
+                start_date=filters.get('start_date').strftime('%Y-%m-%d'),
+                end_date=filters.get('end_date').strftime('%Y-%m-%d'),
+                max_rows=5000,
+            )
+        finally:
+            session.close()
 
-        # 2) Analista Principal (una única llamada con datos + texto)
-        from src.engines.openai_engine import fetch_response_with_metadata
-        from src.engines.strategic_prompts import get_main_analyst_prompt
-        prompt = get_main_analyst_prompt(aggregated_data, corpus)
+        # 2) Generar contenido (usa análisis por cluster + síntesis estratégica)
+        from src.reports.generator import generate_report as build_pdf_from_clusters
+        pdf_bytes = build_pdf_from_clusters(project_id, clusters)
 
-        # Si es modo test, devolvemos el prompt y no llamamos a la IA
-        if test_mode:
-            print("✅ MODO TEST: La generación de datos ha funcionado. El informe no se generará.")
-            return jsonify({
-                "status": "TEST_SUCCESSFUL",
-                "message": "Data aggregation and prompt generation completed successfully.",
-                "prompt_for_main_analyst": prompt,
-                "period": {
-                    "start_date": aggregated_data.get('start_date'),
-                    "end_date": aggregated_data.get('end_date'),
-                },
-                "corpus_size": len(corpus or []),
-            })
-        raw, meta = fetch_response_with_metadata(prompt, model="gpt-4o")
-        _log_ai_call('main_analyst', prompt, raw, meta)
-        main_json = _clean_model_json(raw) or {}
-
-        # 3) Gráficos y KPIs
+        # 3) Preparar imágenes/KPIs (se mantienen como antes)
         from src.reports import plotter
         from src.reports.pdf_writer import build_strategic_pdf
-        k = aggregated_data.get('kpis', {})
-        brand_name = aggregated_data.get('brand') or '-'
+        # Para mantener compatibilidad con PDF existente, dejamos imágenes opcionales vacías
+        k = {"total_mentions": None, "sentiment_avg": None, "sov": None}
+        brand_name = brand_name or '-'
         kpi_rows = [
             ["Marca", str(brand_name)],
-            ["Total menciones", str(k.get("total_mentions", 0))],
-            ["Sentimiento promedio", f"{float(k.get('sentiment_avg', 0.0)):.2f}"],
-            ["SOV total", f"{float(k.get('sov_score', 0.0)):.1f}%"],
-            ["Visibilidad media", f"{float(k.get('visibility_score', 0.0)):.1f}%"],
+            ["Total menciones", str(k.get("total_mentions", "-"))],
+            ["Sentimiento promedio", str(k.get('sentiment_avg', '-'))],
+            ["SOV total", str(k.get('sov', '-'))],
         ]
-
-        ts = aggregated_data.get('time_series', {}) or {}
-        dates = ts.get('dates') or []
         images = {}
-        try:
-            images['combined_vis_sent'] = plotter.plot_combined_visibility_sentiment(
-                dates, ts.get('visibility') or [], ts.get('sentiment') or []
-            )
-        except Exception:
-            images['combined_vis_sent'] = None
-        try:
-            images['mentions_volume'] = plotter.plot_mentions_volume(
-                dates, ts.get('mentions') or []
-            )
-        except Exception:
-            images['mentions_volume'] = None
-        try:
-            sov_src = aggregated_data.get('sov_chart_data') or []
-            sov_list = []
-            for it in sov_src:
-                try:
-                    name = it.get('name') if isinstance(it, dict) else None
-                    sov = float(it.get('sov')) if isinstance(it, dict) else None
-                    if name is not None and sov is not None:
-                        sov_list.append((name, sov))
-                except Exception:
-                    continue
-            images['sov_pie'] = plotter.plot_sov_pie(sov_list)
-        except Exception:
-            images['sov_pie'] = None
-        try:
-            images['top_topics'] = plotter.plot_top_topics(aggregated_data.get('topic_counts') or {})
-        except Exception:
-            images['top_topics'] = None
 
-        pdf_bytes = build_strategic_pdf(
-            narrative=main_json if isinstance(main_json, dict) else {},
-            kpi_rows=kpi_rows,
-            images=images,
-        )
+        # Enviar PDF generado por flujo jerárquico
 
         return send_file(
             io.BytesIO(pdf_bytes),

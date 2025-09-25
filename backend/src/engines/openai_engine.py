@@ -24,9 +24,26 @@ import httpx
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 DEFAULT_TIMEOUT = float(os.getenv("OPENAI_TIMEOUT", "25"))
+MAX_INPUT_CHARS = int(os.getenv("OPENAI_MAX_INPUT_CHARS", "60000"))
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+def _truncate_input(text: str) -> str:
+    """Recorta el contenido de entrada si excede el máximo permitido para evitar errores de contexto.
+    Mantiene el inicio y el final (head/tail) para preservar señales.
+    """
+    try:
+        if not isinstance(text, str):
+            return text
+        if len(text) <= MAX_INPUT_CHARS:
+            return text
+        head = text[: MAX_INPUT_CHARS // 2]
+        tail = text[-(MAX_INPUT_CHARS // 2) :]
+        logger.warning("✂️ Truncando prompt de %s a %s caracteres para ajustarse al límite.", len(text), MAX_INPUT_CHARS)
+        return head + "\n\n[...contenido truncado por longitud...]\n\n" + tail
+    except Exception:
+        return text[:MAX_INPUT_CHARS]
+
 
 # ─────────────────── Funciones del Engine ──────────────────
 def fetch_response(
@@ -45,6 +62,7 @@ def fetch_response(
         if not user_content or user_content.strip() == "":
             logger.error("fetch_response: prompt vacío o None; evitando llamada al modelo.")
             return ""
+        user_content = _truncate_input(user_content)
         res = client.chat.completions.create(
             model=model,
             messages=[
@@ -110,7 +128,7 @@ CONTENIDO:
 ----------
 """
     # Usamos gpt-4o explícitamente para la máxima calidad en el análisis
-    raw = fetch_response(prompt, model="gpt-4o", temperature=0.2, max_tokens=2048)
+    raw = fetch_response(_truncate_input(prompt), model="gpt-4o", temperature=0.2, max_tokens=2048)
     try:
         # Intenta limpiar la respuesta si viene en un bloque de código markdown
         if raw.startswith("```json"):
@@ -146,6 +164,7 @@ def fetch_response_with_metadata(
                 "error_category": "client_error",
                 "error": "empty_prompt",
             }
+        user_content = _truncate_input(user_content)
         res = client.chat.completions.create(
             model=model,
             messages=[

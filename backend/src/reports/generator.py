@@ -5,6 +5,7 @@ from . import plotter
 from . import pdf_writer
 from ..engines.openai_engine import fetch_response
 from ..engines import strategic_prompts as s_prompts
+import json
 
 
 def _build_kpi_rows(kpis: Dict) -> List[List[str]]:
@@ -79,7 +80,56 @@ def _generate_strategic_content(insights_json: Dict[str, Any], aggregated: Dict[
     return sections
 
 
-def generate_report(project_id: int) -> bytes:
+def _analyze_cluster(cluster_obj: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Llama al Analista de Clusters (Nivel 1) y devuelve un dict con topic_name y key_points.
+    Devuelve valores seguros en caso de error.
+    """
+    try:
+        prompt = s_prompts.get_cluster_analyst_prompt(cluster_obj)
+        raw = fetch_response(prompt, model="gpt-4o-mini", temperature=0.2, max_tokens=500)
+        if not raw:
+            return {"topic_name": "(sin nombre)", "key_points": []}
+        text = raw.strip()
+        if text.startswith("```json"):
+            text = text[len("```json"):].strip()
+            if text.endswith("```"):
+                text = text[:-3].strip()
+        data = json.loads(text)
+        topic = data.get("topic_name") or "(sin nombre)"
+        pts = data.get("key_points") or []
+        if not isinstance(pts, list):
+            pts = []
+        return {"topic_name": str(topic), "key_points": [str(p) for p in pts][:5]}
+    except Exception:
+        return {"topic_name": "(sin nombre)", "key_points": []}
+
+
+def _synthesize_clusters(cluster_summaries: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Llama al Sintetizador Estratégico (Nivel 2) con el resumen de clusters."""
+    try:
+        prompt = s_prompts.get_clusters_synthesizer_prompt([
+            {
+                "topic_name": c.get("topic_name", "(sin nombre)"),
+                "volume": int(c.get("volume", 0)),
+                "sentiment": float(c.get("sentiment", 0.0)),
+            }
+            for c in cluster_summaries
+        ])
+        raw = fetch_response(prompt, model="gpt-4o", temperature=0.2, max_tokens=900)
+        if not raw:
+            return {}
+        text = raw.strip()
+        if text.startswith("```json"):
+            text = text[len("```json"):].strip()
+            if text.endswith("```"):
+                text = text[:-3].strip()
+        return json.loads(text)
+    except Exception:
+        return {}
+
+
+def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = None) -> bytes:
     session = aggregator.get_session()
     try:
         kpis = aggregator.get_kpi_summary(session, project_id)
@@ -88,6 +138,9 @@ def generate_report(project_id: int) -> bytes:
         top5, bottom5 = aggregator.get_topics_by_sentiment(session, project_id)
         sov_trends = aggregator.get_share_of_voice_and_trends(session, project_id)
         agent_insights = aggregator.get_agent_insights_data(session, project_id, limit=200)
+        # Nuevo: permitir inyectar clusters precalculados para evitar recomputar
+        if clusters is None:
+            clusters = aggregator.aggregate_clusters_for_report(session, project_id, max_rows=5000)
     finally:
         session.close()
 
@@ -105,7 +158,29 @@ def generate_report(project_id: int) -> bytes:
         },
         "trends": sov_trends.get("trends", {}),
         "agent_insights": agent_insights,
+        # Clusters crudos para posibles usos posteriores
+        "clusters_raw": clusters,
     }
+
+    # Nivel 1: análisis por cluster
+    cluster_summaries: List[Dict[str, Any]] = []
+    for c in (clusters or [])[:50]:  # límite defensivo
+        cluster_obj = {
+            "count": int(c.get("count", 0)),
+            "avg_sentiment": float(c.get("avg_sentiment", 0.0)),
+            "top_sources": c.get("top_sources", []),
+            "example_mentions": c.get("example_mentions", []),
+        }
+        analyzed = _analyze_cluster(cluster_obj)
+        cluster_summaries.append({
+            "topic_name": analyzed.get("topic_name", "(sin nombre)"),
+            "key_points": analyzed.get("key_points", []),
+            "volume": int(cluster_obj["count"]),
+            "sentiment": float(cluster_obj["avg_sentiment"]),
+        })
+
+    # Nivel 2: síntesis estratégica a partir de clusters
+    synthesis = _synthesize_clusters(cluster_summaries)
 
     insights_json = _extract_insights_to_json(aggregated)
 
@@ -132,6 +207,9 @@ def generate_report(project_id: int) -> bytes:
             "summary": agent_summary_text,
             "buckets": agent_insights.get("buckets", {}),
         },
+        # Nuevo: Clusters y Síntesis Estratégica
+        "clusters": cluster_summaries,
+        "clusters_synthesis": synthesis,
         # Pasamos deep_dives si el agregador los incluyó (backend app.py v1)
         "deep_dives": aggregated.get("deep_dives", []),
         "annex": {
@@ -194,6 +272,37 @@ def generate_report(project_id: int) -> bytes:
     pdf_writer.add_title(pdf, "KPIs Principales y Share of Voice")
     pdf_writer.add_table(pdf, content_for_pdf["kpi_rows"])
     pdf_writer.add_image(pdf, images.get("sov_pie"))
+
+    # Nueva sección: Temas por Clusters
+    if content_for_pdf.get("clusters"):
+        pdf_writer.add_title(pdf, "Temas y Hallazgos por Clusters")
+        for c in content_for_pdf["clusters"][:10]:
+            header = f"- {c.get('topic_name', '(sin nombre)')} | volumen: {c.get('volume', 0)} | sentiment: {float(c.get('sentiment', 0.0)):.2f}"
+            pdf_writer.add_paragraph(pdf, header)
+            for kp in (c.get("key_points") or [])[:3]:
+                pdf_writer.add_paragraph(pdf, f"  • {kp}")
+
+    # Nueva sección: Síntesis Estratégica a partir de Clusters
+    if content_for_pdf.get("clusters_synthesis"):
+        pdf_writer.add_title(pdf, "Síntesis Estratégica (basada en clusters)")
+        syn = content_for_pdf["clusters_synthesis"]
+        try:
+            metas = syn.get("meta_narrativas") or []
+            if metas:
+                pdf_writer.add_paragraph(pdf, "Meta-narrativas:")
+                for m in metas[:5]:
+                    pdf_writer.add_paragraph(pdf, f"- {m}")
+            if syn.get("oportunidad_principal"):
+                pdf_writer.add_paragraph(pdf, f"Oportunidad principal: {syn['oportunidad_principal']}")
+            if syn.get("riesgo_inminente"):
+                pdf_writer.add_paragraph(pdf, f"Riesgo inminente: {syn['riesgo_inminente']}")
+            plan = syn.get("plan_estrategico") or []
+            if plan:
+                pdf_writer.add_paragraph(pdf, "Plan estratégico:")
+                for p in plan[:6]:
+                    pdf_writer.add_paragraph(pdf, f"- {p}")
+        except Exception:
+            pass
 
     pdf_writer.add_title(pdf, "Anexo: Análisis Detallado y Visualizaciones")
     pdf_writer.add_image(pdf, images.get("sentiment_evolution"))

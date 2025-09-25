@@ -46,3 +46,4 @@ wordcloud==1.9.3
 seaborn==0.13.2
 SQLAlchemy==2.0.36
 fpdf2==2.8.1
+scikit-learn==1.5.2

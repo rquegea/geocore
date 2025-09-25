@@ -367,3 +367,57 @@ def get_deep_dive_mentions_prompt(topic: str, mentions: list[str]) -> str:
         "  \"citas_destacadas\": [\"cita 1\", \"cita 2\", \"cita 3\"]\n"
         "}"
     )
+
+
+def get_cluster_analyst_prompt(cluster: dict) -> str:
+    """Prompt para Analista de Clusters (Nivel 1). Devuelve JSON con topic_name y key_points."""
+    import json
+    examples = [
+        {
+            "id": m.get("id"),
+            "summary": (m.get("summary") or "")[:300],
+            "sentiment": m.get("sentiment"),
+        }
+        for m in cluster.get("example_mentions", [])
+    ]
+    payload = {
+        "examples": examples,
+        "volume": cluster.get("count", 0),
+        "avg_sentiment": cluster.get("avg_sentiment", 0.0),
+        "top_sources": cluster.get("top_sources", []),
+    }
+    data_json = json.dumps(payload, ensure_ascii=False)
+    return f"""
+Eres un analista especializado en nombrar y resumir temas de conversación.
+Con base en los EJEMPLOS representativos del cluster y sus métricas, devuelve SOLO este JSON:
+{{"topic_name": "...", "key_points": ["...", "..."]}}
+
+Datos de entrada (JSON):
+{data_json}
+"""
+
+
+def get_clusters_synthesizer_prompt(clusters: list[dict]) -> str:
+    """Prompt para Sintetizador Estratégico (Nivel 2) sobre múltiples clusters."""
+    import json
+    brief = [
+        {
+            "topic_name": c.get("topic_name", "(sin nombre)"),
+            "volume": c.get("volume", 0),
+            "sentiment": c.get("sentiment", 0.0),
+        }
+        for c in clusters
+    ]
+    data_json = json.dumps(brief, ensure_ascii=False)
+    return f"""
+Eres un estratega de mercado senior. Con el resumen de los principales temas (clusters), devuelve SOLO este JSON:
+{{
+  "meta_narrativas": ["...", "..."],
+  "oportunidad_principal": "...",
+  "riesgo_inminente": "...",
+  "plan_estrategico": ["acción 1", "acción 2"]
+}}
+
+Datos de entrada (JSON):
+{data_json}
+"""

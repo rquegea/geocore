@@ -7,6 +7,14 @@ import re
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from ..insight_analysis import summarize_agent_insights
+from math import sqrt
+from typing import TypedDict
+import numpy as np
+
+try:
+    from sklearn.cluster import KMeans
+except Exception:  # pragma: no cover
+    KMeans = None  # type: ignore
 
 
 def _db_url() -> str:
@@ -242,15 +250,15 @@ def get_share_of_voice_and_trends(
             JOIN queries q ON q.id = m.query_id
             LEFT JOIN insights i ON i.id = m.generated_insight_id
             WHERE q.id = :project_id
-              AND m.created_at >= :start::date
-              AND m.created_at < (:end::date + INTERVAL '1 day')
+              AND m.created_at >= CAST(:start_date AS date)
+              AND m.created_at < (CAST(:end_date AS date) + INTERVAL '1 day')
             """
         )
 
         brand_counts_by_period: List[Dict] = []
         competitors_global: Counter = Counter()
         for (p_start, p_end) in periods:
-            rows = session.execute(sql, {"project_id": project_id, "start": p_start, "end": p_end}).mappings().all()
+            rows = session.execute(sql, {"project_id": project_id, "start_date": p_start, "end_date": p_end}).mappings().all()
             brands = [client_brand]
             per_category = defaultdict(lambda: {"client": 0, "total": 0, "competitors": Counter()})
             comp_mentions = Counter()
@@ -461,3 +469,153 @@ def get_all_mentions_for_period(
         return corpus
     finally:
         session.close()
+
+
+class ClusterMention(TypedDict):
+    id: int
+    summary: str
+    sentiment: float
+    source: str | None
+    domain: str | None
+    created_at: str
+
+
+class ClusterResult(TypedDict):
+    cluster_id: int
+    centroid: list[float]
+    count: int
+    avg_sentiment: float
+    top_sources: list[tuple[str, int]]
+    example_mentions: list[ClusterMention]
+
+
+def _parse_vector_text(vec_text: str) -> list[float]:
+    # Espera formato "[v1,v2,...]"; robustez ante espacios
+    s = vec_text.strip()
+    if s.startswith('[') and s.endswith(']'):
+        s = s[1:-1]
+    if not s:
+        return []
+    return [float(x) for x in s.replace(' ', '').split(',') if x]
+
+
+def aggregate_clusters_for_report(
+    session: Optional[Session],
+    project_id: int,
+    *,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    max_rows: int = 5000,
+) -> list[ClusterResult]:
+    """
+    Recupera menciones con embedding no nulo en el periodo, ejecuta clustering (KMeans) y
+    devuelve clusters con metadatos y ejemplos representativos.
+    """
+    own_session = False
+    if session is None:
+        session = get_session()
+        own_session = True
+    try:
+        where = [
+            "q.id = :project_id",
+            "m.embedding IS NOT NULL",
+        ]
+        params: Dict[str, Any] = {"project_id": int(project_id), "lim": int(max_rows)}
+        if start_date:
+            where.append("m.created_at >= CAST(:start AS date)")
+            params["start"] = start_date
+        if end_date:
+            where.append("m.created_at < (CAST(:end AS date) + INTERVAL '1 day')")
+            params["end"] = end_date
+
+        sql = text(
+            f"""
+            SELECT m.id,
+                   m.summary,
+                   m.sentiment,
+                   m.source,
+                   m.source_domain,
+                   m.created_at,
+                   m.embedding::text AS emb
+            FROM mentions m
+            JOIN queries q ON q.id = m.query_id
+            WHERE {' AND '.join(where)}
+            ORDER BY m.created_at DESC
+            LIMIT :lim
+            """
+        )
+        rows = session.execute(sql, params).all()
+        if not rows:
+            return []
+
+        mentions: list[ClusterMention] = []
+        vectors: list[list[float]] = []
+        for rid, summary, sent, source, domain, created_at, emb_txt in rows:
+            if not isinstance(emb_txt, str):
+                continue
+            vec = _parse_vector_text(emb_txt)
+            if not vec:
+                continue
+            mentions.append({
+                "id": int(rid),
+                "summary": str(summary or ""),
+                "sentiment": float(sent or 0.0),
+                "source": str(source) if source is not None else None,
+                "domain": str(domain) if domain is not None else None,
+                "created_at": str(created_at),
+            })
+            vectors.append(vec)
+
+        if not mentions or not vectors:
+            return []
+
+        X = np.array(vectors, dtype=np.float32)
+        # Normalizar para usar similitud coseno de forma eficiente con dot product
+        norms = np.linalg.norm(X, axis=1, keepdims=True) + 1e-12
+        Xn = X / norms
+
+        n = Xn.shape[0]
+        k_default = int(max(2, min(12, round(sqrt(n / 2)))))
+        if KMeans is None:
+            # Fallback: un único cluster si no hay sklearn
+            labels = np.zeros(n, dtype=int)
+            centroids = np.mean(Xn, axis=0, keepdims=True)
+        else:
+            km = KMeans(n_clusters=k_default, n_init=10, max_iter=300, random_state=42)
+            labels = km.fit_predict(Xn)
+            centroids = km.cluster_centers_
+
+        results: list[ClusterResult] = []
+        for cid in sorted(set(int(l) for l in labels.tolist())):
+            idx = np.where(labels == cid)[0]
+            if idx.size == 0:
+                continue
+            cluster_vectors = Xn[idx]
+            centroid = np.mean(cluster_vectors, axis=0)
+            # cercanía por coseno = dot(centroid_norm, vec)
+            cent_norm = np.linalg.norm(centroid) + 1e-12
+            centroid_n = centroid / cent_norm
+            scores = cluster_vectors @ centroid_n
+            order = np.argsort(-scores)[:5]
+            sel_idx = idx[order]
+            selected: list[ClusterMention] = [mentions[i] for i in sel_idx]
+
+            avg_sent = float(np.mean([mentions[i]["sentiment"] for i in idx]))
+            from collections import Counter
+            src_counter = Counter([mentions[i]["domain"] or mentions[i]["source"] or "unknown" for i in idx])
+            top_sources = [(k or "unknown", int(v)) for k, v in src_counter.most_common(5)]
+
+            results.append({
+                "cluster_id": int(cid),
+                "centroid": [float(x) for x in centroid.tolist()],
+                "count": int(idx.size),
+                "avg_sentiment": avg_sent,
+                "top_sources": top_sources,
+                "example_mentions": selected,
+            })
+        # Ordenar por tamaño desc
+        results.sort(key=lambda c: c["count"], reverse=True)
+        return results
+    finally:
+        if own_session:
+            session.close()
