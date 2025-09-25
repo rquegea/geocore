@@ -502,8 +502,7 @@ def get_visibility_series(
                 FROM mentions m
                 JOIN queries q ON q.id = m.query_id
                 LEFT JOIN insights i ON i.id = m.generated_insight_id
-                WHERE q.id = :project_id
-                  AND m.created_at >= CAST(:start_date AS date)
+                WHERE m.created_at >= CAST(:start_date AS date)
                   AND m.created_at < (CAST(:end_date AS date) + INTERVAL '1 day')
             )
             SELECT d,
@@ -515,7 +514,7 @@ def get_visibility_series(
             """
         )
 
-        rows = session.execute(sql, {"project_id": int(project_id), "start_date": start_date, "end_date": end_date, "syns": syns, "likes": likes}).all()
+        rows = session.execute(sql, {"start_date": start_date, "end_date": end_date, "syns": syns, "likes": likes}).all()
 
         # Mapear resultados por día
         by_day: Dict[str, tuple[int, int]] = {str(d): (int(b or 0), int(t or 0)) for d, b, t in rows}
