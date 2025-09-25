@@ -447,3 +447,121 @@ def build_empty_structure_pdf(company_name: str) -> bytes:
     except Exception:
         return bytes(str(out).encode("utf-8", errors="ignore"))
 
+
+
+# --- NUEVO: Estructura con contenido para Parte 1 ---
+def build_skeleton_with_content(company_name: str, images: Dict[str, Optional[str]]) -> bytes:
+    """
+    Genera un PDF con la estructura (portada + índice + secciones) e inserta
+    contenido visual en las secciones de la Parte 1 cuando haya imágenes disponibles.
+
+    Secciones pobladas:
+    - "Share of Voice vs. Competencia" <= images["part1_sov_donut"]
+    - "Evolución del Sentimiento (diario)" <= images["part1_sentiment_line"]
+    - "Serie temporal - Análisis de competencia" <= images["part1_visibility_ranking"]
+    - "Resumen Ejecutivo de KPIs" <= images["part1_category_distribution"]
+    """
+    pdf = ReportPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=12)
+
+    # 1) Portada
+    pdf.add_page()
+    pdf.ln(60)
+    pdf.set_font("Helvetica", "B", 28)
+    pdf.cell(0, 14, _sanitize("Marketing Intelligence"), 0, 1, "C")
+    pdf.ln(10)
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, _sanitize(f"{company_name}"), 0, 1, "C")
+
+    # 2) Índice
+    pdf.add_page()
+    add_title(pdf, "Índice")
+
+    parte1 = [
+        "Dashboard Ejecutivo",
+        "Resumen Ejecutivo de KPIs",
+        "Share of Voice vs. Competencia",
+        "Evolución del Sentimiento (diario)",
+        "Evolución del Volumen de Menciones (diario)",
+        "Serie temporal - Análisis de competencia",
+        "Serie temporal - Análisis de marketing y estrategia",
+        "Serie temporal - Análisis de mercado",
+        "Serie temporal - Análisis contextual",
+        "Serie temporal - Análisis de oportunidades",
+        "Serie temporal - Análisis de riesgos",
+        "Serie temporal - Análisis de sentimiento y reputación",
+    ]
+    parte2 = [
+        "Informe Estratégico",
+        "Resumen Ejecutivo",
+        "Resumen Ejecutivo y Hallazgos Principales",
+        "Tendencias y Señales Emergentes",
+        "Análisis Competitivo",
+        "Plan de Acción Estratégico",
+        "Correlaciones Transversales entre Categorías",
+    ]
+    parte3 = [
+        "Anexo: Análisis Detallado por Categoría",
+        "Análisis de competencia",
+        "Análisis de marketing y estrategia",
+        "Análisis de mercado",
+        "Análisis contextual",
+        "Análisis de oportunidades",
+        "Análisis de riesgos",
+        "Análisis de sentimiento y reputación",
+    ]
+
+    def _write_index_block(title: str, items: List[str]):
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.cell(0, 8, _sanitize(title), 0, 1, "L")
+        pdf.set_font("Helvetica", size=11)
+        for it in items:
+            pdf.cell(0, 6, _sanitize(f"- {it}"), 0, 1, "L")
+        pdf.ln(2)
+
+    _write_index_block("Parte 1: Resumen Visual y KPIs", parte1)
+    _write_index_block("Parte 2: Informe Estratégico", parte2)
+    _write_index_block("Parte 3: Anexo - Análisis Detallado por Categoría", parte3)
+
+    # 3) Secciones: cabeceras + contenido de Parte 1 cuando aplique
+    def _write_section_page(title: str):
+        pdf.add_page()
+        pdf.set_font("Helvetica", "B", 18)
+        pdf.cell(0, 12, _sanitize(title), 0, 1, "L")
+        pdf.ln(4)
+
+    # Portada de Parte 1
+    _write_section_page("Parte 1: Resumen Visual y KPIs")
+
+    # Mapeo de secciones -> claves de imágenes
+    section_to_image_keys: Dict[str, List[str]] = {
+        # Añadimos fallbacks a imágenes clásicas si no existen las de Parte 1
+        "Resumen Ejecutivo de KPIs": ["part1_category_distribution", "sentiment_by_category"],
+        "Share of Voice vs. Competencia": ["part1_sov_donut", "sov_pie"],
+        "Evolución del Sentimiento (diario)": ["part1_sentiment_line", "sentiment_evolution"],
+        "Serie temporal - Análisis de competencia": ["part1_visibility_ranking", "topics_top_bottom"],
+    }
+
+    for s in parte1:
+        _write_section_page(s)
+        keys = section_to_image_keys.get(s, [])
+        for k in keys:
+            add_image(pdf, images.get(k), width=180)
+
+    # Parte 2 (cabeceras)
+    _write_section_page("Parte 2: Informe Estratégico")
+    for s in parte2:
+        _write_section_page(s)
+
+    # Parte 3 (cabeceras)
+    _write_section_page("Parte 3: Anexo - Análisis Detallado por Categoría")
+    for s in parte3:
+        _write_section_page(s)
+
+    out = pdf.output(dest="S")
+    if isinstance(out, (bytes, bytearray)):
+        return bytes(out)
+    try:
+        return bytes(str(out).encode("latin-1"))
+    except Exception:
+        return bytes(str(out).encode("utf-8", errors="ignore"))

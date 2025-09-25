@@ -4336,10 +4336,9 @@ def generate_report_endpoint():
             max_rows=5000,
         )
 
-        # 2) Generar PDF ESQUELETO temporalmente
-        from src.reports.pdf_writer import build_empty_structure_pdf
-        company = payload.get('brand') or os.getenv('DEFAULT_BRAND', 'Empresa')
-        pdf_bytes = build_empty_structure_pdf(company)
+        # 2) Generar PDF híbrido con KPIs + Clusters (informe completo)
+        from src.reports.generator import generate_hybrid_report
+        pdf_bytes = generate_hybrid_report(full_data)
 
         return send_file(
             io.BytesIO(pdf_bytes),
@@ -4353,6 +4352,22 @@ def generate_report_endpoint():
         traceback.print_exc()
         return jsonify({"error": "No se pudo generar el informe. Revisa los logs del backend."}), 500
 
+
+@app.route('/api/reports/generate/skeleton', methods=['POST'])
+def generate_report_skeleton_endpoint():
+    try:
+        payload = request.get_json() or {}
+        company = payload.get('brand') or os.getenv('DEFAULT_BRAND', 'Empresa')
+        from src.reports.pdf_writer import build_empty_structure_pdf
+        pdf_bytes = build_empty_structure_pdf(company)
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            as_attachment=True,
+            download_name=f"Informe_Estructura_{datetime.now().strftime('%Y-%m-%d')}.pdf",
+            mimetype='application/pdf'
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/reports/generate/v2', methods=['POST'])
 def generate_report_endpoint_v2():

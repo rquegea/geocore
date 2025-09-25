@@ -505,8 +505,19 @@ export function AnalyticsDashboard() {
       try {
         setInsightsLoading(true)
         const filters = { model: selectedModel, source: selectedSource, topic: selectedTopic, brand: primaryBrandName }
-        const res = await getInsights(dateRange, filters, 100, 0)
-        setInsightsRows(res.insights || [])
+        let res = await getInsights(dateRange, filters, 200, 0)
+        let rows = res.insights || []
+        // Fallback: si con la marca hay muy pocos clusters/insights, cargar también sin marca
+        if ((rows?.length || 0) < 5) {
+          try {
+            const resFallback = await getInsights(dateRange, { model: selectedModel, source: selectedSource, topic: selectedTopic }, 200, 0)
+            if ((resFallback.insights?.length || 0) > (rows?.length || 0)) {
+              res = resFallback
+              rows = resFallback.insights
+            }
+          } catch {}
+        }
+        setInsightsRows(rows)
       } catch (e) {
         console.error("No se pudieron cargar los insights", e)
         setInsightsRows([])

@@ -425,9 +425,78 @@ def generate_hybrid_report(full_data: Dict[str, Any]) -> bytes:
         "kpis": kpis,
     }
 
-    # Renderizar PDF con layout existente
-    from .pdf_writer import build_pdf
-    pdf_bytes = build_pdf(content_for_pdf)
+    # Parte 1: nuevos gráficos solicitados
+    try:
+        # SOV donut (marca vs competencia) con título
+        sov = full_data.get("sov", {})
+        client_brand = sov.get("client_brand") or kpis.get("brand_name") or "Marca"
+        current = sov.get("current", {})
+        per_cat = current.get("sov_by_category", {})
+        client_total = sum(int(v.get("client", 0)) for v in per_cat.values())
+        # Usar SOLO el período actual, igual que el frontend
+        comp_counts = current.get("competitor_mentions", {})
+        sov_counts = [(client_brand, client_total)] + [(b, int(c)) for b, c in comp_counts.items()]
+        # Preferir función nueva si existe; si no, caer a pie clásico
+        try:
+            images["part1_sov_donut"] = plotter.plot_sov_donut_centered(sov_counts, title="Share of Voice vs. Competencia")  # type: ignore[attr-defined]
+        except Exception:
+            images["part1_sov_donut"] = plotter.plot_sov_pie(sov_counts)
+    except Exception:
+        # Fallback final al SOV pie estándar si ya fue calculado más arriba
+        images["part1_sov_donut"] = images.get("sov_pie")
+
+    try:
+        # Sentimiento diario (línea) con título
+        evo = full_data.get("time_series", {}).get("sentiment_per_day", [])
+        dates = [d for d, _ in evo]
+        vals = [float(v) for _, v in evo]
+        try:
+            images["part1_sentiment_line"] = plotter.plot_line_series(dates, vals, title="Evolución del Sentimiento (diario)", ylabel="Sentimiento", ylim=(-1, 1), color="#2ca02c")  # type: ignore[attr-defined]
+        except Exception:
+            images["part1_sentiment_line"] = plotter.plot_sentiment_evolution(evo)
+    except Exception:
+        images["part1_sentiment_line"] = images.get("sentiment_evolution")
+
+    try:
+        # Visibilidad (línea) + ranking (si no existe la función, omitir)
+        vis_series = full_data.get("visibility_timeseries") or []
+        v_dates = [d for d, _ in vis_series]
+        v_vals = [float(v) for _, v in vis_series]
+        ranking = full_data.get("visibility_ranking") or []
+        try:
+            images["part1_visibility_ranking"] = plotter.plot_visibility_with_ranking(v_dates, v_vals, ranking, title="Evolución de visibilidad y ranking")  # type: ignore[attr-defined]
+        except Exception:
+            images["part1_visibility_ranking"] = None
+    except Exception:
+        images["part1_visibility_ranking"] = None
+
+    try:
+        # Distribución de menciones por categoría (porcentaje sobre total)
+        curr = full_data.get("sov", {}).get("current", {})
+        cat_map = curr.get("sov_by_category", {})
+        dist = {k: int(v.get("total", 0)) for k, v in cat_map.items()}
+        try:
+            images["part1_category_distribution"] = plotter.plot_category_distribution_donut(dist, title="Distribución de menciones por categoría")  # type: ignore[attr-defined]
+        except Exception:
+            # Fallback: usar gráfico de sentimiento por categoría si hay datos
+            sbc = full_data.get("sentiment_by_category") or {}
+            images["part1_category_distribution"] = plotter.plot_sentiment_by_category(sbc)
+    except Exception:
+        images["part1_category_distribution"] = None
+
+    # Renderizar PDF usando el ESQUELETO como base y añadiendo Parte 1
+    try:
+        from .pdf_writer import build_skeleton_with_content as _build_skeleton
+    except ImportError:
+        # Fallback por si el nombre cambia o el módulo aún no exporta
+        from . import pdf_writer as _pw  # type: ignore
+        _build_skeleton = getattr(_pw, "build_skeleton_with_content", None)
+        if _build_skeleton is None:
+            # Fallback final: usar la estructura vacía para no romper
+            def _build_skeleton(company_name, imgs):
+                return _pw.build_empty_structure_pdf(company_name)
+    company = kpis.get("brand_name") or full_data.get("brand") or "Empresa"
+    pdf_bytes = _build_skeleton(company, images)
     # Insertar tabla de oportunidades si existe
     try:
         if content_for_pdf.get("competitive_opportunities"):

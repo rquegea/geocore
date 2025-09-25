@@ -181,12 +181,55 @@ export const categorizePromptApi = async (query: string, topic?: string): Promis
 export interface InsightPayload { opportunities?: string[]; risks?: string[]; pain_points?: string[]; trends?: string[]; quotes?: string[]; calls_to_action?: string[]; top_themes?: string[]; topic_frequency?: Record<string, number>; competitors?: string[]; brands?: string[]; avg_sentiment?: number }
 export interface InsightRow { id: number; query_id: number; payload: InsightPayload; created_at: string | null }
 
-export const getInsights = (periodOrRange: DateRange | string, filters?: FilterParams, limit: number = 50, offset: number = 0): Promise<{ insights: InsightRow[]; pagination?: { limit: number; offset: number; count: number } }> => {
+export const getInsights = async (
+  periodOrRange: DateRange | string,
+  filters?: FilterParams,
+  limit: number = 50,
+  offset: number = 0
+): Promise<{ insights: InsightRow[]; pagination?: { limit: number; offset: number; count: number } }> => {
   const baseQs = appendFilters(buildDateQuery(periodOrRange), filters);
   const url = new URLSearchParams(baseQs.startsWith('?') ? baseQs.slice(1) : baseQs);
   url.set('limit', String(limit));
   url.set('offset', String(offset));
-  return fetchFromAPI(`/api/insights?${url.toString()}`);
+
+  const data: any = await fetchFromAPI(`/api/insights?${url.toString()}`);
+
+  // Formato legacy: { insights: InsightRow[] }
+  if (data && Array.isArray(data.insights)) {
+    return data as { insights: InsightRow[]; pagination?: { limit: number; offset: number; count: number } };
+  }
+
+  // Nuevo formato del backend: { clusters: [...] }
+  if (data && Array.isArray(data.clusters)) {
+    const items: InsightRow[] = data.clusters.map((c: any, idx: number) => {
+      const topicName = typeof c?.topic_name === 'string' && c.topic_name.trim() ? String(c.topic_name) : 'Tema';
+      const volume = typeof c?.volume === 'number' ? c.volume : Number(c?.volume) || 0;
+      const avgSent = typeof c?.avg_sentiment === 'number' ? c.avg_sentiment : 0;
+      const quotes = Array.isArray(c?.examples)
+        ? (c.examples
+            .map((e: any) => (e && typeof e.summary === 'string' ? e.summary : null))
+            .filter((s: string | null) => !!s) as string[])
+        : [];
+      return {
+        id: Number(c?.cluster_id ?? idx),
+        query_id: 0,
+        created_at: null,
+        payload: {
+          opportunities: [],
+          risks: [],
+          trends: [topicName],
+          quotes,
+          calls_to_action: [],
+          top_themes: [topicName],
+          topic_frequency: topicName ? { [topicName]: volume } : {},
+          avg_sentiment: avgSent,
+        },
+      } as InsightRow;
+    });
+    return { insights: items, pagination: { limit, offset, count: items.length } };
+  }
+
+  return { insights: [], pagination: { limit, offset, count: 0 } };
 };
 
 // Prompts por proyecto (para la nueva UI agrupada por categoría)
