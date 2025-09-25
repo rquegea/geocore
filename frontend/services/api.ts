@@ -1,4 +1,4 @@
-import { VisibilityData, Competitor, Mention } from "@/types";
+import { VisibilityData, Competitor, Mention, Prompt } from "@/types";
 import type { DateRange } from "react-day-picker";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5050';
@@ -187,4 +187,10 @@ export const getInsights = (periodOrRange: DateRange | string, filters?: FilterP
   url.set('limit', String(limit));
   url.set('offset', String(offset));
   return fetchFromAPI(`/api/insights?${url.toString()}`);
+};
+
+// Prompts por proyecto (para la nueva UI agrupada por categoría)
+export const getPromptsByProjectId = async (projectId: number): Promise<Prompt[]> => {
+  // Endpoint de ejemplo, ajusta si tu backend expone otro path
+  return fetchFromAPI<Prompt[]>(`/api/projects/${projectId}/prompts`);
 };

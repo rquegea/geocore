@@ -34,3 +34,14 @@ export interface Mention {
   }
   
   // ...y cualquier otra estructura de datos que tu API vaya a enviar.
+
+export interface Prompt {
+  id: number;
+  payload: any;
+  category: string;
+  // Campos opcionales/compatibilidad
+  query?: string;
+  topic?: string;
+  brand?: string;
+  created_at?: string | null;
+}
