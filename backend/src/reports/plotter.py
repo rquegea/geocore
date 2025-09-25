@@ -6,6 +6,12 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
+import numpy as np
+
+try:
+    from wordcloud import WordCloud
+except Exception:  # pragma: no cover
+    WordCloud = None  # type: ignore
 
 
 def _tmp_path(prefix: str, suffix: str = ".png") -> str:
@@ -90,6 +96,32 @@ def plot_sov_pie(sov_list: List[Tuple[str, float]]) -> Optional[str]:
     plt.savefig(out, dpi=160)
     plt.close()
     return out
+
+
+def plot_wordcloud_from_corpus(texts: List[str], *, width: int = 800, height: int = 400, background_color: str = "white") -> Optional[str]:
+    """
+    Genera una imagen de nube de palabras a partir de una lista de textos.
+    Si la librería wordcloud no está disponible o el corpus está vacío, devuelve None.
+    """
+    if not texts or not isinstance(texts, list):
+        return None
+    if WordCloud is None:
+        return None
+    try:
+        joined = "\n".join([t for t in texts if isinstance(t, str) and t.strip()])
+        if not joined.strip():
+            return None
+        wc = WordCloud(width=width, height=height, background_color=background_color, collocations=False)
+        wc_img = wc.generate(joined).to_array()
+        plt.figure(figsize=(width/100, height/100))
+        plt.imshow(np.array(wc_img), interpolation="bilinear")
+        plt.axis("off")
+        out = _tmp_path("wordcloud_")
+        plt.savefig(out, dpi=160, bbox_inches="tight", pad_inches=0.05)
+        plt.close()
+        return out
+    except Exception:
+        return None
 
 
 def plot_combined_visibility_sentiment(dates: List[str], visibility: List[float], sentiment: List[float]) -> Optional[str]:

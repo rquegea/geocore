@@ -6,6 +6,7 @@ from . import pdf_writer
 from ..engines.openai_engine import fetch_response
 from ..engines import strategic_prompts as s_prompts
 import json
+from typing import Optional
 
 
 def _build_kpi_rows(kpis: Dict) -> List[List[str]]:
@@ -164,7 +165,7 @@ def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = Non
 
     # Nivel 1: análisis por cluster
     cluster_summaries: List[Dict[str, Any]] = []
-    for c in (clusters or [])[:50]:  # límite defensivo
+    for c in (clusters or [])[:12]:  # límite defensivo para rendimiento
         cluster_obj = {
             "count": int(c.get("count", 0)),
             "avg_sentiment": float(c.get("avg_sentiment", 0.0)),
@@ -198,6 +199,13 @@ def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = Non
         "topics_top_bottom": plotter.plot_topics_top_bottom(top5, bottom5),
         "sov_pie": plotter.plot_sov_pie([(name, cnt) for name, cnt in kpis.get("sov_table", [])[:6]]),
     }
+
+    # Nueva: Wordcloud cualitativa reciente (corpus global)
+    try:
+        corpus = aggregator.get_all_mentions_for_period(limit=120)
+        images["wordcloud"] = plotter.plot_wordcloud_from_corpus(corpus)
+    except Exception:
+        images["wordcloud"] = None
 
     content_for_pdf: Dict[str, Any] = {
         "strategic": strategic_sections,
@@ -317,6 +325,9 @@ def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = Non
     if content_for_pdf["annex"].get("topics_text"):
         pdf_writer.add_paragraph(pdf, content_for_pdf["annex"]["topics_text"])
 
+    # Inserta la wordcloud si está disponible
+    pdf_writer.add_image(pdf, images.get("wordcloud"))
+
     return pdf.output(dest="S")
 
 
@@ -330,7 +341,7 @@ def generate_hybrid_report(full_data: Dict[str, Any]) -> bytes:
 
     # Preparar análisis de clusters (Nivel 1 y 2)
     cluster_summaries: List[Dict[str, Any]] = []
-    for c in (clusters or [])[:50]:
+    for c in (clusters or [])[:12]:
         cluster_obj = {
             "count": int(c.get("count", 0)),
             "avg_sentiment": float(c.get("avg_sentiment", 0.0)),

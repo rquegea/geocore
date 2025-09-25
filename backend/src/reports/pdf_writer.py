@@ -345,3 +345,105 @@ def build_pdf(content: Dict) -> bytes:
         return bytes(str(out).encode("utf-8", errors="ignore"))
 
 
+
+# --- NUEVO: Generador de estructura en blanco (portada + índice + secciones) ---
+def build_empty_structure_pdf(company_name: str) -> bytes:
+    """
+    Genera un PDF con solo la estructura solicitada:
+    - Portada con título "Marketing Intelligence" y nombre de empresa
+    - Índice con todas las secciones
+    - Páginas en blanco para cada sección con su encabezado
+    """
+    pdf = ReportPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=12)
+
+    # 1) Portada
+    pdf.add_page()
+    pdf.ln(60)
+    pdf.set_font("Helvetica", "B", 28)
+    pdf.cell(0, 14, _sanitize("Marketing Intelligence"), 0, 1, "C")
+    pdf.ln(10)
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, _sanitize(f"{company_name}"), 0, 1, "C")
+
+    # 2) Índice
+    pdf.add_page()
+    add_title(pdf, "Índice")
+
+    # Definir estructura solicitada
+    parte1 = [
+        "Dashboard Ejecutivo",
+        "Resumen Ejecutivo de KPIs",
+        "Share of Voice vs. Competencia",
+        "Evolución del Sentimiento (diario)",
+        "Evolución del Volumen de Menciones (diario)",
+        "Serie temporal - Análisis de competencia",
+        "Serie temporal - Análisis de marketing y estrategia",
+        "Serie temporal - Análisis de mercado",
+        "Serie temporal - Análisis contextual",
+        "Serie temporal - Análisis de oportunidades",
+        "Serie temporal - Análisis de riesgos",
+        "Serie temporal - Análisis de sentimiento y reputación",
+    ]
+    parte2 = [
+        "Informe Estratégico",
+        "Resumen Ejecutivo",
+        "Resumen Ejecutivo y Hallazgos Principales",
+        "Tendencias y Señales Emergentes",
+        "Análisis Competitivo",
+        "Plan de Acción Estratégico",
+        "Correlaciones Transversales entre Categorías",
+    ]
+    parte3 = [
+        "Anexo: Análisis Detallado por Categoría",
+        "Análisis de competencia",
+        "Análisis de marketing y estrategia",
+        "Análisis de mercado",
+        "Análisis contextual",
+        "Análisis de oportunidades",
+        "Análisis de riesgos",
+        "Análisis de sentimiento y reputación",
+    ]
+
+    def _write_index_block(title: str, items: List[str]):
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.cell(0, 8, _sanitize(title), 0, 1, "L")
+        pdf.set_font("Helvetica", size=11)
+        for it in items:
+            pdf.cell(0, 6, _sanitize(f"- {it}"), 0, 1, "L")
+        pdf.ln(2)
+
+    _write_index_block("Parte 1: Resumen Visual y KPIs", parte1)
+    _write_index_block("Parte 2: Informe Estratégico", parte2)
+    _write_index_block("Parte 3: Anexo - Análisis Detallado por Categoría", parte3)
+
+    # 3) Secciones en blanco
+    def _write_section_page(title: str):
+        pdf.add_page()
+        pdf.set_font("Helvetica", "B", 18)
+        pdf.cell(0, 12, _sanitize(title), 0, 1, "L")
+        pdf.ln(4)
+
+    # Parte 1
+    _write_section_page("Parte 1: Resumen Visual y KPIs")
+    for s in parte1:
+        _write_section_page(s)
+
+    # Parte 2
+    _write_section_page("Parte 2: Informe Estratégico")
+    for s in parte2:
+        _write_section_page(s)
+
+    # Parte 3
+    _write_section_page("Parte 3: Anexo - Análisis Detallado por Categoría")
+    for s in parte3:
+        _write_section_page(s)
+
+    out = pdf.output(dest="S")
+    if isinstance(out, (bytes, bytearray)):
+        return bytes(out)
+    try:
+        return bytes(str(out).encode("latin-1"))
+    except Exception:
+        return bytes(str(out).encode("utf-8", errors="ignore"))
+

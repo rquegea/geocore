@@ -17,6 +17,18 @@ except Exception:  # pragma: no cover
     KMeans = None  # type: ignore
 from src.engines.openai_engine import fetch_response
 
+# Mapeo de sinónimos de marcas (alineado con backend/app.py)
+BRAND_SYNONYMS: Dict[str, List[str]] = {
+    "The Core School": ["the core", "the core school", "thecore"],
+    "U-TAD": ["u-tad", "utad"],
+    "ECAM": ["ecam"],
+    "TAI": ["tai"],
+    "CES": ["ces"],
+    "CEV": ["cev"],
+    "FX Barcelona Film School": ["fx barcelona", "fx barcelona film school", "fx animation"],
+    "Septima Ars": ["septima ars", "séptima ars"],
+}
+
 
 def _db_url() -> str:
     host = os.getenv("POSTGRES_HOST", os.getenv("DB_HOST", "localhost"))
@@ -81,14 +93,29 @@ def _detect_brands(text: Optional[str], brands: List[str]) -> List[str]:
     return list(found)
 
 
-def get_kpi_summary(session: Optional[Session], project_id: int) -> Dict:
+def get_kpi_summary(
+    session: Optional[Session],
+    project_id: int,
+    *,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> Dict:
+    where: List[str] = ["q.id = :project_id"]
+    params: Dict[str, Any] = {"project_id": project_id}
+    if start_date:
+        where.append("m.created_at >= CAST(:start_date AS date)")
+        params["start_date"] = start_date
+    if end_date:
+        where.append("m.created_at < (CAST(:end_date AS date) + INTERVAL '1 day')")
+        params["end_date"] = end_date
+
     sql = text(
-        """
+        f"""
         SELECT COUNT(*) AS total_mentions,
                AVG(m.sentiment) AS sentiment_avg
         FROM mentions m
         JOIN queries q ON q.id = m.query_id
-        WHERE q.id = :project_id
+        WHERE {' AND '.join(where)}
         """
     )
     sov_sql = text(
@@ -108,7 +135,7 @@ def get_kpi_summary(session: Optional[Session], project_id: int) -> Dict:
         session = get_session()
         own_session = True
     try:
-        row = session.execute(sql, {"project_id": project_id}).mappings().first()
+        row = session.execute(sql, params).mappings().first()
         totals = dict(row) if row else {"total_mentions": 0, "sentiment_avg": None}
         sov_rows = session.execute(sov_sql).mappings().all()
     finally:
@@ -133,14 +160,28 @@ def get_kpi_summary(session: Optional[Session], project_id: int) -> Dict:
     }
 
 
-def get_sentiment_evolution(session: Optional[Session], project_id: int) -> List[Tuple[str, float]]:
+def get_sentiment_evolution(
+    session: Optional[Session],
+    project_id: int,
+    *,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> List[Tuple[str, float]]:
+    where: List[str] = ["q.id = :project_id"]
+    params: Dict[str, Any] = {"project_id": project_id}
+    if start_date:
+        where.append("m.created_at >= CAST(:start_date AS date)")
+        params["start_date"] = start_date
+    if end_date:
+        where.append("m.created_at < (CAST(:end_date AS date) + INTERVAL '1 day')")
+        params["end_date"] = end_date
     sql = text(
-        """
+        f"""
         SELECT DATE_TRUNC('day', m.created_at)::date AS d,
                AVG(m.sentiment) AS avg_s
         FROM mentions m
         JOIN queries q ON q.id = m.query_id
-        WHERE q.id = :project_id
+        WHERE {' AND '.join(where)}
         GROUP BY 1
         ORDER BY 1
         """
@@ -150,23 +191,37 @@ def get_sentiment_evolution(session: Optional[Session], project_id: int) -> List
         session = get_session()
         own_session = True
     try:
-        rows = session.execute(sql, {"project_id": project_id}).all()
+        rows = session.execute(sql, params).all()
     finally:
         if own_session:
             session.close()
     return [(r[0].strftime("%Y-%m-%d"), float(r[1] or 0.0)) for r in rows]
 
 
-def get_sentiment_by_category(session: Optional[Session], project_id: int) -> Dict[str, float]:
+def get_sentiment_by_category(
+    session: Optional[Session],
+    project_id: int,
+    *,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> Dict[str, float]:
+    where: List[str] = ["q.id = :project_id"]
+    params: Dict[str, Any] = {"project_id": project_id}
+    if start_date:
+        where.append("m.created_at >= CAST(:start_date AS date)")
+        params["start_date"] = start_date
+    if end_date:
+        where.append("m.created_at < (CAST(:end_date AS date) + INTERVAL '1 day')")
+        params["end_date"] = end_date
     sql = text(
-        """
+        f"""
         SELECT
           COALESCE((i.payload->>'category'), COALESCE(q.category, q.topic, 'Desconocida')) AS cat,
           AVG(m.sentiment) AS avg_s
         FROM mentions m
         JOIN queries q ON q.id = m.query_id
         LEFT JOIN insights i ON i.id = m.generated_insight_id
-        WHERE q.id = :project_id
+        WHERE {' AND '.join(where)}
         GROUP BY 1
         ORDER BY 1
         """
@@ -176,22 +231,36 @@ def get_sentiment_by_category(session: Optional[Session], project_id: int) -> Di
         session = get_session()
         own_session = True
     try:
-        rows = session.execute(sql, {"project_id": project_id}).all()
+        rows = session.execute(sql, params).all()
     finally:
         if own_session:
             session.close()
     return {str(r[0]): float(r[1] or 0.0) for r in rows}
 
 
-def get_topics_by_sentiment(session: Optional[Session], project_id: int) -> Tuple[List[Tuple[str, float]], List[Tuple[str, float]]]:
+def get_topics_by_sentiment(
+    session: Optional[Session],
+    project_id: int,
+    *,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> Tuple[List[Tuple[str, float]], List[Tuple[str, float]]]:
+    where: List[str] = ["q.id = :project_id"]
+    params: Dict[str, Any] = {"project_id": project_id}
+    if start_date:
+        where.append("m.created_at >= CAST(:start_date AS date)")
+        params["start_date"] = start_date
+    if end_date:
+        where.append("m.created_at < (CAST(:end_date AS date) + INTERVAL '1 day')")
+        params["end_date"] = end_date
     sql = text(
-        """
+        f"""
         SELECT jsonb_array_elements_text(COALESCE(m.key_topics, '[]'::jsonb)) AS topic,
                AVG(m.sentiment) AS avg_s,
                COUNT(*) AS cnt
         FROM mentions m
         JOIN queries q ON q.id = m.query_id
-        WHERE q.id = :project_id
+        WHERE {' AND '.join(where)}
         GROUP BY 1
         HAVING COUNT(*) >= 3
         """
@@ -201,7 +270,7 @@ def get_topics_by_sentiment(session: Optional[Session], project_id: int) -> Tupl
         session = get_session()
         own_session = True
     try:
-        rows = session.execute(sql, {"project_id": project_id}).all()
+        rows = session.execute(sql, params).all()
     finally:
         if own_session:
             session.close()
@@ -244,6 +313,10 @@ def get_share_of_voice_and_trends(
             """
             SELECT
               COALESCE((i.payload->>'category'), COALESCE(q.category, q.topic, 'Desconocida')) AS category,
+              m.key_topics,
+              LOWER(COALESCE(m.response,'')) AS resp,
+              LOWER(COALESCE(m.source_title,'')) AS title,
+              i.payload,
               m.summary,
               m.sentiment,
               DATE_TRUNC('day', m.created_at)::date AS d
@@ -258,9 +331,14 @@ def get_share_of_voice_and_trends(
 
         brand_counts_by_period: List[Dict] = []
         competitors_global: Counter = Counter()
+        # Preparar sinónimos en minúsculas para detección robusta
+        norm_synonyms: Dict[str, List[str]] = {
+            canon: [canon.lower()] + [s.lower() for s in alts]
+            for canon, alts in BRAND_SYNONYMS.items()
+        }
+
         for (p_start, p_end) in periods:
             rows = session.execute(sql, {"project_id": project_id, "start_date": p_start, "end_date": p_end}).mappings().all()
-            brands = [client_brand]
             per_category = defaultdict(lambda: {"client": 0, "total": 0, "competitors": Counter()})
             comp_mentions = Counter()
             sentiment_sum = 0.0
@@ -268,20 +346,58 @@ def get_share_of_voice_and_trends(
 
             for r in rows:
                 category = str(r["category"]) if r["category"] is not None else "Desconocida"
-                summary = r.get("summary")
+                key_topics = r.get("key_topics") or []
+                resp = (r.get("resp") or "").lower()
+                title = (r.get("title") or "").lower()
+                payload = r.get("payload") or {}
                 sent = float(r.get("sentiment") or 0.0)
-                if summary:
-                    detected = _detect_brands(summary, brands)
-                else:
+
+                detected: List[str] = []
+                try:
+                    # key_topics: coincidencia exacta con sinónimos normalizados
+                    try_topics = [str(t).strip().lower() for t in (key_topics or [])]
+                    # payload.brands: puede ser lista de objetos o strings
+                    payload_brands: List[str] = []
+                    try:
+                        raw_b = payload.get('brands') if isinstance(payload, dict) else []
+                        if isinstance(raw_b, list):
+                            for b in raw_b:
+                                if isinstance(b, dict):
+                                    name = (b.get('name') or '').strip().lower()
+                                    if name:
+                                        payload_brands.append(name)
+                                elif isinstance(b, str):
+                                    payload_brands.append(b.strip().lower())
+                    except Exception:
+                        pass
+
+                    for canon, syns in norm_synonyms.items():
+                        hit = False
+                        for s in syns:
+                            if s in try_topics:
+                                hit = True; break
+                            if s and (s in resp or s in title):
+                                hit = True; break
+                            if s in payload_brands:
+                                hit = True; break
+                        if hit:
+                            detected.append(canon)
+                except Exception:
                     detected = []
+
                 if detected:
+                    seen = set()
                     for b in detected:
+                        if b in seen:
+                            continue
+                        seen.add(b)
                         if b == client_brand:
                             per_category[category]["client"] += 1
                         else:
                             comp_mentions[b] += 1
                             per_category[category]["competitors"][b] += 1
                         per_category[category]["total"] += 1
+
                 sentiment_sum += sent
                 sentiment_count += 1
 
@@ -635,11 +751,11 @@ def get_full_report_data(
     """
     session = get_session()
     try:
-        # KPIs y métricas
-        kpis = get_kpi_summary(session, project_id)
-        evo = get_sentiment_evolution(session, project_id)
-        by_cat = get_sentiment_by_category(session, project_id)
-        top5, bottom5 = get_topics_by_sentiment(session, project_id)
+        # KPIs y métricas (aplicar rango temporal si viene informado)
+        kpis = get_kpi_summary(session, project_id, start_date=start_date, end_date=end_date)
+        evo = get_sentiment_evolution(session, project_id, start_date=start_date, end_date=end_date)
+        by_cat = get_sentiment_by_category(session, project_id, start_date=start_date, end_date=end_date)
+        top5, bottom5 = get_topics_by_sentiment(session, project_id, start_date=start_date, end_date=end_date)
         sov_trends = get_share_of_voice_and_trends(session, project_id, start_date=start_date, end_date=end_date)
 
         # Clusters
@@ -676,6 +792,26 @@ def get_full_report_data(
     finally:
         session.close()
 
+
+class Aggregator:
+    """
+    Interfaz orientada a objetos para orquestar la obtención de datos del informe.
+    Mantiene compatibilidad con el enfoque SQL actual sin requerir DataFrames.
+    """
+    def get_full_report_data(
+        self,
+        project_id: int,
+        *,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        max_rows: int = 5000,
+    ) -> Dict[str, Any]:
+        return get_full_report_data(
+            project_id,
+            start_date=start_date,
+            end_date=end_date,
+            max_rows=max_rows,
+        )
 
 def get_competitive_opportunities(
     session: Session,
