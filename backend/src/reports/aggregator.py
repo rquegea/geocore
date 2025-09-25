@@ -448,6 +448,298 @@ def get_share_of_voice_and_trends(
             session.close()
 
 
+def get_visibility_series(
+    session: Optional[Session],
+    project_id: int,
+    *,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> list[tuple[str, float]]:
+    """
+    Serie diaria de visibilidad (%) de la marca principal del proyecto:
+    visibilidad = menciones de la marca / total de menciones por día.
+    """
+    own_session = False
+    if session is None:
+        session = get_session()
+        own_session = True
+    try:
+        # Resolver marca principal
+        brow = session.execute(text("SELECT COALESCE(brand, topic, 'Unknown') AS b FROM queries WHERE id=:pid"), {"pid": int(project_id)}).first()
+        client_brand = (brow[0] if brow else "Unknown")
+
+        # Consulta de menciones en el rango (similar a get_share_of_voice_and_trends)
+        if not start_date:
+            start_date = "1970-01-01"
+        if not end_date:
+            end_date = "2999-12-31"
+
+        sql = text(
+            """
+            SELECT
+              LOWER(COALESCE(m.response,'')) AS resp,
+              LOWER(COALESCE(m.source_title,'')) AS title,
+              i.payload,
+              DATE_TRUNC('day', m.created_at)::date AS d
+            FROM mentions m
+            JOIN queries q ON q.id = m.query_id
+            LEFT JOIN insights i ON i.id = m.generated_insight_id
+            WHERE q.id = :project_id
+              AND m.created_at >= CAST(:start_date AS date)
+              AND m.created_at < (CAST(:end_date AS date) + INTERVAL '1 day')
+            """
+        )
+
+        rows = session.execute(sql, {"project_id": int(project_id), "start_date": start_date, "end_date": end_date}).mappings().all()
+
+        # Preparar sinónimos normalizados
+        norm_synonyms: Dict[str, list[str]] = {
+            canon: [canon.lower()] + [s.lower() for s in alts]
+            for canon, alts in BRAND_SYNONYMS.items()
+        }
+        syns = norm_synonyms.get(client_brand, [client_brand.lower()])
+
+        from collections import defaultdict
+        brand_by_day: Dict[str, int] = defaultdict(int)
+        total_by_day: Dict[str, int] = defaultdict(int)
+
+        for r in rows:
+            day: str = str(r.get("d"))
+            total_by_day[day] += 1
+
+            try:
+                payload = r.get("payload") or {}
+                resp = (r.get("resp") or "").lower()
+                title = (r.get("title") or "").lower()
+
+                payload_brands: list[str] = []
+                if isinstance(payload, dict):
+                    raw_b = payload.get("brands")
+                    if isinstance(raw_b, list):
+                        for b in raw_b:
+                            if isinstance(b, dict):
+                                name = (b.get("name") or "").strip().lower()
+                                if name:
+                                    payload_brands.append(name)
+                            elif isinstance(b, str):
+                                payload_brands.append(b.strip().lower())
+
+                detected_client = False
+                for s in syns:
+                    if not s:
+                        continue
+                    if s in resp or s in title or s in payload_brands:
+                        detected_client = True
+                        break
+                if detected_client:
+                    brand_by_day[day] += 1
+            except Exception:
+                # Falla silenciosa, solo cuenta como total
+                pass
+
+        # Construir serie ordenada
+        series: list[tuple[str, float]] = []
+        for day in sorted(total_by_day.keys()):
+            num = int(brand_by_day.get(day, 0))
+            den = int(total_by_day.get(day, 0))
+            pct = (num / float(max(den, 1))) * 100.0
+            series.append((day, round(pct, 1)))
+        return series
+    finally:
+        if own_session:
+            session.close()
+
+
+def get_industry_sov_ranking(
+    session: Optional[Session],
+    *,
+    start_date: Optional[str],
+    end_date: Optional[str],
+) -> list[tuple[str, float]]:
+    """Ranking SOV global: porcentaje por marca sobre total de menciones con marca detectada."""
+    own_session = False
+    if session is None:
+        session = get_session()
+        own_session = True
+    try:
+        sql = text(
+            """
+            SELECT
+              LOWER(COALESCE(m.response,'')) AS resp,
+              LOWER(COALESCE(m.source_title,'')) AS title,
+              i.payload
+            FROM mentions m
+            JOIN queries q ON q.id = m.query_id
+            LEFT JOIN insights i ON i.id = m.generated_insight_id
+            WHERE m.created_at >= CAST(:start_date AS date)
+              AND m.created_at < (CAST(:end_date AS date) + INTERVAL '1 day')
+            """
+        )
+        rows = session.execute(sql, {"start_date": start_date or "1970-01-01", "end_date": end_date or "2999-12-31"}).mappings().all()
+        from collections import Counter
+        counts: Counter[str] = Counter()
+        # Sinónimos normalizados
+        norm_synonyms: Dict[str, list[str]] = {c: [c.lower()] + [s.lower() for s in alts] for c, alts in BRAND_SYNONYMS.items()}
+        for r in rows:
+            payload = r.get("payload") or {}
+            resp = (r.get("resp") or "").lower()
+            title = (r.get("title") or "").lower()
+            payload_brands: list[str] = []
+            if isinstance(payload, dict):
+                raw_b = payload.get("brands")
+                if isinstance(raw_b, list):
+                    for b in raw_b:
+                        if isinstance(b, dict):
+                            name = (b.get("name") or "").strip().lower()
+                            if name:
+                                payload_brands.append(name)
+                        elif isinstance(b, str):
+                            payload_brands.append(b.strip().lower())
+            seen = set()
+            for canon, syns in norm_synonyms.items():
+                if canon in seen:
+                    continue
+                for s in syns:
+                    if s and (s in resp or s in title or s in payload_brands):
+                        counts[canon] += 1
+                        seen.add(canon)
+                        break
+        total = sum(counts.values()) or 1
+        pairs = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+        return [(name, round(100.0 * cnt / total, 1)) for name, cnt in pairs]
+    finally:
+        if own_session:
+            session.close()
+
+
+def get_visibility_ranking(
+    session: Optional[Session],
+    *,
+    start_date: Optional[str],
+    end_date: Optional[str],
+) -> list[tuple[str, float]]:
+    """Ranking de visibilidad: porcentaje de apariciones por marca sobre total de respuestas."""
+    own_session = False
+    if session is None:
+        session = get_session()
+        own_session = True
+    try:
+        sql = text(
+            """
+            SELECT
+              LOWER(COALESCE(m.response,'')) AS resp,
+              LOWER(COALESCE(m.source_title,'')) AS title,
+              i.payload
+            FROM mentions m
+            JOIN queries q ON q.id = m.query_id
+            LEFT JOIN insights i ON i.id = m.generated_insight_id
+            WHERE m.created_at >= CAST(:start_date AS date)
+              AND m.created_at < (CAST(:end_date AS date) + INTERVAL '1 day')
+            """
+        )
+        rows = session.execute(sql, {"start_date": start_date or "1970-01-01", "end_date": end_date or "2999-12-31"}).mappings().all()
+        from collections import Counter
+        total_by_brand: Counter[str] = Counter()
+        # Sinónimos normalizados
+        norm_synonyms: Dict[str, list[str]] = {c: [c.lower()] + [s.lower() for s in alts] for c, alts in BRAND_SYNONYMS.items()}
+        for r in rows:
+            payload = r.get("payload") or {}
+            resp = (r.get("resp") or "").lower()
+            title = (r.get("title") or "").lower()
+            payload_brands: list[str] = []
+            if isinstance(payload, dict):
+                raw_b = payload.get("brands")
+                if isinstance(raw_b, list):
+                    for b in raw_b:
+                        if isinstance(b, dict):
+                            name = (b.get("name") or "").strip().lower()
+                            if name:
+                                payload_brands.append(name)
+                        elif isinstance(b, str):
+                            payload_brands.append(b.strip().lower())
+            detected: list[str] = []
+            for canon, syns in norm_synonyms.items():
+                for s in syns:
+                    if s and (s in resp or s in title or s in payload_brands):
+                        detected.append(canon)
+                        break
+            for canon in set(detected):
+                total_by_brand[canon] += 1
+        total = sum(total_by_brand.values()) or 1
+        pairs = sorted(total_by_brand.items(), key=lambda x: x[1], reverse=True)
+        return [(name, round(100.0 * cnt / total, 1)) for name, cnt in pairs]
+    finally:
+        if own_session:
+            session.close()
+
+
+def get_sentiment_positive_series(
+    session: Optional[Session],
+    project_id: int,
+    *,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> list[tuple[str, float]]:
+    """Serie diaria del porcentaje de menciones POSITIVAS de la marca principal (0-100%)."""
+    own_session = False
+    if session is None:
+        session = get_session()
+        own_session = True
+    try:
+        # Resolver marca
+        brow = session.execute(text("SELECT COALESCE(brand, topic, 'Unknown') AS b FROM queries WHERE id=:pid"), {"pid": int(project_id)}).first()
+        client_brand = (brow[0] if brow else "Unknown")
+        syns = [client_brand.lower()]
+        syns.extend([s.lower() for s in BRAND_SYNONYMS.get(client_brand, [])])
+
+        if not start_date:
+            start_date = "1970-01-01"
+        if not end_date:
+            end_date = "2999-12-31"
+
+        sql = text(
+            """
+            WITH rows AS (
+                SELECT 
+                    DATE(m.created_at) AS d,
+                    COALESCE(m.sentiment, 0) AS sent,
+                    (
+                        EXISTS (
+                            SELECT 1 FROM jsonb_array_elements_text(COALESCE(to_jsonb(m.key_topics),'[]'::jsonb)) kt
+                            WHERE LOWER(TRIM(kt)) = ANY(:syns)
+                        )
+                        OR LOWER(COALESCE(m.response,'')) LIKE ANY(:likes)
+                        OR LOWER(COALESCE(m.source_title,'')) LIKE ANY(:likes)
+                        OR EXISTS (
+                            SELECT 1 FROM jsonb_array_elements(COALESCE(i.payload->'brands','[]'::jsonb)) b
+                            WHERE LOWER(TRIM(CASE WHEN jsonb_typeof(b)='object' THEN COALESCE(b->>'name','') ELSE TRIM(BOTH '"' FROM b::text) END)) = ANY(:syns)
+                        )
+                    ) AS is_brand
+                FROM mentions m
+                JOIN queries q ON q.id = m.query_id
+                LEFT JOIN insights i ON i.id = m.generated_insight_id
+                WHERE m.created_at >= CAST(:start_date AS date)
+                  AND m.created_at < (CAST(:end_date AS date) + INTERVAL '1 day')
+            )
+            SELECT d,
+                   SUM(CASE WHEN is_brand AND sent > 0.3 THEN 1 ELSE 0 END) AS pos,
+                   SUM(CASE WHEN is_brand THEN 1 ELSE 0 END) AS tot
+            FROM rows
+            GROUP BY d
+            ORDER BY d
+            """
+        )
+        likes = [f"%{s}%" for s in syns]
+        rows = session.execute(sql, {"syns": syns, "likes": likes, "start_date": start_date, "end_date": end_date}).all()
+        series: list[tuple[str, float]] = []
+        for d, pos, tot in rows:
+            pct = (float(pos or 0) / float(max(tot or 0, 1))) * 100.0
+            series.append((str(d), round(pct, 1)))
+        return series
+    finally:
+        if own_session:
+            session.close()
+
 def get_agent_insights_data(session: Optional[Session], project_id: int, limit: int = 200) -> Dict[str, Any]:
     """
     Recupera payloads de la tabla insights asociados al proyecto (query_id) y
@@ -713,7 +1005,7 @@ def aggregate_clusters_for_report(
             cent_norm = np.linalg.norm(centroid) + 1e-12
             centroid_n = centroid / cent_norm
             scores = cluster_vectors @ centroid_n
-            order = np.argsort(-scores)[:5]
+            order = np.argsort(-scores)[:20]
             sel_idx = idx[order]
             selected: list[ClusterMention] = [mentions[i] for i in sel_idx]
 
@@ -776,12 +1068,16 @@ def get_full_report_data(
             top_n=10,
         )
 
+        # Serie global de visibilidad para el dashboard
+        visibility_series = get_visibility_series(session, project_id, start_date=start_date, end_date=end_date)
+
         return {
             "project_id": project_id,
             "kpis": kpis,
             "time_series": {
                 "sentiment_per_day": evo,
             },
+            "visibility_timeseries": visibility_series,
             "sentiment_by_category": by_cat,
             "topics_top5": top5,
             "topics_bottom5": bottom5,

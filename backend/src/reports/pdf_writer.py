@@ -535,16 +535,50 @@ def build_skeleton_with_content(company_name: str, images: Dict[str, Optional[st
 
     # Mapeo de secciones -> claves de imágenes
     section_to_image_keys: Dict[str, List[str]] = {
-        # Añadimos fallbacks a imágenes clásicas si no existen las de Parte 1
+        # Dashboard Ejecutivo (tres KPIs): SOV global, Visibilidad global, Sentimiento global
+        "Share of Voice vs. Competencia": ["sov_pie", "part1_sov_donut"],
+        "Evolución del Sentimiento (diario)": ["sentiment_evolution", "part1_sentiment_line"],
+        # Usamos la línea de visibilidad global
+        "Serie temporal - Análisis de competencia": ["part1_visibility_line", "topics_top_bottom"],
+        # Resto de secciones
         "Resumen Ejecutivo de KPIs": ["part1_category_distribution", "sentiment_by_category"],
-        "Share of Voice vs. Competencia": ["part1_sov_donut", "sov_pie"],
-        "Evolución del Sentimiento (diario)": ["part1_sentiment_line", "sentiment_evolution"],
-        "Serie temporal - Análisis de competencia": ["part1_visibility_ranking", "topics_top_bottom"],
     }
 
     for s in parte1:
         _write_section_page(s)
         keys = section_to_image_keys.get(s, [])
+        if s == "Share of Voice vs. Competencia":
+            # Dos columnas: izquierda SOV pie, derecha ranking (imagen precompuesta: images["sov_ranking_table"]) si existe
+            page_width = pdf.w - 2 * pdf.l_margin
+            col_w = page_width / 2.0
+            y0 = pdf.get_y()
+            # Izquierda
+            pdf.set_xy(pdf.l_margin, y0)
+            add_image(pdf, images.get(keys[0] if keys else None), width=col_w - 6)
+            # Derecha (ranking renderizado como imagen, si no hay, dejar vacío)
+            pdf.set_xy(pdf.l_margin + col_w, y0)
+            add_image(pdf, images.get("sov_ranking_table"), width=col_w - 6)
+            continue
+        if s == "Evolución del Sentimiento (diario)":
+            # Dos columnas: izquierda línea sentimiento, derecha barra distribución (imagen images["sentiment_distribution"]) si existe
+            page_width = pdf.w - 2 * pdf.l_margin
+            col_w = page_width / 2.0
+            y0 = pdf.get_y()
+            pdf.set_xy(pdf.l_margin, y0)
+            add_image(pdf, images.get(keys[0] if keys else None), width=col_w - 6)
+            pdf.set_xy(pdf.l_margin + col_w, y0)
+            add_image(pdf, images.get("sentiment_distribution"), width=col_w - 6)
+            continue
+        if s == "Evolución del Volumen de Menciones (diario)":
+            # Dos columnas: izquierda visibilidad (línea), derecha ranking visibilidad
+            page_width = pdf.w - 2 * pdf.l_margin
+            col_w = page_width / 2.0
+            y0 = pdf.get_y()
+            pdf.set_xy(pdf.l_margin, y0)
+            add_image(pdf, images.get("visibility_line"), width=col_w - 6)
+            pdf.set_xy(pdf.l_margin + col_w, y0)
+            add_image(pdf, images.get("visibility_ranking_table"), width=col_w - 6)
+            continue
         for k in keys:
             add_image(pdf, images.get(k), width=180)
 

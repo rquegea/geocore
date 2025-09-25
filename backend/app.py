@@ -3196,6 +3196,57 @@ def get_insights():
                 "examples": c.get("example_mentions", []),
             })
 
+        # Fallback clásico: si hay pocos clusters, enriquecer con insights históricos
+        classic_insights: list[dict] = []
+        try:
+            if len(clusters_out) < 10:
+                from src.reports import aggregator as agg2
+                sess2 = agg2.get_session()
+                try:
+                    summary = agg2.get_agent_insights_data(sess2, project_id, limit=300)
+                finally:
+                    sess2.close()
+
+                buckets = (summary or {}).get("buckets", {})
+                # Convertir buckets en filas compatibles
+                def rows_from_list(key: str, arr: list[str | dict]) -> list[dict]:
+                    out: list[dict] = []
+                    for i, it in enumerate(arr or []):
+                        if isinstance(it, str):
+                            payload = {key: [it]}
+                        elif isinstance(it, dict):
+                            payload = {key: [it.get("text") or it.get("title") or it.get("opportunity") or it.get("risk") or it.get("trend") or ""]}
+                        else:
+                            continue
+                        out.append({
+                            "id": i + 1,
+                            "query_id": project_id,
+                            "payload": payload,
+                            "created_at": None,
+                        })
+                    return out
+
+                classic_insights.extend(rows_from_list("opportunities", buckets.get("opportunities", [])))
+                classic_insights.extend(rows_from_list("risks", buckets.get("risks", [])))
+                classic_insights.extend(rows_from_list("trends", buckets.get("trends", [])))
+                # quotes y ctas
+                if isinstance(buckets.get("ctas"), list) and buckets["ctas"]:
+                    classic_insights.append({
+                        "id": 99901,
+                        "query_id": project_id,
+                        "payload": {"calls_to_action": [x if isinstance(x, str) else str(x) for x in buckets["ctas"]]},
+                        "created_at": None,
+                    })
+                if isinstance(buckets.get("quotes"), list) and buckets["quotes"]:
+                    classic_insights.append({
+                        "id": 99902,
+                        "query_id": project_id,
+                        "payload": {"quotes": [x if isinstance(x, str) else str(x) for x in buckets["quotes"]]},
+                        "created_at": None,
+                    })
+        except Exception:
+            classic_insights = []
+
         return jsonify({
             "project_id": project_id,
             "period": {
@@ -3203,6 +3254,7 @@ def get_insights():
                 "end": filters.get('end_date').isoformat() if filters.get('end_date') else None,
             },
             "clusters": clusters_out,
+            "insights": classic_insights,
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500

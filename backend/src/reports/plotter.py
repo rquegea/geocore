@@ -20,6 +20,31 @@ def _tmp_path(prefix: str, suffix: str = ".png") -> str:
     return path
 
 
+def plot_line_series(dates: List[str], values: List[float], *, title: str = "", ylabel: str = "", ylim: tuple | None = None, color: str = "#1f77b4") -> Optional[str]:
+    if not dates or not values:
+        return None
+    sns.set_theme(style="whitegrid")
+    plt.figure(figsize=(8, 3))
+    sns.lineplot(x=dates, y=values, marker="o", linewidth=1.8, color=color)
+    try:
+        step = max(1, len(dates) // 8)
+        xticks_idx = list(range(0, len(dates), step))
+        xticks_labels = [dates[i] for i in xticks_idx]
+        plt.xticks(xticks_idx, xticks_labels, rotation=45, ha="right")
+    except Exception:
+        plt.xticks(rotation=45, ha="right")
+    if ylabel:
+        plt.ylabel(ylabel)
+    if title:
+        plt.title(title)
+    if ylim is not None:
+        plt.ylim(*ylim)
+    plt.tight_layout()
+    out = _tmp_path("line_series_")
+    plt.savefig(out, dpi=160)
+    plt.close()
+    return out
+
 def plot_sentiment_evolution(series: List[Tuple[str, float]]) -> Optional[str]:
     if not series:
         return None

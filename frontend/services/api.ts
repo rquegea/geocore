@@ -199,18 +199,20 @@ export const getInsights = async (
     return data as { insights: InsightRow[]; pagination?: { limit: number; offset: number; count: number } };
   }
 
-  // Nuevo formato del backend: { clusters: [...] }
+  // Nuevo formato del backend: { clusters: [...], insights?: [...] }
   if (data && Array.isArray(data.clusters)) {
-    const items: InsightRow[] = data.clusters.map((c: any, idx: number) => {
-      const topicName = typeof c?.topic_name === 'string' && c.topic_name.trim() ? String(c.topic_name) : 'Tema';
-      const volume = typeof c?.volume === 'number' ? c.volume : Number(c?.volume) || 0;
-      const avgSent = typeof c?.avg_sentiment === 'number' ? c.avg_sentiment : 0;
-      const quotes = Array.isArray(c?.examples)
-        ? (c.examples
-            .map((e: any) => (e && typeof e.summary === 'string' ? e.summary : null))
-            .filter((s: string | null) => !!s) as string[])
-        : [];
-      return {
+    const baseItems: InsightRow[] = []
+    data.clusters.forEach((c: any, idx: number) => {
+      const topicName = typeof c?.topic_name === 'string' && c.topic_name.trim() ? String(c.topic_name) : 'Tema'
+      const volume = typeof c?.volume === 'number' ? c.volume : Number(c?.volume) || 0
+      const avgSent = typeof c?.avg_sentiment === 'number' ? c.avg_sentiment : 0
+      const examples = Array.isArray(c?.examples) ? c.examples : []
+      const quotes = examples
+        .map((e: any) => (e && typeof e.summary === 'string' ? e.summary : null))
+        .filter((s: string | null) => !!s) as string[]
+
+      // 1) Tendencia por tópico
+      baseItems.push({
         id: Number(c?.cluster_id ?? idx),
         query_id: 0,
         created_at: null,
@@ -224,9 +226,38 @@ export const getInsights = async (
           topic_frequency: topicName ? { [topicName]: volume } : {},
           avg_sentiment: avgSent,
         },
-      } as InsightRow;
-    });
-    return { insights: items, pagination: { limit, offset, count: items.length } };
+      })
+
+      // 2) Oportunidades y riesgos derivados de ejemplos
+      const opps: string[] = []
+      const risks: string[] = []
+      examples.forEach((e: any) => {
+        const s = Number(e?.sentiment)
+        const text = typeof e?.summary === 'string' ? e.summary : ''
+        if (!text) return
+        if (s > 0.3) opps.push(text)
+        else if (s < -0.3) risks.push(text)
+      })
+      if (opps.length) {
+        baseItems.push({ id: Number((c?.cluster_id ?? idx) + 100000), query_id: 0, created_at: null, payload: { opportunities: opps, top_themes: [topicName] } })
+      }
+      if (risks.length) {
+        baseItems.push({ id: Number((c?.cluster_id ?? idx) + 200000), query_id: 0, created_at: null, payload: { risks, top_themes: [topicName] } })
+      }
+    })
+
+    // 3) Mezclar insights clásicos si el backend los trae
+    if (Array.isArray(data.insights)) {
+      const classic: InsightRow[] = (data.insights as any[]).map((r: any, i: number) => ({
+        id: Number(r?.id ?? (900000 + i)),
+        query_id: Number(r?.query_id ?? 0),
+        created_at: r?.created_at ?? null,
+        payload: (r?.payload || {}) as InsightPayload,
+      }))
+      baseItems.push(...classic)
+    }
+
+    return { insights: baseItems, pagination: { limit, offset, count: baseItems.length } }
   }
 
   return { insights: [], pagination: { limit, offset, count: 0 } };

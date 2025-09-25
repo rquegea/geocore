@@ -438,13 +438,21 @@ export function AnalyticsDashboard() {
   useEffect(() => {
     const loadFiltersLists = async () => {
       try {
-        const [modelsRes, topicsRes] = await Promise.all([
+        const [modelsRes] = await Promise.all([
           getModels(),
-          getTopics(),
         ])
         setModelOptions(["all", ...modelsRes.models])
-        // Los topics deben ser globales para poder cambiar entre ellos sin que la lista se bloquee
-        setTopicOptions(["all", ...(topicsRes.topics || [])])
+        // Fijamos el catálogo de tipos de análisis (índice del informe)
+        const ANALYSIS_TYPES = [
+          "Análisis de Competencia",
+          "Análisis de Marketing y Estrategia",
+          "Análisis de Mercado",
+          "Análisis Contextual",
+          "Análisis de Oportunidades",
+          "Análisis de Riesgos",
+          "Análisis de Sentimiento y Reputación",
+        ]
+        setTopicOptions(["all", ...ANALYSIS_TYPES])
       } catch (e) {
         console.error("No se pudieron cargar los listados de filtros", e)
       }
@@ -505,12 +513,12 @@ export function AnalyticsDashboard() {
       try {
         setInsightsLoading(true)
         const filters = { model: selectedModel, source: selectedSource, topic: selectedTopic, brand: primaryBrandName }
-        let res = await getInsights(dateRange, filters, 200, 0)
+        let res = await getInsights(dateRange, filters, 1000, 0)
         let rows = res.insights || []
         // Fallback: si con la marca hay muy pocos clusters/insights, cargar también sin marca
         if ((rows?.length || 0) < 5) {
           try {
-            const resFallback = await getInsights(dateRange, { model: selectedModel, source: selectedSource, topic: selectedTopic }, 200, 0)
+            const resFallback = await getInsights(dateRange, { model: selectedModel, source: selectedSource, topic: selectedTopic }, 1000, 0)
             if ((resFallback.insights?.length || 0) > (rows?.length || 0)) {
               res = resFallback
               rows = resFallback.insights
@@ -561,6 +569,13 @@ export function AnalyticsDashboard() {
       }
       return null
     }
+    const normalizeForDedup = (s: string) => s
+      .toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+
     insightsRows.forEach((row) => {
       const p = row.payload || ({} as any)
       const imp = impactFrom(p)
@@ -580,6 +595,27 @@ export function AnalyticsDashboard() {
       if (Array.isArray(p.quotes)) data.quotes.push(...p.quotes.filter((q: any) => typeof q === 'string'))
       if (Array.isArray(p.calls_to_action)) data.ctas.push(...p.calls_to_action.filter((c: any) => typeof c === 'string'))
     })
+
+    // Deduplicación por similitud textual (clave normalizada) conservando mayor impacto
+    const impactRank: Record<StrategyItem['impact'], number> = { 'Bajo': 0, 'Medio': 1, 'Alto': 2 }
+    const dedupItems = (arr: StrategyItem[]) => {
+      const map = new Map<string, StrategyItem>()
+      for (const it of arr) {
+        const key = normalizeForDedup(it.text)
+        const prev = map.get(key)
+        if (!prev || impactRank[it.impact] > impactRank[prev.impact]) {
+          map.set(key, it)
+        }
+      }
+      return Array.from(map.values())
+    }
+    const dedupStrings = (arr: string[]) => Array.from(new Map(arr.map(s => [normalizeForDedup(s), s])).values())
+
+    data.opportunities = dedupItems(data.opportunities)
+    data.risks = dedupItems(data.risks)
+    data.trends = dedupItems(data.trends)
+    data.quotes = dedupStrings(data.quotes)
+    data.ctas = dedupStrings(data.ctas)
     const term = strategySearch.trim().toLowerCase()
     const filterItem = (arr: StrategyItem[]) => term ? arr.filter(it => it.text.toLowerCase().includes(term)) : arr
     const sorters: Record<string, (a: StrategyItem, b: StrategyItem) => number> = {
@@ -619,20 +655,26 @@ export function AnalyticsDashboard() {
 
   // Sugerir CTAs cuando no existan en los insights: derivar de oportunidades/ riesgos/ tendencias
   const suggestedCtas: string[] = useMemo(() => {
+    const norm = (s: string) => s
+      .toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ').trim()
     if (aggregatedInsights.ctas && aggregatedInsights.ctas.length > 0) {
-      return aggregatedInsights.ctas
+      const uniq = new Map(aggregatedInsights.ctas.map(s => [norm(s), s]))
+      return Array.from(uniq.values())
     }
     const derived: string[] = []
-    aggregatedInsights.opportunities.slice(0, 10).forEach((o) => {
+    aggregatedInsights.opportunities.slice(0, 20).forEach((o) => {
       derived.push(`Aprovechar oportunidad: ${o.text}`)
     })
-    aggregatedInsights.trends.slice(0, 10).forEach((t) => {
+    aggregatedInsights.trends.slice(0, 20).forEach((t) => {
       derived.push(`Capitalizar tendencia: ${t.text}`)
     })
-    aggregatedInsights.risks.slice(0, 10).forEach((r) => {
+    aggregatedInsights.risks.slice(0, 20).forEach((r) => {
       derived.push(`Mitigar riesgo: ${r.text}`)
     })
-    return derived
+    const uniq = new Map(derived.map(s => [norm(s), s]))
+    return Array.from(uniq.values())
   }, [aggregatedInsights])
 
   const refreshPromptsAndTopics = async () => {
@@ -1220,7 +1262,7 @@ export function AnalyticsDashboard() {
                         onPresetChange={handlePresetChange}
                         selectedTopic={selectedTopic}
                         onTopicChange={setSelectedTopic}
-                        topicOptions={topicOptions.map<ToolbarOptionItem>((t) => ({ value: t, label: t === 'all' ? 'Todos los temas' : translateTopicToSpanish(t) }))}
+                        topicOptions={topicOptions.map<ToolbarOptionItem>((t) => ({ value: t, label: t === 'all' ? 'Todos los temas' : t }))}
                         selectedModel={selectedModel}
                         onModelChange={setSelectedModel}
                         modelOptions={modelOptions}
@@ -1407,25 +1449,31 @@ export function AnalyticsDashboard() {
                   </>
                 )}
                 {activeTab === 'Prompts' && (
-                  <PromptsTab
-                    activePeriod={activePeriod as PresetPeriod}
-                    onPresetChange={handlePresetChange}
-                    selectedTopic={selectedTopic}
-                    onTopicChange={setSelectedTopic}
-                    topicOptions={topicOptions}
-                    selectedModel={selectedModel}
-                    onModelChange={setSelectedModel}
-                    modelOptions={modelOptions}
-                    dateRange={dateRange}
-                    brandName={brandName}
-                    openTopics={openTopics}
-                    setOpenTopics={setOpenTopics}
-                    openPrompt={openPrompt}
-                    openEditPrompt={openEditPrompt}
-                    handleDeletePrompt={handleDeletePrompt}
-                    translateTopicToSpanish={translateTopicToSpanish}
-                    emojiForTopic={emojiForTopic}
-                  />
+                  <>
+                    <div className="flex items-center justify-between">
+                      <GlobalFiltersToolbar
+                        activePeriod={activePeriod as ToolbarPresetPeriod}
+                        onPresetChange={handlePresetChange}
+                        selectedTopic={selectedTopic}
+                        onTopicChange={setSelectedTopic}
+                        topicOptions={topicOptions.map<ToolbarOptionItem>((t) => ({ value: t, label: t === 'all' ? 'Todos los temas' : translateTopicToSpanish(t) }))}
+                        selectedModel={selectedModel}
+                        onModelChange={setSelectedModel}
+                        modelOptions={modelOptions}
+                      />
+                    </div>
+                    <PromptsTab
+                      activePeriod={activePeriod as PresetPeriod}
+                      selectedTopic={selectedTopic}
+                      selectedModel={selectedModel}
+                      dateRange={dateRange}
+                      openPrompt={openPrompt}
+                      openEditPrompt={openEditPrompt}
+                      handleDeletePrompt={handleDeletePrompt}
+                      translateTopicToSpanish={(s) => s}
+                      emojiForTopic={emojiForTopic}
+                    />
+                  </>
                 )}
                 {/* Modal de detalle de prompt */}
                 <PromptDetailModal

@@ -332,9 +332,75 @@ def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = Non
 
 
 def generate_hybrid_report(full_data: Dict[str, Any]) -> bytes:
-    """Genera un PDF híbrido que combina KPIs + gráficos + clusters + síntesis estratégica."""
-    # Desempaquetar datos
+    """Rellena el esqueleto con 3 páginas en dos columnas: SOV, Sentimiento, Visibilidad (últimos 30 días)."""
+    from .pdf_writer import build_skeleton_with_content as build
+    from . import plotter
+    from . import aggregator as agg
     kpis = full_data.get("kpis", {})
+    brand_name = kpis.get("brand_name") or full_data.get("brand") or "Empresa"
+
+    # Periodo por defecto: últimos 30 días
+    start_date = full_data.get("start_date") or None
+    end_date = full_data.get("end_date") or None
+
+    # 1) SOV global (pie) y ranking (lista)
+    session = agg.get_session();
+    try:
+        sov_pairs = agg.get_industry_sov_ranking(session, start_date=start_date, end_date=end_date)
+        sov_img = plotter.plot_sov_pie([(name, val) for name, val in sov_pairs[:10]])
+        # Render ranking como tabla simple en imagen: reutilizamos barh con porcentajes
+        try:
+            # Renderizar ranking como imagen de lista simple
+            labels = [f"{i+1}. {n} — {v:.1f}%" for i, (n, v) in enumerate(sov_pairs[:10])]
+            import matplotlib.pyplot as plt
+            h = max(1.6, 0.32 * len(labels) + 0.6)
+            plt.figure(figsize=(4.2, h))
+            for i, txt in enumerate(labels):
+                plt.text(0.01, 1.0 - (i+1)/(len(labels)+1), txt, fontsize=9)
+            plt.axis('off')
+            from .plotter import _tmp_path
+            sov_rank_img = _tmp_path("sov_rank_"); plt.tight_layout(); plt.savefig(sov_rank_img, dpi=160, bbox_inches='tight', pad_inches=0.1); plt.close()
+        except Exception:
+            sov_rank_img = None
+
+        # 2) Sentimiento positivo por día (serie) en una sola columna (sin gráfico derecho)
+        sent_series = agg.get_sentiment_positive_series(session, int(full_data.get("project_id") or 1), start_date=start_date, end_date=end_date)
+        sent_img = plotter.plot_line_series([d for d, _ in sent_series], [float(v) for _, v in sent_series], title="% de menciones positivas", ylabel="Positivo (%)", ylim=(0,100), color="#16a34a")
+        sent_dist_img = None
+
+        # 3) Visibilidad por día y ranking
+        vis_series = agg.get_visibility_series(session, int(full_data.get("project_id") or 1), start_date=start_date, end_date=end_date)
+        vis_dates = [d for d, _ in vis_series]; vis_vals = [float(v) for _, v in vis_series]
+        try:
+            vis_line_img = plotter.plot_line_series(vis_dates, vis_vals, title="Puntuación de visibilidad", ylabel="Visibilidad (%)", ylim=(0,100), color="#000000")
+        except Exception:
+            vis_line_img = None
+        vis_rank_pairs = agg.get_visibility_ranking(session, start_date=start_date, end_date=end_date)
+        try:
+            items = [f"{i+1}. {n} — {v:.1f}%" for i, (n, v) in enumerate(vis_rank_pairs[:10])]
+            import matplotlib.pyplot as plt
+            h = max(1.6, 0.32 * len(items) + 0.6)
+            plt.figure(figsize=(4.2, h))
+            for i, txt in enumerate(items):
+                plt.text(0.01, 1.0 - (i+1)/(len(items)+1), txt, fontsize=9)
+            plt.axis('off')
+            from .plotter import _tmp_path
+            vis_rank_img = _tmp_path("vis_rank_"); plt.tight_layout(); plt.savefig(vis_rank_img, dpi=160, bbox_inches='tight', pad_inches=0.1); plt.close()
+        except Exception:
+            vis_rank_img = None
+    finally:
+        session.close()
+
+    images = {
+        "sov_pie": sov_img,
+        "sov_ranking_table": sov_rank_img,
+        "sentiment_evolution": sent_img,
+        "sentiment_distribution": sent_dist_img,
+        "visibility_line": vis_line_img,
+        "visibility_ranking_table": vis_rank_img,
+    }
+
+    return build(brand_name, images)
     evo = full_data.get("time_series", {}).get("sentiment_per_day", [])
     sov = full_data.get("sov", {})
     clusters = full_data.get("clusters", [])
@@ -425,48 +491,45 @@ def generate_hybrid_report(full_data: Dict[str, Any]) -> bytes:
         "kpis": kpis,
     }
 
-    # Parte 1: nuevos gráficos solicitados
+    # Parte 1: Dashboard Ejecutivo con 3 KPIs globales
     try:
-        # SOV donut (marca vs competencia) con título
-        sov = full_data.get("sov", {})
-        client_brand = sov.get("client_brand") or kpis.get("brand_name") or "Marca"
-        current = sov.get("current", {})
-        per_cat = current.get("sov_by_category", {})
-        client_total = sum(int(v.get("client", 0)) for v in per_cat.values())
-        # Usar SOLO el período actual, igual que el frontend
-        comp_counts = current.get("competitor_mentions", {})
-        sov_counts = [(client_brand, client_total)] + [(b, int(c)) for b, c in comp_counts.items()]
-        # Preferir función nueva si existe; si no, caer a pie clásico
+        # SOV global (donut/pie). Si no hay competencia, omitir donut y usar pie global
+        sov_table = (kpis.get("sov_table") or [])
         try:
-            images["part1_sov_donut"] = plotter.plot_sov_donut_centered(sov_counts, title="Share of Voice vs. Competencia")  # type: ignore[attr-defined]
+            if len(sov_table) >= 2:
+                images["part1_sov_donut"] = plotter.plot_sov_pie([(b, int(c)) for b, c in sov_table[:8]])
+            else:
+                images["part1_sov_donut"] = None
         except Exception:
-            images["part1_sov_donut"] = plotter.plot_sov_pie(sov_counts)
+            images["part1_sov_donut"] = None
     except Exception:
         # Fallback final al SOV pie estándar si ya fue calculado más arriba
         images["part1_sov_donut"] = images.get("sov_pie")
 
     try:
-        # Sentimiento diario (línea) con título
+        # Sentimiento global (línea)
         evo = full_data.get("time_series", {}).get("sentiment_per_day", [])
         dates = [d for d, _ in evo]
         vals = [float(v) for _, v in evo]
-        try:
-            images["part1_sentiment_line"] = plotter.plot_line_series(dates, vals, title="Evolución del Sentimiento (diario)", ylabel="Sentimiento", ylim=(-1, 1), color="#2ca02c")  # type: ignore[attr-defined]
-        except Exception:
-            images["part1_sentiment_line"] = plotter.plot_sentiment_evolution(evo)
+        images["part1_sentiment_line"] = plotter.plot_sentiment_evolution(evo)
     except Exception:
         images["part1_sentiment_line"] = images.get("sentiment_evolution")
 
     try:
-        # Visibilidad (línea) + ranking (si no existe la función, omitir)
+        # Visibilidad global (línea). Usamos la serie calculada en aggregator
         vis_series = full_data.get("visibility_timeseries") or []
         v_dates = [d for d, _ in vis_series]
         v_vals = [float(v) for _, v in vis_series]
-        ranking = full_data.get("visibility_ranking") or []
         try:
-            images["part1_visibility_ranking"] = plotter.plot_visibility_with_ranking(v_dates, v_vals, ranking, title="Evolución de visibilidad y ranking")  # type: ignore[attr-defined]
+            # Reutilizar plot_mentions_volume para una línea simple de % visibilidad
+            images["part1_visibility_line"] = plotter.plot_line_series(v_dates, v_vals, title="Puntuación de visibilidad", ylabel="Visibilidad (%)", ylim=(0, 100), color="#000000")  # type: ignore[attr-defined]
         except Exception:
-            images["part1_visibility_ranking"] = None
+            # Fallback simple usando lineplot existente (si estuviera)
+            from . import plotter as _pl
+            try:
+                images["part1_visibility_line"] = _pl.plot_mentions_volume(v_dates, [int(round(x)) for x in v_vals])
+            except Exception:
+                images["part1_visibility_line"] = None
     except Exception:
         images["part1_visibility_ranking"] = None
 
