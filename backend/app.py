@@ -4287,6 +4287,8 @@ def generate_report_endpoint():
             'brand_id': payload.get('brand_id'),
             'category': payload.get('category') or payload.get('prompt_category'),
         }
+        # Modo de prueba para no gastar tokens
+        test_mode = bool(payload.get('test_mode', False))
         if not filters:
             return jsonify({"error": "Filtros no proporcionados"}), 400
 
@@ -4308,6 +4310,20 @@ def generate_report_endpoint():
         from src.engines.openai_engine import fetch_response_with_metadata
         from src.engines.strategic_prompts import get_main_analyst_prompt
         prompt = get_main_analyst_prompt(aggregated_data, corpus)
+
+        # Si es modo test, devolvemos el prompt y no llamamos a la IA
+        if test_mode:
+            print("✅ MODO TEST: La generación de datos ha funcionado. El informe no se generará.")
+            return jsonify({
+                "status": "TEST_SUCCESSFUL",
+                "message": "Data aggregation and prompt generation completed successfully.",
+                "prompt_for_main_analyst": prompt,
+                "period": {
+                    "start_date": aggregated_data.get('start_date'),
+                    "end_date": aggregated_data.get('end_date'),
+                },
+                "corpus_size": len(corpus or []),
+            })
         raw, meta = fetch_response_with_metadata(prompt, model="gpt-4o")
         _log_ai_call('main_analyst', prompt, raw, meta)
         main_json = _clean_model_json(raw) or {}

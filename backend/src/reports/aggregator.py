@@ -436,12 +436,14 @@ def get_all_mentions_for_period(
             where.append("q.brand_id = :brand_id")
             params["brand_id"] = int(brand_id)
 
+        # Usar CAST(:param AS date) para evitar problemas de parseo de SQLAlchemy/psycopg2
+        where_sql = ' AND '.join(where).replace(":start::date", "CAST(:start AS date)").replace(":end::date", "CAST(:end AS date)")
         sql = text(
             f"""
             SELECT m.response
             FROM mentions m
             JOIN queries q ON q.id = m.query_id
-            WHERE {' AND '.join(where)}
+            WHERE {where_sql}
             ORDER BY m.created_at DESC
             LIMIT :lim
             """

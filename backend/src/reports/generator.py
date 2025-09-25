@@ -30,6 +30,7 @@ def _extract_insights_to_json(aggregated: Dict[str, Any]) -> Dict[str, Any]:
         import json
         data = json.loads(text)
         return {
+            "executive_summary": data.get("executive_summary", "") if isinstance(data.get("executive_summary"), str) else "",
             "executive_summary_points": data.get("key_findings", [])[:3] if isinstance(data.get("key_findings"), list) else [],
             "key_findings": data.get("key_findings", []),
             "opportunities": data.get("opportunities", []),
@@ -43,7 +44,14 @@ def _extract_insights_to_json(aggregated: Dict[str, Any]) -> Dict[str, Any]:
 def _generate_strategic_content(insights_json: Dict[str, Any], aggregated: Dict[str, Any]) -> Dict[str, str]:
     sections: Dict[str, str] = {}
     try:
-        exec_prompt = s_prompts.get_executive_summary_prompt(aggregated)
+        # Preferir el redactor del resumen ejecutivo basado en los insights estructurados
+        if insights_json.get("executive_summary") or insights_json.get("key_findings"):
+            exec_prompt = s_prompts.get_strategic_summary_prompt({
+                "executive_summary": insights_json.get("executive_summary", ""),
+                "key_findings": insights_json.get("key_findings", []),
+            })
+        else:
+            exec_prompt = s_prompts.get_executive_summary_prompt(aggregated)
         sections["executive_summary"] = fetch_response(exec_prompt, model="gpt-4o", temperature=0.3, max_tokens=900)
     except Exception:
         sections["executive_summary"] = ""
@@ -56,6 +64,18 @@ def _generate_strategic_content(insights_json: Dict[str, Any], aggregated: Dict[
         sections["action_plan"] = fetch_response(plan_prompt, model="gpt-4o", temperature=0.3, max_tokens=1100)
     except Exception:
         sections["action_plan"] = ""
+    # Sección: Análisis Competitivo
+    try:
+        comp_prompt = s_prompts.get_competitive_analysis_prompt(aggregated)
+        sections["competitive_analysis"] = fetch_response(comp_prompt, model="gpt-4o-mini", temperature=0.3, max_tokens=900)
+    except Exception:
+        sections["competitive_analysis"] = ""
+    # Sección: Tendencias y Anomalías
+    try:
+        trends_prompt = s_prompts.get_trends_anomalies_prompt(aggregated)
+        sections["trends"] = fetch_response(trends_prompt, model="gpt-4o-mini", temperature=0.3, max_tokens=900)
+    except Exception:
+        sections["trends"] = ""
     return sections
 
 
@@ -162,6 +182,14 @@ def generate_report(project_id: int) -> bytes:
 
     pdf_writer.add_title(pdf, "Plan de Acción Estratégico")
     pdf_writer.add_paragraph(pdf, strategic_sections.get("action_plan", ""))
+
+    # Nuevas secciones del equipo de analistas
+    if strategic_sections.get("competitive_analysis"):
+        pdf_writer.add_title(pdf, "Análisis Competitivo")
+        pdf_writer.add_paragraph(pdf, strategic_sections.get("competitive_analysis", ""))
+    if strategic_sections.get("trends"):
+        pdf_writer.add_title(pdf, "Tendencias y Señales Emergentes")
+        pdf_writer.add_paragraph(pdf, strategic_sections.get("trends", ""))
 
     pdf_writer.add_title(pdf, "KPIs Principales y Share of Voice")
     pdf_writer.add_table(pdf, content_for_pdf["kpi_rows"])
