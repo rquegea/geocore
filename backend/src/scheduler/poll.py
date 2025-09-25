@@ -13,8 +13,10 @@ from src.engines.openai_engine import fetch_response, extract_insights, fetch_re
 from src.engines.perplexity import fetch_perplexity_response, fetch_perplexity_with_metadata
 from src.engines.serp import get_search_results as fetch_serp_response
 from src.engines.serp import get_search_results_structured
-from src.engines.sentiment import analyze_sentiment
 from src.utils.slack import send_slack_alert
+from src.engines.sentiment_fixed import analyze_sentiment
+
+
 
 logging.basicConfig(
     filename="logs/poll.log",

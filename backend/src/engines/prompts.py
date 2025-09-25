@@ -55,7 +55,7 @@ EJEMPLOS RÁPIDOS:
 - "Se anuncian cambios sin indicar impacto" → sentiment ≈ 0.0
 
 Devuelve SOLO este JSON exacto (sin texto adicional):
-{"sentiment": 0.8, "emotion": "alegría", "confidence": 0.9}
+{{"sentiment": 0.8, "emotion": "alegría", "confidence": 0.9}}
 
 Donde:
 - sentiment: número entre -1 (muy negativo) y 1 (muy positivo)

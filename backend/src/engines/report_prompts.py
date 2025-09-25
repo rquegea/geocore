@@ -4,40 +4,29 @@ from . import prompts as catalog
 
 
 def get_executive_summary_prompt(data: dict[str, Any]):
-    """Analista Ejecutivo: KPIs y Resumen Ejecutivo.
-    Usa data['corpus_for_llm'] si está presente para citar breves extractos.
     """
-    corpus_note = ""
-    if isinstance(data, dict) and data.get("corpus_for_llm"):
-        corpus_note = f"\n\n**EXTRACTOS TEXTUALES (muestra):** {json.dumps(data.get('corpus_for_llm'), ensure_ascii=False)}\n"
+    Genera un prompt para crear un resumen ejecutivo de alto nivel.
+    """
     return f"""
-    **ROL:** Eres un Analista Principal en una consultora estratégica de primer nivel (McKinsey, BCG). Tu audiencia es el C-suite de "The Core School". Tu lenguaje debe ser conciso, basado en datos y enfocado en el impacto de negocio.
-    **TAREA:** Analiza los datos de mercado proporcionados para redactar un Resumen Ejecutivo de alto impacto que vaya directo a las conclusiones clave. No resumas los datos, interprétalos.
+    **Rol y Objetivo:**
+    Actúa como Director de Insights y Estrategia en una consultora de élite como McKinsey o BCG. Tu audiencia es el C-Suite (CEO, CMO) de '{data['brand']}'. Tu misión es destilar todos los datos proporcionados en un resumen ejecutivo que sea a la vez informativo y prescriptivo. No te limites a describir los datos; interprétalos para contar una historia convincente sobre la posición de la marca en el mercado.
 
-    **EJEMPLOS DE TONO Y ESTILO:**
-    - **Headline Agudo:** "CES domina la conversación online, dejando a The Core School con una brecha de visibilidad del 49% que requiere acción inmediata."
-    - **Hallazgo Profundo:** "Pérdida de Visibilidad en Temas Clave: A pesar de un sentimiento general positivo (0.62), nuestra visibilidad ha caído, especialmente en temas de alto interés como 'Carreras Audiovisuales', donde CES nos supera ampliamente."
-    - **Evaluación Concluyente:** "Conclusión: Urge un cambio de estrategia. La actual estrategia de contenidos no está logrando competir eficazmente con CES. Es imperativo lanzar una campaña de posicionamiento en los temas de mayor oportunidad para revertir esta tendencia."
+    **Estructura Requerida:**
+    1.  **Headline (Titular Impactante):** Un titular de una sola frase que resuma el hallazgo más crítico del periodo. Debe ser audaz y directo.
+        * *Ejemplo de buen titular:* "A pesar de una percepción de marca positiva, The Core School se enfrenta a una brecha de visibilidad crítica de 48.9 puntos frente a su principal competidor, CES."
+        * *Ejemplo de mal titular:* "Resumen de datos del periodo."
 
-    **DATOS CLAVE DEL PERIODO:** {json.dumps(data, indent=2, ensure_ascii=False)}{corpus_note}
+    2.  **Hallazgos Clave (3 bullets):** Tres puntos concisos que resuman las conclusiones más importantes. Cada punto debe ser una frase completa que combine un dato con una implicación de negocio.
+        * *Ejemplo:* "- **Pérdida de Visibilidad:** The Core School ocupa el cuarto lugar en SOV con un 20.2%, muy por detrás de CES, lo que limita su alcance a audiencias clave."
 
-    **INSTRUCCIONES DE REDACCIÓN:**
-    - Integra 1-3 citas cortas (10-25 palabras) tomadas de los extractos si aportan claridad o evidencia. No inventes citas.
-    - Mantén coherencia y evita redundancias.
+    3.  **Evaluación General y Conclusión:** Un párrafo corto (2-3 frases) que ofrezca un diagnóstico general y una conclusión estratégica clara. ¿Cuál es la situación general y qué se debe hacer al respecto?
+        * *Ejemplo:* "Conclusión: Es urgente implementar una estrategia de contenido dirigida a cerrar la brecha de visibilidad con CES, enfocándose en temas donde The Core School puede demostrar fortalezas únicas y capitalizar las debilidades detectadas en la competencia."
 
-    **RESPONDE ÚNICAMENTE CON ESTE FORMATO JSON:**
-    {{
-      "executive_summary": {{
-        "title": "Informe Ejecutivo de Inteligencia de Mercado y Estrategia",
-        "headline": "Genera un titular de una sola frase que resuma el insight más crítico del periodo.",
-        "key_findings": [
-          "Hallazgo #1 sobre Visibilidad y Reputación.",
-          "Hallazgo #2 sobre Posición Competitiva.",
-          "Hallazgo #3 sobre Percepción de la Audiencia."
-        ],
-        "overall_assessment": "Evaluación general conclusiva con llamada a la acción."
-      }}
-    }}
+    **Datos para el Análisis:**
+    {data['summary']}
+
+    **Instrucción Final:**
+    Genera el resumen ejecutivo siguiendo estrictamente la estructura y el tono descritos. Sé implacable en tu análisis y no tengas miedo de señalar tanto las oportunidades como las amenazas críticas.
     """
 
 
@@ -113,44 +102,50 @@ def get_methodology_prompt():
 
 
 def get_correlation_anomalies_prompt(data: dict[str, Any]):
-    """Analista de Correlaciones y Anomalías."""
-    corpus_note = ""
-    if isinstance(data, dict) and data.get("corpus_for_llm"):
-        corpus_note = f"\n\n**EXTRACTOS TEXTUALES (muestra):** {json.dumps(data.get('corpus_for_llm'), ensure_ascii=False)}\n"
+    """
+    Genera un prompt para identificar correlaciones y anomalías entre diferentes temas.
+    """
     return f"""
-    **ROL:** Eres un Analista de Correlaciones y Anomalías. Identifica relaciones causa-efecto plausibles y anomalías.
-    **DATOS ENTRADA:** {json.dumps(data, indent=2, ensure_ascii=False)}{corpus_note}
-    **RESPONDE ÚNICAMENTE CON ESTE JSON:**
-    {{
-      "correlation_insights": {{
-        "title": "Correlaciones y Anomalías Relevantes",
-        "key_correlations": [{{"pattern": "...", "evidence": "...", "confidence": "Alto"}}],
-        "anomalies": [{{"signal": "...", "date": "YYYY-MM-DD", "hypothesis": "...", "next_steps": "..."}}]
-      }}
-    }}
+    **Rol y Objetivo:**
+    Actúas como un Científico de Datos especializado en descubrir insights ocultos. Tu misión es analizar las correlaciones entre los temas y el sentimiento en diferentes contextos. Busca patrones inesperados, anomalías y relaciones causa-efecto que no son obvias a primera vista. El objetivo es generar una hipótesis estratégica única.
+
+    **Tarea Específica:**
+    1.  Observa los datos de sentimiento por tema y las citas destacadas.
+    2.  Identifica una correlación o una anomalía que te parezca significativa. Por ejemplo:
+        * ¿Un tema que es muy positivo en general se vuelve negativo cuando se asocia a un competidor específico?
+        * ¿Hay dos temas aparentemente no relacionados que siempre aparecen juntos con un sentimiento similar?
+        * ¿Una preocupación de los padres (sentimiento negativo) está directamente correlacionada con la conversación sobre el coste (sentimiento neutro)?
+    3.  Formula una **hipótesis estratégica** basada en tu hallazgo.
+    4.  Propón **una acción de contenido o de marketing** para validar o explotar esta hipótesis.
+
+    **Datos para el Análisis:**
+    {data['correlation_data']}
+
+    **Instrucción Final:**
+    No te limites a describir los datos. Tu valor reside en ir más allá de lo evidente y proponer una idea original basada en las conexiones que descubras.
     """
 
 
 def get_competitive_analysis_prompt(data: dict[str, Any]):
-    """Analista Competitivo: SOV, posicionamiento y debilidades."""
-    corpus_note = ""
-    if isinstance(data, dict) and data.get("corpus_for_llm"):
-        corpus_note = f"\n\n**EXTRACTOS TEXTUALES (muestra):** {json.dumps(data.get('corpus_for_llm'), ensure_ascii=False)}\n"
-    # Ejemplo de uso del catálogo central (ilustrativo; este módulo mantiene prompts complejos existentes)
-    _ = catalog.IDENTIFY_COMPETITOR_WEAKNESSES.format(competitor_name="Líder", mentions_text="...")
+    """
+    Genera un prompt para el análisis del panorama competitivo.
+    """
     return f"""
-    **ROL:** Eres un Analista de Inteligencia Competitiva. Tu objetivo es analizar el posicionamiento frente a competidores.
+    **Rol y Objetivo:**
+    Eres un Analista Senior de Inteligencia Competitiva. Tu tarea es analizar el posicionamiento de '{data['brand']}' frente a sus competidores clave, basándote en los datos de Share of Voice (SOV) y sentimiento. Tu análisis debe ser agudo, identificando no solo quién lidera, sino por qué y dónde residen las oportunidades.
 
-    **DATOS DE MERCADO:** {json.dumps(data, indent=2, ensure_ascii=False)}{corpus_note}
+    **Estructura Requerida:**
+    1.  **Posicionamiento General:** Un párrafo que describa la posición de '{data['brand']}' en el mercado. ¿Es un líder, un retador, un nicho? Usa los datos de SOV para justificar tu afirmación.
+    2.  **Análisis del Líder ({data['leader_brand']}):** Describe por qué el líder domina la conversación. ¿En qué temas o narrativas es más fuerte? ¿Cuál es la implicación estratégica para '{data['brand']}'?
+    3.  **Oportunidades frente a Debilidades de Competidores:** Analiza la tabla de 'Debilidades Detectadas' y propón cómo '{data['brand']}' puede explotarlas. Sé específico en tus recomendaciones.
 
-    **RESPONDE ÚNICAMENTE CON ESTE FORMATO JSON:**
-    {{
-      "competitive_landscape": {{
-        "title": "Análisis del Panorama Competitivo",
-        "overall_positioning": "Describe la posición general basada en SOV y sentimiento.",
-        "leader_analysis": "Análisis del líder.",
-        "competitor_weaknesses": [{{"competitor": "...", "theme": "...", "analysis": "..."}}]
-      }}
-    }}
+    **Datos para el Análisis:**
+    - SOV General: {data['sov_summary']}
+    - SOV por Tema: {data['granular_sov']}
+    - Sentimiento por Marca: {data['sentiment_summary']}
+    - Debilidades de competidores: {data['key_mentions']}
+
+    **Instrucción Final:**
+    Tu análisis debe concluir con una recomendación clara sobre dónde enfocar los esfuerzos para ganar cuota de conversación al líder.
     """
 
