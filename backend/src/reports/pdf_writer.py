@@ -53,11 +53,9 @@ def build_pdf(content: Dict) -> bytes:
     pdf.set_auto_page_break(auto=True, margin=12)
     pdf.add_page()
 
-    kpis = content.get("kpis", {})
-    add_title(pdf, "Resumen Ejecutivo")
-    add_paragraph(pdf, f"Total menciones: {kpis.get('total_mentions', 0)}")
-    add_paragraph(pdf, f"Sentimiento medio: {kpis.get('sentiment_avg', 0):.2f}")
-    add_paragraph(pdf, f"Share of Voice: {kpis.get('sov', 0):.1f}%")
+    title = content.get("title") or "Informe de Inteligencia Estratégica"
+    add_title(pdf, title)
+    add_paragraph(pdf, content.get("summary") or "")
 
     add_title(pdf, "Evolución del Sentimiento")
     add_image(pdf, content.get("images", {}).get("sentiment_evolution"))
@@ -68,7 +66,8 @@ def build_pdf(content: Dict) -> bytes:
     add_title(pdf, "Temas por Sentimiento")
     add_image(pdf, content.get("images", {}).get("topics_top_bottom"))
 
-    add_title(pdf, "Share of Voice (SOV)")
+    add_title(pdf, "KPIs y Share of Voice")
+    add_table(pdf, content.get("kpi_rows") or [])
     add_image(pdf, content.get("images", {}).get("sov_pie"))
 
     return bytes(pdf.output(dest="S").encode("latin-1"))
