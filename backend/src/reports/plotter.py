@@ -47,8 +47,26 @@ def plot_line_series(dates: List[str], values: List[float], *, title: str = "", 
 
 
 def plot_visibility_series(dates: List[str], values: List[float]) -> Optional[str]:
-    """Gráfico de líneas para Puntuación de visibilidad (0-100%)."""
-    return plot_line_series(dates, values, title="Puntuación de visibilidad", ylabel="Visibilidad (%)", ylim=(0, 100), color="#000000")
+    """Gráfico de líneas (lineplot) de Puntuación de Visibilidad (0–100%)."""
+    if not dates or not values:
+        return None
+    sns.set_theme(style="whitegrid")
+    plt.figure(figsize=(8, 3))
+    sns.lineplot(x=dates, y=values, marker="o", linewidth=1.8, color="#000000")
+    try:
+        step = max(1, len(dates) // 8)
+        xticks_idx = list(range(0, len(dates), step))
+        xticks_labels = [dates[i] for i in xticks_idx]
+        plt.xticks(xticks_idx, xticks_labels, rotation=45, ha="right")
+    except Exception:
+        plt.xticks(rotation=45, ha="right")
+    plt.ylabel("Visibilidad (%)")
+    plt.ylim(0, 100)
+    plt.tight_layout()
+    out = _tmp_path("visibility_series_")
+    plt.savefig(out, dpi=160)
+    plt.close()
+    return out
 
 def plot_sentiment_evolution(series: List[Tuple[str, float]]) -> Optional[str]:
     if not series:

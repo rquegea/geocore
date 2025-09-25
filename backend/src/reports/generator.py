@@ -369,8 +369,7 @@ def generate_hybrid_report(full_data: Dict[str, Any]) -> bytes:
         sent_dist_img = None
 
         # 3) Visibilidad por día y ranking
-        vis_series = agg.get_visibility_series(session, int(full_data.get("project_id") or 1), start_date=start_date, end_date=end_date)
-        vis_dates = [d for d, _ in vis_series]; vis_vals = [float(v) for _, v in vis_series]
+        vis_dates, vis_vals = agg.get_visibility_series(session, int(full_data.get("project_id") or 1), start_date=start_date, end_date=end_date)
         try:
             vis_line_img = plotter.plot_visibility_series(vis_dates, vis_vals)
         except Exception:

@@ -93,11 +93,29 @@ def insert_mention(cur, data: Dict[str, Any]):
     )
     return cur.fetchone()[0]
 
-def insert_insights(cur, query_id: int, insights_payload: dict, client_id: int | None, brand_id: int | None, category: str | None) -> int:
-    cur.execute(
-        "INSERT INTO insights (query_id, payload, client_id, brand_id, category) VALUES (%s, %s, %s, %s, %s) RETURNING id",
-        (query_id, json.dumps(insights_payload), client_id, brand_id, category),
-    )
+def insert_insights(cur, query_id: int, insights_payload: dict,
+                    client_id: int | None, brand_id: int | None,
+                    category: str | None, topic: str | None) -> int:
+    """Inserta un insight y asocia metadatos.
+
+    Intenta guardar también el topic del prompt en la columna `topic` si existe.
+    Si la columna no existe (entornos antiguos), hace fallback sin `topic`.
+    """
+    try:
+        cur.execute(
+            "INSERT INTO insights (query_id, payload, client_id, brand_id, category, topic) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+            (query_id, json.dumps(insights_payload), client_id, brand_id, category, topic),
+        )
+    except Exception as exc:
+        # Fallback si la columna topic no existe en este entorno
+        msg = str(exc).lower()
+        if "column \"topic\"" in msg or "column topic" in msg:
+            cur.execute(
+                "INSERT INTO insights (query_id, payload, client_id, brand_id, category) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+                (query_id, json.dumps(insights_payload), client_id, brand_id, category),
+            )
+        else:
+            raise
     return cur.fetchone()[0]
 
 def run_engine(name: str, fetch_fn: Callable[[str], Union[str, list]],
@@ -184,7 +202,7 @@ def run_engine(name: str, fetch_fn: Callable[[str], Union[str, list]],
         if name in {"gpt-4", "pplx-7b-chat", "serpapi"}:
             insights_payload = extract_insights(response_text)
             if insights_payload:
-                insight_id = insert_insights(cur, query_id, insights_payload, client_id, brand_id, query_category)
+                insight_id = insert_insights(cur, query_id, insights_payload, client_id, brand_id, query_category, query_topic)
 
         alert_triggered = sentiment < SENTIMENT_THRESHOLD
         mention_data = {

@@ -454,10 +454,10 @@ def get_visibility_series(
     *,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-) -> list[tuple[str, float]]:
+) -> tuple[list[str], list[float]]:
     """
-    Serie diaria de visibilidad (%) de la marca principal del proyecto:
-    visibilidad = menciones de la marca / total de menciones por día.
+    Serie diaria EXACTA de visibilidad (%) replicando /api/visibility (granularity=day).
+    Devuelve (dates[], values[]) donde values son porcentajes 0–100 por día.
     """
     own_session = False
     if session is None:
@@ -468,94 +468,74 @@ def get_visibility_series(
         brow = session.execute(text("SELECT COALESCE(brand, topic, 'Unknown') AS b FROM queries WHERE id=:pid"), {"pid": int(project_id)}).first()
         client_brand = (brow[0] if brow else "Unknown")
 
-        # Consulta de menciones en el rango (similar a get_share_of_voice_and_trends)
-        if not start_date:
-            start_date = "1970-01-01"
-        if not end_date:
-            end_date = "2999-12-31"
+        # Ventana temporal
+        if not start_date or not end_date:
+            # Por defecto: últimos 30 días ventana cerrada
+            from datetime import datetime as _dt, timedelta as _td
+            end_dt = _dt.utcnow().date()
+            start_dt = (end_dt - _td(days=29))
+            start_date = start_dt.strftime("%Y-%m-%d")
+            end_date = end_dt.strftime("%Y-%m-%d")
 
+        # Preparar sinónimos + patrones LIKE
+        syns = [client_brand.lower()] + [s.lower() for s in BRAND_SYNONYMS.get(client_brand, [])]
+        likes = [f"%{s}%" for s in syns]
+
+        # Replicar lógica del endpoint /api/visibility (granularity=day)
         sql = text(
             """
-            SELECT
-              m.key_topics,
-              LOWER(COALESCE(m.response,'')) AS resp,
-              LOWER(COALESCE(m.source_title,'')) AS title,
-              i.payload,
-              DATE_TRUNC('day', m.created_at)::date AS d
-            FROM mentions m
-            JOIN queries q ON q.id = m.query_id
-            LEFT JOIN insights i ON i.id = m.generated_insight_id
-            WHERE q.id = :project_id
-              AND m.created_at >= CAST(:start_date AS date)
-              AND m.created_at < (CAST(:end_date AS date) + INTERVAL '1 day')
+            WITH rows AS (
+                SELECT 
+                    DATE(m.created_at) AS d,
+                    (
+                        EXISTS (
+                            SELECT 1 FROM jsonb_array_elements_text(COALESCE(to_jsonb(m.key_topics),'[]'::jsonb)) kt
+                            WHERE LOWER(TRIM(kt)) = ANY(:syns)
+                        )
+                        OR LOWER(COALESCE(m.response,'')) LIKE ANY(:likes)
+                        OR LOWER(COALESCE(m.source_title,'')) LIKE ANY(:likes)
+                        OR EXISTS (
+                            SELECT 1 FROM jsonb_array_elements(COALESCE(i.payload->'brands','[]'::jsonb)) b
+                            WHERE LOWER(TRIM(CASE WHEN jsonb_typeof(b)='object' THEN COALESCE(b->>'name','') ELSE TRIM(BOTH '"' FROM b::text) END)) = ANY(:syns)
+                        )
+                    ) AS is_brand
+                FROM mentions m
+                JOIN queries q ON q.id = m.query_id
+                LEFT JOIN insights i ON i.id = m.generated_insight_id
+                WHERE q.id = :project_id
+                  AND m.created_at >= CAST(:start_date AS date)
+                  AND m.created_at < (CAST(:end_date AS date) + INTERVAL '1 day')
+            )
+            SELECT d,
+                   SUM(CASE WHEN is_brand THEN 1 ELSE 0 END) AS brand_cnt,
+                   COUNT(*) AS total_cnt
+            FROM rows
+            GROUP BY d
+            ORDER BY d
             """
         )
 
-        rows = session.execute(sql, {"project_id": int(project_id), "start_date": start_date, "end_date": end_date}).mappings().all()
+        rows = session.execute(sql, {"project_id": int(project_id), "start_date": start_date, "end_date": end_date, "syns": syns, "likes": likes}).all()
 
-        # Preparar sinónimos normalizados
-        norm_synonyms: Dict[str, list[str]] = {
-            canon: [canon.lower()] + [s.lower() for s in alts]
-            for canon, alts in BRAND_SYNONYMS.items()
-        }
-        syns = norm_synonyms.get(client_brand, [client_brand.lower()])
+        # Mapear resultados por día
+        by_day: Dict[str, tuple[int, int]] = {str(d): (int(b or 0), int(t or 0)) for d, b, t in rows}
 
-        from collections import defaultdict
-        brand_by_day: Dict[str, int] = defaultdict(int)
-        total_by_day: Dict[str, int] = defaultdict(int)
-
-        for r in rows:
-            day: str = str(r.get("d"))
-            total_by_day[day] += 1
-
-            try:
-                payload = r.get("payload") or {}
-                resp = (r.get("resp") or "").lower()
-                title = (r.get("title") or "").lower()
-                key_topics = r.get("key_topics") or []
-                kt_list: list[str] = []
-                try:
-                    if isinstance(key_topics, list):
-                        kt_list = [str(x).strip().lower() for x in key_topics]
-                    else:
-                        import json as _json
-                        kt_list = [str(x).strip().lower() for x in (_json.loads(key_topics) if key_topics else [])]
-                except Exception:
-                    kt_list = []
-
-                payload_brands: list[str] = []
-                if isinstance(payload, dict):
-                    raw_b = payload.get("brands")
-                    if isinstance(raw_b, list):
-                        for b in raw_b:
-                            if isinstance(b, dict):
-                                name = (b.get("name") or "").strip().lower()
-                                if name:
-                                    payload_brands.append(name)
-                            elif isinstance(b, str):
-                                payload_brands.append(b.strip().lower())
-
-                detected_client = False
-                for s in syns:
-                    if not s:
-                        continue
-                    if s in resp or s in title or s in payload_brands or s in kt_list:
-                        detected_client = True
-                        break
-                if detected_client:
-                    brand_by_day[day] += 1
-            except Exception:
-                # Falla silenciosa, solo cuenta como total
-                pass
-
-        # Construir serie ordenada
-        series: list[tuple[str, float]] = []
-        for day in sorted(total_by_day.keys()):
-            num = int(brand_by_day.get(day, 0))
-            den = int(total_by_day.get(day, 0))
-            pct = (num / float(max(den, 1))) * 100.0
-            series.append((day, round(pct, 1)))
-        return series
+        # Rellenar todos los días en el rango
+        from datetime import datetime as _dt
+        from datetime import timedelta as _td
+        start_dt = _dt.strptime(start_date, "%Y-%m-%d").date()
+        end_dt = _dt.strptime(end_date, "%Y-%m-%d").date()
+        dates: list[str] = []
+        values: list[float] = []
+        day = start_dt
+        while day <= end_dt:
+            key = day.strftime("%Y-%m-%d")
+            brand_cnt, total_cnt = by_day.get(key, (0, 0))
+            pct = (float(brand_cnt) / float(max(total_cnt, 1))) * 100.0
+            dates.append(key)
+            values.append(round(pct, 1))
+            day += _td(days=1)
+        return dates, values
     finally:
         if own_session:
             session.close()
