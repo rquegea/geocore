@@ -3492,13 +3492,8 @@ def get_topics():
         # para garantizar que los filtros tengan resultados incluso si hay una taxonomía
         # diferente (por ejemplo etiquetas en español).
         conn = get_db_connection(); cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT topic
-            FROM queries
-            WHERE enabled = TRUE AND topic IS NOT NULL AND topic <> ''
-            """
-        )
+        # Devolver tanto topics (compat) como categories nuevas
+        cur.execute("SELECT COALESCE(category, topic) FROM queries WHERE enabled = TRUE AND COALESCE(category, topic) <> ''")
         raw_topics = [row[0] for row in cur.fetchall()]
         cur.close(); conn.close()
 
@@ -4295,6 +4290,50 @@ def generate_report_endpoint():
             return jsonify({"error": "Filtros no proporcionados"}), 400
 
         aggregated_data = _aggregate_data_for_report(filters)
+
+        # ===== Deep Research (dos capas) =====
+        # Capa 1: Estratega → identificar 3-4 temas críticos a partir de KPIs/series
+        try:
+            strategist_prompt = (
+                "Eres un Estratega Senior. A partir de los datos agregados, identifica una lista de 3-4 'temas críticos' "
+                "(oportunidad mayor, riesgo mayor, mejor sentimiento, peor sentimiento). "
+                "Devuelve SOLO un JSON con: {\"temas\":[\"tema1\",\"tema2\",...]}"
+            )
+            from src.engines.openai_engine import fetch_response_with_metadata
+            import json as _json
+            s_topics_raw, s_topics_meta = fetch_response_with_metadata(
+                strategist_prompt + "\n\nDATOS:\n" + _json.dumps(aggregated_data, ensure_ascii=False),
+                model="gpt-4o"
+            )
+            _log_ai_call('strategist_topics', strategist_prompt, s_topics_raw, s_topics_meta)
+            try:
+                cleaned = _clean_model_json(s_topics_raw) or {}
+                temas_criticos = list((cleaned or {}).get('temas') or [])[:4]
+            except Exception:
+                temas_criticos = []
+        except Exception:
+            temas_criticos = []
+
+        # Capa 2: Investigador → deep dive por cada tema crítico sobre menciones completas
+        deep_dives = []
+        if temas_criticos:
+            try:
+                from src.reports.aggregator import get_raw_mentions_for_topic
+                from src.engines.strategic_prompts import get_deep_dive_mentions_prompt
+                for tema in temas_criticos:
+                    try:
+                        menciones = get_raw_mentions_for_topic(str(tema), limit=25)
+                        prompt_dd = get_deep_dive_mentions_prompt(str(tema), menciones)
+                        dd_raw, dd_meta = fetch_response_with_metadata(prompt_dd, model="gpt-4o")
+                        _log_ai_call('deep_dive_topic', prompt_dd, dd_raw, dd_meta)
+                        dd_json = _clean_model_json(dd_raw) or {}
+                        deep_dives.append({"tema": str(tema), **dd_json})
+                    except Exception:
+                        deep_dives.append({"tema": str(tema), "sintesis_del_hallazgo": "", "causa_raiz": "", "citas_destacadas": []})
+            except Exception:
+                deep_dives = []
+
+        aggregated_data.setdefault('deep_dives', deep_dives)
 
         # --- Cadena de Analistas Virtuales (versión final) ---
         # Pasamos el corpus para que los prompts puedan incorporar citas breves

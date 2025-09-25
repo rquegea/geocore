@@ -107,6 +107,28 @@ def build_pdf(content: Dict) -> bytes:
     add_image(pdf, content.get("images", {}).get("sentiment_by_category"))
     add_image(pdf, content.get("images", {}).get("topics_top_bottom"))
 
+    # 5) Anexo: Análisis Cualitativo Profundo
+    deep_dives = (content.get("deep_dives") or []) if isinstance(content, dict) else []
+    if isinstance(deep_dives, list) and deep_dives:
+        add_title(pdf, "Anexo: Análisis Cualitativo Profundo")
+        for item in deep_dives:
+            try:
+                tema = str((item or {}).get("tema") or "Tema")
+                add_title(pdf, f"Tema: {tema}")
+                sint = (item or {}).get("sintesis_del_hallazgo") or ""
+                causa = (item or {}).get("causa_raiz") or ""
+                citas = (item or {}).get("citas_destacadas") or []
+                if sint:
+                    add_paragraph(pdf, f"Síntesis: {sint}")
+                if causa:
+                    add_paragraph(pdf, f"Causa raíz: {causa}")
+                if isinstance(citas, list) and citas:
+                    add_paragraph(pdf, "Citas destacadas:")
+                    for c in citas[:6]:
+                        add_paragraph(pdf, f"\u201C{str(c)}\u201D")
+            except Exception:
+                continue
+
     return bytes(pdf.output(dest="S").encode("latin-1"))
 
 

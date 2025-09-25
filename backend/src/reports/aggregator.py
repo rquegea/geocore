@@ -348,3 +348,40 @@ def get_agent_insights_data(session: Optional[Session], project_id: int, limit: 
     finally:
         if own_session:
             session.close()
+
+
+def get_raw_mentions_for_topic(topic: str, limit: int = 25) -> List[str]:
+    """
+    Devuelve texto literal de menciones asociadas a un tema dado.
+    Coincide por:
+      - que el topic exista en m.key_topics (array JSON)
+      - o que q.topic o q.category coincida con el tema
+    """
+    session = get_session()
+    try:
+        sql = text(
+            """
+            SELECT m.response
+            FROM mentions m
+            JOIN queries q ON q.id = m.query_id
+            WHERE (
+                EXISTS (
+                    SELECT 1
+                    FROM jsonb_array_elements_text(COALESCE(m.key_topics, '[]'::jsonb)) AS t(val)
+                    WHERE lower(t.val) = lower(:topic)
+                )
+                OR lower(COALESCE(q.category, '')) = lower(:topic)
+                OR lower(COALESCE(q.topic, '')) = lower(:topic)
+            )
+            ORDER BY m.created_at DESC
+            LIMIT :lim
+            """
+        )
+        rows = session.execute(sql, {"topic": topic, "lim": int(max(1, limit))}).all()
+        out: List[str] = []
+        for (resp,) in rows:
+            if isinstance(resp, str) and resp.strip():
+                out.append(resp.strip())
+        return out
+    finally:
+        session.close()

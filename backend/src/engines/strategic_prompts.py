@@ -293,3 +293,25 @@ def get_agent_insights_summary_prompt(data: dict) -> str:
     **Instrucción Final:**
     Genera el resumen siguiendo estrictamente la estructura y el tono descritos. Sé claro y ejecutivo.
     """
+
+
+def get_deep_dive_mentions_prompt(topic: str, mentions: list[str]) -> str:
+    """
+    Prompt para analizar en profundidad menciones textuales sobre un tema.
+    Devuelve JSON estricto con: sintesis_del_hallazgo, causa_raiz y citas_destacadas.
+    """
+    import json
+    corpus = "\n\n".join([m.strip()[:4000] for m in mentions if isinstance(m, str)])
+    return (
+        "Actúa como Analista Cualitativo Senior. Analiza las menciones textuales del tema especificado "
+        "y devuelve EXCLUSIVAMENTE un JSON con las claves pedidas. Sé sintético y profesional. "
+        f"\n\nTema: {topic}\n"
+        "Menciones (texto literal, truncado si es largo):\n"
+        f"{corpus}\n\n"
+        "Formato de salida (JSON estricto):\n"
+        "{\n"
+        "  \"sintesis_del_hallazgo\": \"3-5 frases con el hallazgo principal y su impacto para negocio.\",\n"
+        "  \"causa_raiz\": \"Hipótesis clara de la causa raíz basada en patrones en las menciones.\",\n"
+        "  \"citas_destacadas\": [\"cita 1\", \"cita 2\", \"cita 3\"]\n"
+        "}"
+    )

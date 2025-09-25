@@ -112,6 +112,8 @@ def generate_report(project_id: int) -> bytes:
             "summary": agent_summary_text,
             "buckets": agent_insights.get("buckets", {}),
         },
+        # Pasamos deep_dives si el agregador los incluyó (backend app.py v1)
+        "deep_dives": aggregated.get("deep_dives", []),
         "annex": {
             "evolution_text": "",
             "category_text": "",
