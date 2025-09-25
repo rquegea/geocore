@@ -9,7 +9,7 @@ from typing import Callable, Union, List, Tuple, Dict, Any
 import psycopg2
 from psycopg2.extras import Json
 
-from src.engines.openai_engine import fetch_response, extract_insights, fetch_response_with_metadata
+from src.engines.openai_engine import fetch_response, extract_insights, fetch_response_with_metadata, client as openai_client
 from src.engines.perplexity import fetch_perplexity_response, fetch_perplexity_with_metadata
 from src.engines.serp import get_search_results as fetch_serp_response
 from src.engines.serp import get_search_results_structured
@@ -70,7 +70,7 @@ def insert_mention(cur, data: Dict[str, Any]):
             input_tokens, output_tokens, price_usd,
             analysis_latency_ms, total_pipeline_ms, error_category,
             source_domain, source_rank, query_text, query_topic, poll_id,
-            client_id, brand_id, category
+            client_id, brand_id, category, embedding
         )
         VALUES (
             %(query_id)s, %(engine)s, %(source)s, %(response)s, %(sentiment)s, %(emotion)s,
@@ -82,7 +82,7 @@ def insert_mention(cur, data: Dict[str, Any]):
             %(input_tokens)s, %(output_tokens)s, %(price_usd)s,
             %(analysis_latency_ms)s, %(total_pipeline_ms)s, %(error_category)s,
             %(source_domain)s, %(source_rank)s, %(query_text)s, %(query_topic)s, %(poll_id)s,
-            %(client_id)s, %(brand_id)s, %(category)s
+            %(client_id)s, %(brand_id)s, %(category)s, %(embedding)s::vector
         )
         RETURNING id
         """,
@@ -166,6 +166,16 @@ def run_engine(name: str, fetch_fn: Callable[[str], Union[str, list]],
 
         analysis_start = time.time()
         summary, key_topics = summarize_and_extract_topics(response_text)
+        # Generar embedding para el summary
+        embedding = None
+        try:
+            emb_res = openai_client.embeddings.create(model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-small"), input=[summary])
+            embedding_vec = emb_res.data[0].embedding
+            # Convertimos a literal ::vector para el INSERT
+            embedding = "[" + ",".join(f"{float(x):.8f}" for x in embedding_vec) + "]"
+        except Exception as e:
+            logging.warning("⚠️ No se pudo generar embedding: %s", e)
+            embedding = None
         target_for_sentiment = summary if summary and isinstance(summary, str) and len(summary) >= 8 else response_text
         sentiment, emotion, confidence = analyze_sentiment(target_for_sentiment)
         analysis_ms = int((time.time() - analysis_start) * 1000)
@@ -203,6 +213,7 @@ def run_engine(name: str, fetch_fn: Callable[[str], Union[str, list]],
             "client_id": client_id,
             "brand_id": brand_id,
             "category": query_category,
+            "embedding": embedding if embedding is not None else None,
         }
 
         mention_id = insert_mention(cur, mention_data)
