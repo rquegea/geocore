@@ -48,6 +48,31 @@ def add_table(pdf: ReportPDF, rows: List[List[str]]):
     pdf.ln(3)
 
 
+def add_agent_insights_section(pdf: ReportPDF, agent_summary: Dict[str, str], raw_buckets: Dict[str, list] | None = None):
+    """
+    Inserta la sección de "Insights de Agentes" con un resumen ejecutivo y, opcionalmente,
+    un anexo con elementos destacados por bucket.
+    """
+    if not agent_summary:
+        return
+    add_title(pdf, "Insights del Answer Engine")
+    summary_text = agent_summary.get("summary", "")
+    if summary_text:
+        add_paragraph(pdf, summary_text)
+    # Opcional: listas breves de ejemplos
+    if raw_buckets:
+        def _add_bucket(name: str, title: str, max_items: int = 5):
+            items = (raw_buckets.get(name) or [])[:max_items]
+            if not items:
+                return
+            add_title(pdf, title)
+            for it in items:
+                text = it.get("text") or it.get("opportunity") or it.get("risk") or it.get("trend") or "-"
+                add_paragraph(pdf, f"- {text}")
+        _add_bucket("opportunities", "Oportunidades destacadas")
+        _add_bucket("risks", "Riesgos destacados")
+        _add_bucket("trends", "Tendencias destacadas")
+
 def build_pdf(content: Dict) -> bytes:
     pdf = ReportPDF(orientation="P", unit="mm", format="A4")
     pdf.set_auto_page_break(auto=True, margin=12)
@@ -66,12 +91,17 @@ def build_pdf(content: Dict) -> bytes:
         add_title(pdf, "Plan de Acción Estratégico")
         add_paragraph(pdf, strategic.get("action_plan", ""))
 
-    # 2) KPIs y SOV
+    # 2) Insights de Agentes (si existe)
+    agent = content.get("agent_insights") or {}
+    if isinstance(agent, dict) and (agent.get("summary") or agent.get("buckets")):
+        add_agent_insights_section(pdf, {"summary": agent.get("summary", "")}, agent.get("buckets"))
+
+    # 3) KPIs y SOV
     add_title(pdf, "KPIs Principales y Share of Voice")
     add_table(pdf, content.get("kpi_rows") or [])
     add_image(pdf, content.get("images", {}).get("sov_pie"))
 
-    # 3) Anexo: visualizaciones y análisis detallado
+    # 4) Anexo: visualizaciones y análisis detallado
     add_title(pdf, "Anexo: Análisis Detallado y Visualizaciones")
     add_image(pdf, content.get("images", {}).get("sentiment_evolution"))
     add_image(pdf, content.get("images", {}).get("sentiment_by_category"))

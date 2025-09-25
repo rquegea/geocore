@@ -1,11 +1,12 @@
 import os
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
 from collections import defaultdict, Counter
 from datetime import datetime, timedelta
 import re
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
+from ..insight_analysis import summarize_agent_insights
 
 
 def _db_url() -> str:
@@ -338,3 +339,28 @@ def get_share_of_voice_and_trends(
             session.close()
 
 
+def get_agent_insights_data(session: Optional[Session], project_id: int, limit: int = 200) -> Dict[str, Any]:
+    """
+    Recupera `payload` de la tabla `insights` ligados a las menciones del proyecto
+    (v e1 query_id = project_id) y genera un resumen normalizado para prompts/PDF.
+    """
+    own_session = False
+    if session is None:
+        session = get_session()
+        own_session = True
+    try:
+        sql = text(
+            """
+            SELECT i.payload
+            FROM insights i
+            WHERE i.query_id = :pid
+            ORDER BY i.created_at DESC
+            LIMIT :lim
+            """
+        )
+        rows = session.execute(sql, {"pid": project_id, "lim": int(limit)}).mappings().all()
+        payload_rows = [{"payload": r.get("payload")} for r in rows]
+        return summarize_agent_insights(payload_rows)
+    finally:
+        if own_session:
+            session.close()

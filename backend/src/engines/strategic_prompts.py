@@ -269,3 +269,27 @@ def get_trends_anomalies_prompt(aggregated_data: dict) -> str:
     """
 
 
+def get_agent_insights_summary_prompt(data: dict) -> str:
+    """
+    Genera un prompt para resumir el análisis de insights de agentes.
+    Espera una clave 'agent_insights' con buckets normalizados.
+    """
+    import json
+    agent_json = json.dumps(data.get("agent_insights", {}), ensure_ascii=False, indent=2)
+    return f"""
+    **Rol y Objetivo:**
+    Actúa como Analista Jefe de Estrategias de Agentes. Tu misión es analizar el seguimiento de insights del Answer Engine y presentar los hallazgos clave.
+
+    **Estructura Requerida:**
+    1.  **Rendimiento de Agentes (3 bullets):** Tres puntos que resuman el desempeño general de los agentes (calidad de oportunidades/risks/tendencias, señales repetidas, y cobertura de temas).
+    2.  **Insights Destacados:** Un párrafo corto que describa los insights más relevantes identificados (oportunidades y riesgos más fuertes) con referencia a su impacto.
+    3.  **Recomendaciones:** Dos recomendaciones basadas en el análisis para próximas decisiones.
+
+    **Datos para el Análisis (JSON):**
+    ```json
+    {agent_json}
+    ```
+
+    **Instrucción Final:**
+    Genera el resumen siguiendo estrictamente la estructura y el tono descritos. Sé claro y ejecutivo.
+    """

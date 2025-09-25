@@ -72,6 +72,8 @@ def generate_report(project_id: int) -> bytes:
         top5, bottom5 = aggregator.get_topics_by_sentiment(session, project_id)
         # Intento de SOV/trends adicional (sin fechas explícitas)
         sov_trends = aggregator.get_share_of_voice_and_trends(session, project_id)
+        # Insights de agentes (Answer Engine)
+        agent_insights = aggregator.get_agent_insights_data(session, project_id, limit=200)
     finally:
         session.close()
 
@@ -89,6 +91,7 @@ def generate_report(project_id: int) -> bytes:
             "sentiment_per_day": [{"date": d, "average": s} for d, s in evo],
         },
         "trends": sov_trends.get("trends", {}),
+        "agent_insights": agent_insights,
     }
 
     # 3) Extracción de insights (JSON)
@@ -96,6 +99,13 @@ def generate_report(project_id: int) -> bytes:
 
     # 4) Contenido estratégico narrativo
     strategic_sections = _generate_strategic_content(insights_json, aggregated)
+    # 4.1) Resumen de insights de agentes
+    agent_summary_text = ""
+    try:
+        agent_prompt = s_prompts.get_agent_insights_summary_prompt({"agent_insights": agent_insights})
+        agent_summary_text = fetch_response(agent_prompt, model="gpt-4o-mini", temperature=0.3, max_tokens=700)
+    except Exception:
+        agent_summary_text = ""
 
     # 5) Gráficos existentes
     images = {
@@ -110,6 +120,10 @@ def generate_report(project_id: int) -> bytes:
         "strategic": strategic_sections,
         "kpi_rows": _build_kpi_rows(kpis),
         "images": images,
+        "agent_insights": {
+            "summary": agent_summary_text,
+            "buckets": agent_insights.get("buckets", {}),
+        },
         "annex": {
             "evolution_text": "",
             "category_text": "",
