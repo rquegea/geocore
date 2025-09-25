@@ -537,15 +537,37 @@ export function AnalyticsDashboard() {
       if (score >= 0.35) return "Medio"
       return "Bajo"
     }
+    const normalizeText = (item: any): string | null => {
+      if (item == null) return null
+      if (typeof item === 'string') return item
+      if (typeof item === 'object') {
+        // Acepta formatos { opportunity/risk: string, impact?: string } o { text: string }
+        const keys = ['opportunity', 'risk', 'trend', 'text', 'title']
+        for (const k of keys) {
+          const v = (item as any)[k]
+          if (typeof v === 'string' && v.trim()) return v
+        }
+      }
+      return null
+    }
     insightsRows.forEach((row) => {
       const p = row.payload || ({} as any)
       const imp = impactFrom(p)
       const themes = Array.isArray(p.top_themes) ? (p.top_themes as string[]) : []
-      if (Array.isArray(p.opportunities)) p.opportunities.forEach((t: string, idx: number) => data.opportunities.push({ id: `opp-${row.id}-${idx}-${t}`, text: t, impact: imp, createdAt: row.created_at, themes }))
-      if (Array.isArray(p.risks)) p.risks.forEach((t: string, idx: number) => data.risks.push({ id: `risk-${row.id}-${idx}-${t}`, text: t, impact: imp, createdAt: row.created_at, themes }))
-      if (Array.isArray(p.trends)) p.trends.forEach((t: string, idx: number) => data.trends.push({ id: `trend-${row.id}-${idx}-${t}`, text: t, impact: imp, createdAt: row.created_at, themes }))
-      if (Array.isArray(p.quotes)) data.quotes.push(...p.quotes)
-      if (Array.isArray(p.calls_to_action)) data.ctas.push(...p.calls_to_action)
+      if (Array.isArray(p.opportunities)) p.opportunities.forEach((entry: any, idx: number) => {
+        const t = normalizeText(entry)
+        if (t) data.opportunities.push({ id: `opp-${row.id}-${idx}-${t}`, text: t, impact: imp, createdAt: row.created_at, themes })
+      })
+      if (Array.isArray(p.risks)) p.risks.forEach((entry: any, idx: number) => {
+        const t = normalizeText(entry)
+        if (t) data.risks.push({ id: `risk-${row.id}-${idx}-${t}`, text: t, impact: imp, createdAt: row.created_at, themes })
+      })
+      if (Array.isArray(p.trends)) p.trends.forEach((entry: any, idx: number) => {
+        const t = normalizeText(entry)
+        if (t) data.trends.push({ id: `trend-${row.id}-${idx}-${t}`, text: t, impact: imp, createdAt: row.created_at, themes })
+      })
+      if (Array.isArray(p.quotes)) data.quotes.push(...p.quotes.filter((q: any) => typeof q === 'string'))
+      if (Array.isArray(p.calls_to_action)) data.ctas.push(...p.calls_to_action.filter((c: any) => typeof c === 'string'))
     })
     const term = strategySearch.trim().toLowerCase()
     const filterItem = (arr: StrategyItem[]) => term ? arr.filter(it => it.text.toLowerCase().includes(term)) : arr

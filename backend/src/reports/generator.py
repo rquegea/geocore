@@ -29,7 +29,6 @@ def _extract_insights_to_json(aggregated: Dict[str, Any]) -> Dict[str, Any]:
                 text = text[:-3].strip()
         import json
         data = json.loads(text)
-        # Normalizar claves a las esperadas por el generador estratégico
         return {
             "executive_summary_points": data.get("key_findings", [])[:3] if isinstance(data.get("key_findings"), list) else [],
             "key_findings": data.get("key_findings", []),
@@ -43,13 +42,11 @@ def _extract_insights_to_json(aggregated: Dict[str, Any]) -> Dict[str, Any]:
 
 def _generate_strategic_content(insights_json: Dict[str, Any], aggregated: Dict[str, Any]) -> Dict[str, str]:
     sections: Dict[str, str] = {}
-    # Resumen ejecutivo (a partir de KPIs enriquecidos)
     try:
         exec_prompt = s_prompts.get_executive_summary_prompt(aggregated)
         sections["executive_summary"] = fetch_response(exec_prompt, model="gpt-4o", temperature=0.3, max_tokens=900)
     except Exception:
         sections["executive_summary"] = ""
-    # Plan de acción estratégico
     try:
         plan_prompt = s_prompts.get_strategic_plan_prompt({
             "opportunities": insights_json.get("opportunities", []),
@@ -63,21 +60,17 @@ def _generate_strategic_content(insights_json: Dict[str, Any], aggregated: Dict[
 
 
 def generate_report(project_id: int) -> bytes:
-    # 1) Agregación mejorada (KPIs + SOV + tendencias)
     session = aggregator.get_session()
     try:
         kpis = aggregator.get_kpi_summary(session, project_id)
         evo = aggregator.get_sentiment_evolution(session, project_id)
         by_cat = aggregator.get_sentiment_by_category(session, project_id)
         top5, bottom5 = aggregator.get_topics_by_sentiment(session, project_id)
-        # Intento de SOV/trends adicional (sin fechas explícitas)
         sov_trends = aggregator.get_share_of_voice_and_trends(session, project_id)
-        # Insights de agentes (Answer Engine)
         agent_insights = aggregator.get_agent_insights_data(session, project_id, limit=200)
     finally:
         session.close()
 
-    # 2) Preparar estructura agregada para IA estratégica
     aggregated: Dict[str, Any] = {
         "kpis": {
             "total_mentions": kpis.get("total_mentions"),
@@ -94,12 +87,9 @@ def generate_report(project_id: int) -> bytes:
         "agent_insights": agent_insights,
     }
 
-    # 3) Extracción de insights (JSON)
     insights_json = _extract_insights_to_json(aggregated)
 
-    # 4) Contenido estratégico narrativo
     strategic_sections = _generate_strategic_content(insights_json, aggregated)
-    # 4.1) Resumen de insights de agentes
     agent_summary_text = ""
     try:
         agent_prompt = s_prompts.get_agent_insights_summary_prompt({"agent_insights": agent_insights})
@@ -107,7 +97,6 @@ def generate_report(project_id: int) -> bytes:
     except Exception:
         agent_summary_text = ""
 
-    # 5) Gráficos existentes
     images = {
         "sentiment_evolution": plotter.plot_sentiment_evolution(evo),
         "sentiment_by_category": plotter.plot_sentiment_by_category(by_cat),
@@ -115,7 +104,6 @@ def generate_report(project_id: int) -> bytes:
         "sov_pie": plotter.plot_sov_pie([(name, cnt) for name, cnt in kpis.get("sov_table", [])[:6]]),
     }
 
-    # 6) Construcción de PDF priorizando contenido estratégico + anexo visual
     content_for_pdf: Dict[str, Any] = {
         "strategic": strategic_sections,
         "kpi_rows": _build_kpi_rows(kpis),
@@ -131,7 +119,6 @@ def generate_report(project_id: int) -> bytes:
         },
     }
 
-    # Textos analíticos breves para el anexo
     try:
         if evo:
             first_s = evo[0][1]
@@ -164,24 +151,20 @@ def generate_report(project_id: int) -> bytes:
     except Exception:
         pass
 
-    # 7) Renderizado final
     pdf = pdf_writer.ReportPDF(orientation="P", unit="mm", format="A4")
     pdf.set_auto_page_break(auto=True, margin=12)
     pdf.add_page()
 
-    # Secciones estratégicas
     pdf_writer.add_title(pdf, "Resumen Ejecutivo")
     pdf_writer.add_paragraph(pdf, strategic_sections.get("executive_summary", ""))
 
     pdf_writer.add_title(pdf, "Plan de Acción Estratégico")
     pdf_writer.add_paragraph(pdf, strategic_sections.get("action_plan", ""))
 
-    # KPIs y SOV
     pdf_writer.add_title(pdf, "KPIs Principales y Share of Voice")
     pdf_writer.add_table(pdf, content_for_pdf["kpi_rows"])
     pdf_writer.add_image(pdf, images.get("sov_pie"))
 
-    # Anexo
     pdf_writer.add_title(pdf, "Anexo: Análisis Detallado y Visualizaciones")
     pdf_writer.add_image(pdf, images.get("sentiment_evolution"))
     if content_for_pdf["annex"].get("evolution_text"):
@@ -196,5 +179,3 @@ def generate_report(project_id: int) -> bytes:
         pdf_writer.add_paragraph(pdf, content_for_pdf["annex"]["topics_text"])
 
     return bytes(pdf.output(dest="S").encode("latin-1"))
-
-

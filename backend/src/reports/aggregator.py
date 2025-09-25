@@ -106,9 +106,7 @@ def get_kpi_summary(session: Optional[Session], project_id: int) -> Dict:
         if own_session:
             session.close()
     total_all = sum(r["cnt"] for r in sov_rows) or 1
-    # SOV de este proyecto si el nombre coincide (usamos queries.brand si existe)
     proj_brand_sql = text("SELECT COALESCE(brand, topic, 'Unknown') AS b FROM queries WHERE id=:pid")
-    # Reutilizamos sesión efímera
     s2 = get_session()
     try:
         brow = s2.execute(proj_brand_sql, {"pid": project_id}).first()
@@ -227,15 +225,12 @@ def get_share_of_voice_and_trends(
             prev_start, prev_end = _compute_previous_period(start_date, end_date)
             periods = [(start_date, end_date), (prev_start, prev_end)]
         else:
-            # Un solo periodo sin comparación
             periods = [("1970-01-01", "2999-12-31")]
 
-        # Obtener brand base si no viene indicada
         if client_brand is None:
             brow = session.execute(text("SELECT COALESCE(brand, topic, 'Unknown') AS b FROM queries WHERE id=:pid"), {"pid": project_id}).first()
             client_brand = (brow[0] if brow else "Unknown")
 
-        # Traer menciones con categoría y resumen para ambos periodos
         sql = text(
             """
             SELECT
@@ -256,16 +251,7 @@ def get_share_of_voice_and_trends(
         competitors_global: Counter = Counter()
         for (p_start, p_end) in periods:
             rows = session.execute(sql, {"project_id": project_id, "start": p_start, "end": p_end}).mappings().all()
-            # Descubrir competidores dinámicamente por co-menciones en el periodo actual
-            if p_start == periods[0][0] and p_end == periods[0][1]:
-                # Sacar candidatos de tabla de queries (si existiera una tabla de catálogo, aquí no la tenemos)
-                pass
-            # Detectar marcas cliente + competidores a partir de texto
             brands = [client_brand]
-            # Heurística: de la tabla sov_table global (todas las marcas) ya disponemos arriba, pero aquí no. Mantener simple.
-            # El set real de competidores en geocore no está explícito; detectaremos cualquier token con patrón exacto del brand base únicamente.
-            # Mejora futura: tabla de mercados/competidores.
-
             per_category = defaultdict(lambda: {"client": 0, "total": 0, "competitors": Counter()})
             comp_mentions = Counter()
             sentiment_sum = 0.0
@@ -287,7 +273,6 @@ def get_share_of_voice_and_trends(
                             comp_mentions[b] += 1
                             per_category[category]["competitors"][b] += 1
                         per_category[category]["total"] += 1
-                # Sentimiento global
                 sentiment_sum += sent
                 sentiment_count += 1
 
@@ -297,7 +282,6 @@ def get_share_of_voice_and_trends(
             sov_total = (total_client / total_with_brands * 100.0) if total_with_brands > 0 else 0.0
             avg_sent = (sentiment_sum / float(sentiment_count)) if sentiment_count > 0 else 0.0
 
-            # Guardar estructura del periodo
             brand_counts_by_period.append({
                 "period": {"start": p_start, "end": p_end},
                 "sov_by_category": {k: {"client": int(v["client"]), "total": int(v["total"]), "competitors": dict(v["competitors"]) } for k, v in per_category.items()},
@@ -341,8 +325,8 @@ def get_share_of_voice_and_trends(
 
 def get_agent_insights_data(session: Optional[Session], project_id: int, limit: int = 200) -> Dict[str, Any]:
     """
-    Recupera `payload` de la tabla `insights` ligados a las menciones del proyecto
-    (v e1 query_id = project_id) y genera un resumen normalizado para prompts/PDF.
+    Recupera payloads de la tabla insights asociados al proyecto (query_id) y
+    devuelve un resumen normalizado para prompts y PDF.
     """
     own_session = False
     if session is None:
