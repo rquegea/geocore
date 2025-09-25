@@ -4336,9 +4336,10 @@ def generate_report_endpoint():
             max_rows=5000,
         )
 
-        # 2) Generar PDF híbrido con KPIs + Clusters
-        from src.reports.generator import generate_hybrid_report
-        pdf_bytes = generate_hybrid_report(full_data)
+        # 2) Generar PDF ESQUELETO temporalmente
+        from src.reports.pdf_writer import build_empty_structure_pdf
+        company = payload.get('brand') or os.getenv('DEFAULT_BRAND', 'Empresa')
+        pdf_bytes = build_empty_structure_pdf(company)
 
         return send_file(
             io.BytesIO(pdf_bytes),
