@@ -21,8 +21,17 @@ def plot_sentiment_evolution(series: List[Tuple[str, float]]) -> Optional[str]:
     values = [v for _, v in series]
     sns.set_theme(style="whitegrid")
     plt.figure(figsize=(8, 3))
-    sns.lineplot(x=dates, y=values, marker="o", linewidth=1.8)
-    plt.xticks(rotation=45, ha="right")
+    sns.lineplot(x=dates, y=values, marker="o", linewidth=1.8, label="Sentimiento")
+    # Reducir etiquetas en eje X para evitar solapes
+    try:
+        step = max(1, len(dates) // 8)
+        xticks_idx = list(range(0, len(dates), step))
+        xticks_labels = [dates[i] for i in xticks_idx]
+        plt.xticks(xticks_idx, xticks_labels, rotation=45, ha="right")
+    except Exception:
+        plt.xticks(rotation=45, ha="right")
+    plt.ylabel("Sentimiento")
+    plt.legend(loc="best", fontsize=8)
     plt.ylim(-1.0, 1.0)
     plt.tight_layout()
     out = _tmp_path("sentiment_evolution_")
@@ -67,8 +76,13 @@ def plot_topics_top_bottom(top5: List[Tuple[str, float]], bottom5: List[Tuple[st
 def plot_sov_pie(sov_list: List[Tuple[str, float]]) -> Optional[str]:
     if not sov_list:
         return None
-    labels = [n for n, _ in sov_list]
-    sizes = [max(0.01, float(v)) for _, v in sov_list]
+    # Asegurar múltiples marcas: filtrar elementos con tamaño > 0 y normalizar
+    filtered = [(n, float(v)) for n, v in sov_list if v is not None]
+    if not filtered:
+        return None
+    total = sum(v for _, v in filtered) or 1.0
+    labels = [n for n, _ in filtered]
+    sizes = [max(0.01, (v / total) * 100.0) for _, v in filtered]
     plt.figure(figsize=(4.8, 4.8))
     plt.pie(sizes, labels=labels, autopct="%1.1f%%", startangle=140, textprops={"fontsize": 8})
     plt.tight_layout()
@@ -85,15 +99,22 @@ def plot_combined_visibility_sentiment(dates: List[str], visibility: List[float]
         import matplotlib.pyplot as plt
         plt.figure(figsize=(8, 3.2))
         ax1 = plt.gca()
-        ax1.plot(dates, visibility, color='tab:blue', marker='o', linewidth=1.6, label='Visibilidad')
+        # Reducir etiquetas X
+        step = max(1, len(dates) // 8)
+        xticks_idx = list(range(0, len(dates), step))
+        ax1.plot(range(len(dates)), visibility, color='tab:blue', marker='o', linewidth=1.6, label='Visibilidad')
         ax1.set_ylabel('Visibilidad (%)', color='tab:blue')
         ax1.tick_params(axis='y', labelcolor='tab:blue')
         ax2 = ax1.twinx()
-        ax2.plot(dates, sentiment, color='tab:green', marker='x', linestyle='--', linewidth=1.4, label='Sentimiento')
+        ax2.plot(range(len(dates)), sentiment, color='tab:green', marker='x', linestyle='--', linewidth=1.4, label='Sentimiento')
         ax2.set_ylabel('Sentimiento', color='tab:green')
         ax2.tick_params(axis='y', labelcolor='tab:green')
         ax2.set_ylim(-1, 1)
-        plt.xticks(rotation=45, ha='right')
+        plt.xticks(xticks_idx, [dates[i] for i in xticks_idx], rotation=45, ha='right')
+        # Leyenda combinada
+        lines_labels = [ax.get_legend_handles_labels() for ax in [ax1, ax2]]
+        lines, labels = [sum(lol, []) for lol in zip(*lines_labels)]
+        ax1.legend(lines, labels, loc='upper left', fontsize=8)
         plt.tight_layout()
         out = _tmp_path("combined_vis_sent_")
         plt.savefig(out, dpi=160)

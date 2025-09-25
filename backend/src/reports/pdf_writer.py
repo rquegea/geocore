@@ -192,58 +192,86 @@ def build_strategic_pdf(
 def build_pdf(content: Dict) -> bytes:
     pdf = ReportPDF(orientation="P", unit="mm", format="A4")
     pdf.set_auto_page_break(auto=True, margin=12)
+
+    # Página 1: Dashboard Ejecutivo (2 columnas)
     pdf.add_page()
+    add_title(pdf, content.get("title") or "Dashboard Ejecutivo")
+    page_width = pdf.w - 2 * pdf.l_margin
+    col_w = page_width / 2.0
+    y0 = pdf.get_y()
 
-    # Encabezado
-    title = content.get("title") or "Informe de Inteligencia Estratégica"
-    add_title(pdf, title)
-
-    # 1) Contenido estratégico primero
-    strategic = content.get("strategic", {}) if isinstance(content.get("strategic"), dict) else {}
-    if strategic.get("executive_summary"):
-        add_title(pdf, "Resumen Ejecutivo")
-        add_paragraph(pdf, strategic.get("executive_summary", ""))
-    if strategic.get("action_plan"):
-        add_title(pdf, "Plan de Acción Estratégico")
-        add_paragraph(pdf, strategic.get("action_plan", ""))
-
-    # 2) Insights de Agentes (si existe)
-    agent = content.get("agent_insights") or {}
-    if isinstance(agent, dict) and (agent.get("summary") or agent.get("buckets")):
-        add_agent_insights_section(pdf, {"summary": agent.get("summary", "")}, agent.get("buckets"))
-
-    # 3) KPIs y SOV
-    add_title(pdf, "KPIs Principales y Share of Voice")
+    # Columna izquierda: KPIs
+    pdf.set_xy(pdf.l_margin, y0)
+    add_title(pdf, "KPIs Principales")
     add_table(pdf, content.get("kpi_rows") or [])
-    add_image(pdf, content.get("images", {}).get("sov_pie"))
 
-    # 4) Anexo: visualizaciones y análisis detallado
-    add_title(pdf, "Anexo: Análisis Detallado y Visualizaciones")
-    add_image(pdf, content.get("images", {}).get("sentiment_evolution"))
-    add_image(pdf, content.get("images", {}).get("sentiment_by_category"))
-    add_image(pdf, content.get("images", {}).get("topics_top_bottom"))
+    # Columna derecha: evolución
+    pdf.set_xy(pdf.l_margin + col_w, y0)
+    add_title(pdf, "Evolución Sentimiento")
+    img_trend = content.get("images", {}).get("sentiment_evolution")
+    if img_trend:
+        try:
+            pdf.image(img_trend, w=col_w - 6)
+        except Exception:
+            pass
 
-    # 5) Anexo: Análisis Cualitativo Profundo
-    deep_dives = (content.get("deep_dives") or []) if isinstance(content, dict) else []
-    if isinstance(deep_dives, list) and deep_dives:
-        add_title(pdf, "Anexo: Análisis Cualitativo Profundo")
-        for item in deep_dives:
-            try:
-                tema = str((item or {}).get("tema") or "Tema")
-                add_title(pdf, f"Tema: {tema}")
-                sint = (item or {}).get("sintesis_del_hallazgo") or ""
-                causa = (item or {}).get("causa_raiz") or ""
-                citas = (item or {}).get("citas_destacadas") or []
-                if sint:
-                    add_paragraph(pdf, f"Síntesis: {sint}")
-                if causa:
-                    add_paragraph(pdf, f"Causa raíz: {causa}")
-                if isinstance(citas, list) and citas:
-                    add_paragraph(pdf, "Citas destacadas:")
-                    for c in citas[:6]:
-                        add_paragraph(pdf, f"\u201C{str(c)}\u201D")
-            except Exception:
-                continue
+    # Página 2: Competencia (SOV + Top/Bottom)
+    pdf.add_page()
+    add_title(pdf, "Análisis Competitivo")
+    # SOV Pie a la izquierda
+    y1 = pdf.get_y()
+    pdf.set_xy(pdf.l_margin, y1)
+    img_sov = content.get("images", {}).get("sov_pie")
+    if img_sov:
+        try:
+            pdf.image(img_sov, w=col_w - 6)
+        except Exception:
+            pass
+    # Top/Bottom a la derecha
+    pdf.set_xy(pdf.l_margin + col_w, y1)
+    img_tb = content.get("images", {}).get("topics_top_bottom")
+    if img_tb:
+        try:
+            pdf.image(img_tb, w=col_w - 6)
+        except Exception:
+            pass
+
+    # Página 3+: Clusters
+    clusters = content.get("clusters") or []
+    if clusters:
+        pdf.add_page()
+        add_title(pdf, "Principales Temas de Conversación")
+        for i, c in enumerate(clusters):
+            add_title(pdf, c.get("topic_name", "(sin nombre)"))
+            for kp in (c.get("key_points") or [])[:3]:
+                add_paragraph(pdf, f"- {kp}")
+            examples = c.get("examples") or []
+            for ex in examples[:3]:
+                q = (ex.get("summary") or "").strip()
+                if q:
+                    add_paragraph(pdf, '"' + _sanitize(q) + '"')
+            if (i + 1) % 3 == 0 and i < len(clusters) - 1:
+                pdf.add_page()
+
+    # Última: Síntesis y Plan de Acción
+    syn = content.get("clusters_synthesis") or {}
+    if syn:
+        pdf.add_page()
+        add_title(pdf, "Síntesis Estratégica y Plan de Acción")
+        metas = syn.get("meta_narrativas") or []
+        if metas:
+            add_paragraph(pdf, "Meta-narrativas:")
+            for m in metas[:6]:
+                add_paragraph(pdf, f"- {m}")
+        if syn.get("oportunidad_principal"):
+            add_paragraph(pdf, f"Oportunidad principal: {syn['oportunidad_principal']}")
+        if syn.get("riesgo_inminente"):
+            add_paragraph(pdf, f"Riesgo inminente: {syn['riesgo_inminente']}")
+        plan = syn.get("plan_estrategico") or []
+        if plan:
+            add_paragraph(pdf, "Plan estratégico:")
+            for p in plan[:8]:
+                add_paragraph(pdf, f"- {p}")
 
     out = pdf.output(dest="S")
     if isinstance(out, (bytes, bytearray)):
