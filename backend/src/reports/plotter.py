@@ -45,6 +45,11 @@ def plot_line_series(dates: List[str], values: List[float], *, title: str = "", 
     plt.close()
     return out
 
+
+def plot_visibility_series(dates: List[str], values: List[float]) -> Optional[str]:
+    """Gráfico de líneas para Puntuación de visibilidad (0-100%)."""
+    return plot_line_series(dates, values, title="Puntuación de visibilidad", ylabel="Visibilidad (%)", ylim=(0, 100), color="#000000")
+
 def plot_sentiment_evolution(series: List[Tuple[str, float]]) -> Optional[str]:
     if not series:
         return None

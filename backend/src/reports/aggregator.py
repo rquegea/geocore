@@ -477,6 +477,7 @@ def get_visibility_series(
         sql = text(
             """
             SELECT
+              m.key_topics,
               LOWER(COALESCE(m.response,'')) AS resp,
               LOWER(COALESCE(m.source_title,'')) AS title,
               i.payload,
@@ -511,6 +512,16 @@ def get_visibility_series(
                 payload = r.get("payload") or {}
                 resp = (r.get("resp") or "").lower()
                 title = (r.get("title") or "").lower()
+                key_topics = r.get("key_topics") or []
+                kt_list: list[str] = []
+                try:
+                    if isinstance(key_topics, list):
+                        kt_list = [str(x).strip().lower() for x in key_topics]
+                    else:
+                        import json as _json
+                        kt_list = [str(x).strip().lower() for x in (_json.loads(key_topics) if key_topics else [])]
+                except Exception:
+                    kt_list = []
 
                 payload_brands: list[str] = []
                 if isinstance(payload, dict):
@@ -528,7 +539,7 @@ def get_visibility_series(
                 for s in syns:
                     if not s:
                         continue
-                    if s in resp or s in title or s in payload_brands:
+                    if s in resp or s in title or s in payload_brands or s in kt_list:
                         detected_client = True
                         break
                 if detected_client:
