@@ -655,9 +655,9 @@ def get_visibility_ranking(
                         break
             for canon in set(detected):
                 total_by_brand[canon] += 1
-        total = sum(total_by_brand.values()) or 1
+        total_responses = len(rows) or 1
         pairs = sorted(total_by_brand.items(), key=lambda x: x[1], reverse=True)
-        return [(name, round(100.0 * cnt / total, 1)) for name, cnt in pairs]
+        return [(name, round(100.0 * cnt / total_responses, 1)) for name, cnt in pairs]
     finally:
         if own_session:
             session.close()

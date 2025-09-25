@@ -3642,18 +3642,18 @@ def get_prompts_grouped():
             params_exec.append(filters['model'])
         topic_filter_sql = ""
         if filters.get('topic') and filters['topic'] != 'all':
-            topic_filter_sql = " AND q.topic = %s"
+            topic_filter_sql = " AND COALESCE(q.category, q.topic) = %s"
             params_exec.append(filters['topic'])
         cur.execute(
             f"""
-            SELECT q.id, q.query, q.topic,
+            SELECT q.id, q.query, COALESCE(q.category, q.topic) AS topic,
                    COUNT(m.id) AS executions,
                    COUNT(DISTINCT DATE(m.created_at)) AS active_days
             FROM queries q
             LEFT JOIN mentions m ON m.query_id = q.id
                  AND m.created_at >= %s AND m.created_at < %s{engine_on}
             WHERE q.enabled = TRUE{topic_filter_sql}
-            GROUP BY q.id, q.query, q.topic
+            GROUP BY q.id, q.query, COALESCE(q.category, q.topic)
             """,
             tuple(params_exec)
         )
@@ -3667,7 +3667,7 @@ def get_prompts_grouped():
             params_mentions.append(filters['model'])
         topic_filter_sql2 = ""
         if filters.get('topic') and filters['topic'] != 'all':
-            topic_filter_sql2 = " AND q.topic = %s"
+            topic_filter_sql2 = " AND COALESCE(q.category, q.topic) = %s"
             params_mentions.append(filters['topic'])
         cur.execute(
             f"""
