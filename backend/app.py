@@ -4321,46 +4321,24 @@ def generate_report_endpoint():
         if not filters:
             return jsonify({"error": "Filtros no proporcionados"}), 400
 
-        # 1) Obtener clusters (eficiente, sin cargar texto crudo)
+        # 1) Obtener todos los datos en una sola llamada
         from src.reports import aggregator as agg
-        session = agg.get_session()
-        try:
-            # Resolver proyecto/brand
-            brand_name = payload.get('brand') or os.getenv('DEFAULT_BRAND', 'The Core School')
-            conn = get_db_connection(); cur = conn.cursor()
-            cur.execute("SELECT id FROM queries WHERE COALESCE(brand, topic) = %s ORDER BY id ASC LIMIT 1", (brand_name,))
-            row = cur.fetchone(); cur.close(); conn.close()
-            project_id = int(row[0]) if row else 1
+        brand_name = payload.get('brand') or os.getenv('DEFAULT_BRAND', 'The Core School')
+        conn = get_db_connection(); cur = conn.cursor()
+        cur.execute("SELECT id FROM queries WHERE COALESCE(brand, topic) = %s ORDER BY id ASC LIMIT 1", (brand_name,))
+        row = cur.fetchone(); cur.close(); conn.close()
+        project_id = int(row[0]) if row else 1
 
-            clusters = agg.aggregate_clusters_for_report(
-                session,
-                project_id,
-                start_date=filters.get('start_date').strftime('%Y-%m-%d'),
-                end_date=filters.get('end_date').strftime('%Y-%m-%d'),
-                max_rows=5000,
-            )
-        finally:
-            session.close()
+        full_data = agg.get_full_report_data(
+            project_id,
+            start_date=filters.get('start_date').strftime('%Y-%m-%d'),
+            end_date=filters.get('end_date').strftime('%Y-%m-%d'),
+            max_rows=5000,
+        )
 
-        # 2) Generar contenido (usa análisis por cluster + síntesis estratégica)
-        from src.reports.generator import generate_report as build_pdf_from_clusters
-        pdf_bytes = build_pdf_from_clusters(project_id, clusters)
-
-        # 3) Preparar imágenes/KPIs (se mantienen como antes)
-        from src.reports import plotter
-        from src.reports.pdf_writer import build_strategic_pdf
-        # Para mantener compatibilidad con PDF existente, dejamos imágenes opcionales vacías
-        k = {"total_mentions": None, "sentiment_avg": None, "sov": None}
-        brand_name = brand_name or '-'
-        kpi_rows = [
-            ["Marca", str(brand_name)],
-            ["Total menciones", str(k.get("total_mentions", "-"))],
-            ["Sentimiento promedio", str(k.get('sentiment_avg', '-'))],
-            ["SOV total", str(k.get('sov', '-'))],
-        ]
-        images = {}
-
-        # Enviar PDF generado por flujo jerárquico
+        # 2) Generar PDF híbrido con KPIs + Clusters
+        from src.reports.generator import generate_hybrid_report
+        pdf_bytes = generate_hybrid_report(full_data)
 
         return send_file(
             io.BytesIO(pdf_bytes),

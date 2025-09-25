@@ -317,4 +317,92 @@ def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = Non
     if content_for_pdf["annex"].get("topics_text"):
         pdf_writer.add_paragraph(pdf, content_for_pdf["annex"]["topics_text"])
 
-    return bytes(pdf.output(dest="S").encode("latin-1"))
+    return pdf.output(dest="S")
+
+
+def generate_hybrid_report(full_data: Dict[str, Any]) -> bytes:
+    """Genera un PDF híbrido que combina KPIs + gráficos + clusters + síntesis estratégica."""
+    # Desempaquetar datos
+    kpis = full_data.get("kpis", {})
+    evo = full_data.get("time_series", {}).get("sentiment_per_day", [])
+    sov = full_data.get("sov", {})
+    clusters = full_data.get("clusters", [])
+
+    # Preparar análisis de clusters (Nivel 1 y 2)
+    cluster_summaries: List[Dict[str, Any]] = []
+    for c in (clusters or [])[:50]:
+        cluster_obj = {
+            "count": int(c.get("count", 0)),
+            "avg_sentiment": float(c.get("avg_sentiment", 0.0)),
+            "top_sources": c.get("top_sources", []),
+            "example_mentions": c.get("example_mentions", []),
+        }
+        analyzed = _analyze_cluster(cluster_obj)
+        cluster_summaries.append({
+            "topic_name": analyzed.get("topic_name", "(sin nombre)"),
+            "key_points": analyzed.get("key_points", []),
+            "volume": int(cluster_obj["count"]),
+            "sentiment": float(cluster_obj["avg_sentiment"]),
+            "examples": cluster_obj["example_mentions"][:3],
+        })
+
+    synthesis = _synthesize_clusters(cluster_summaries)
+
+    # Construir imágenes usando plotter
+    from . import plotter
+    images = {}
+    try:
+        dates = [d for d, _ in evo]
+        values = [float(v) for _, v in evo]
+        images["sentiment_evolution"] = plotter.plot_sentiment_evolution(evo)
+    except Exception:
+        images["sentiment_evolution"] = None
+    try:
+        sov_list = [(name, cnt) for name, cnt in (kpis.get("sov_table", [])[:6] if kpis.get("sov_table") else [])]
+        images["sov_pie"] = plotter.plot_sov_pie(sov_list)
+    except Exception:
+        images["sov_pie"] = None
+    try:
+        top5 = full_data.get("topics_top5") or []
+        bottom5 = full_data.get("topics_bottom5") or []
+        images["topics_top_bottom"] = plotter.plot_topics_top_bottom(top5, bottom5)
+    except Exception:
+        images["topics_top_bottom"] = None
+
+    # Preparar bloques de texto estratégico a partir de síntesis
+    strategic_sections = {
+        "executive_summary": "",
+        "action_plan": "",
+        "competitive_analysis": "",
+        "trends": "",
+    }
+    try:
+        # Usamos síntesis para Executive y Plan si están disponibles
+        if synthesis:
+            exec_prompt = s_prompts.get_strategic_summary_prompt({
+                "executive_summary": "" ,
+                "key_findings": [kp for c in cluster_summaries for kp in c.get("key_points", [])][:6],
+            })
+            strategic_sections["executive_summary"] = fetch_response(exec_prompt, model="gpt-4o", temperature=0.3, max_tokens=700)
+            plan_prompt = s_prompts.get_strategic_plan_prompt({
+                "opportunities": [],
+                "risks": [],
+                "recommendations": synthesis.get("plan_estrategico", []),
+            })
+            strategic_sections["action_plan"] = fetch_response(plan_prompt, model="gpt-4o", temperature=0.3, max_tokens=900)
+    except Exception:
+        pass
+
+    # Armar contenido para PDF híbrido
+    kpi_rows = _build_kpi_rows(kpis)
+    content_for_pdf: Dict[str, Any] = {
+        "strategic": strategic_sections,
+        "kpi_rows": kpi_rows,
+        "images": images,
+        "clusters": cluster_summaries,
+        "clusters_synthesis": synthesis,
+    }
+
+    # Renderizar PDF con layout existente
+    from .pdf_writer import build_pdf
+    return build_pdf(content_for_pdf)

@@ -619,3 +619,42 @@ def aggregate_clusters_for_report(
     finally:
         if own_session:
             session.close()
+
+
+def get_full_report_data(
+    project_id: int,
+    *,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    max_rows: int = 5000,
+) -> Dict[str, Any]:
+    """
+    Devuelve un objeto híbrido con KPIs + series + SOV + clusters (con ejemplos) listo
+    para ser consumido por el generador de informes.
+    """
+    session = get_session()
+    try:
+        # KPIs y métricas
+        kpis = get_kpi_summary(session, project_id)
+        evo = get_sentiment_evolution(session, project_id)
+        by_cat = get_sentiment_by_category(session, project_id)
+        top5, bottom5 = get_topics_by_sentiment(session, project_id)
+        sov_trends = get_share_of_voice_and_trends(session, project_id, start_date=start_date, end_date=end_date)
+
+        # Clusters
+        clusters = aggregate_clusters_for_report(session, project_id, start_date=start_date, end_date=end_date, max_rows=max_rows)
+
+        return {
+            "project_id": project_id,
+            "kpis": kpis,
+            "time_series": {
+                "sentiment_per_day": evo,
+            },
+            "sentiment_by_category": by_cat,
+            "topics_top5": top5,
+            "topics_bottom5": bottom5,
+            "sov": sov_trends,
+            "clusters": clusters,
+        }
+    finally:
+        session.close()
