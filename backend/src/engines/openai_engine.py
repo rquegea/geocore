@@ -18,10 +18,12 @@ from typing import Any, Dict, Tuple
 
 from dotenv import load_dotenv
 from openai import OpenAI, OpenAIError
+import httpx
 
 # ───────────────────────── Config ──────────────────────────
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+DEFAULT_TIMEOUT = float(os.getenv("OPENAI_TIMEOUT", "25"))
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -58,12 +60,13 @@ def fetch_response(
             ],
             temperature=temperature,
             max_tokens=max_tokens,
+            timeout=DEFAULT_TIMEOUT,
         )
         answer: str = res.choices[0].message.content.strip()
         return answer
-    except OpenAIError as exc:
+    except (OpenAIError, httpx.TimeoutException, TimeoutError) as exc:
         logger.exception("❌ OpenAI API error en fetch_response: %s", exc)
-        raise
+        return ""
 
 
 def extract_insights(text: str) -> Dict[str, Any]:
@@ -151,6 +154,7 @@ def fetch_response_with_metadata(
             ],
             temperature=temperature,
             max_tokens=max_tokens,
+            timeout=DEFAULT_TIMEOUT,
         )
         answer = res.choices[0].message.content.strip()
         usage = getattr(res, "usage", None)
@@ -169,7 +173,7 @@ def fetch_response_with_metadata(
             # Ejemplo: 0.000005 por token in, 0.000015 por token out
             meta["price_usd"] = round(input_tokens * 0.000005 + output_tokens * 0.000015, 6)
         return answer, meta
-    except OpenAIError as exc:
+    except (OpenAIError, httpx.TimeoutException, TimeoutError) as exc:
         logger.exception("❌ OpenAI API error en fetch_response_with_metadata: %s", exc)
         return "", {
             "model_name": model,
@@ -178,5 +182,5 @@ def fetch_response_with_metadata(
             "input_tokens": None,
             "output_tokens": None,
             "price_usd": None,
-            "error_category": "api_error",
+            "error_category": "timeout" if isinstance(exc, (httpx.TimeoutException, TimeoutError)) else "api_error",
         }

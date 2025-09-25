@@ -2,6 +2,7 @@ import openai
 import os
 import json
 import logging
+from . import prompts as catalog
 
 # Configurar logging para debugging
 logging.basicConfig(level=logging.INFO)
@@ -14,20 +15,7 @@ def analyze_sentiment(text):
     """
     Versión mejorada con mejor manejo de errores y logging
     """
-    prompt = f"""
-Analiza el siguiente texto y devuelve el resultado en formato JSON exacto.
-
-Texto a analizar:
-"""{text}"""
-
-Responde SOLO con este formato JSON (sin texto adicional):
-{{"sentiment": 0.8, "emotion": "alegría", "confidence": 0.9}}
-
-Donde:
-- sentiment: número entre -1 (muy negativo) y 1 (muy positivo)  
-- emotion: alegría, tristeza, enojo, miedo, sorpresa, neutral
-- confidence: número entre 0 y 1
-"""
+    prompt = catalog.SENTIMENT_ANALYSIS_JSON.format(text=text)
     
     try:
         logger.info(f"Analizando sentiment para texto de {len(text)} caracteres")

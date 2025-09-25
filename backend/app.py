@@ -39,6 +39,7 @@ import matplotlib
 matplotlib.use('Agg')  # Evita backends GUI (NSWindow) en macOS/entornos no interactivos
 import matplotlib.pyplot as plt
 from reportlab.lib.utils import ImageReader
+from src.reports.generator import generate_report as generate_report_v2
 
 load_dotenv()
 
@@ -287,9 +288,24 @@ def _aggregate_data_for_report_db(filters):
     model = (filters or {}).get('model')
     source = (filters or {}).get('source')
     topic = (filters or {}).get('topic')
+    # Multi-cliente y categorías
+    client_id = (filters or {}).get('client_id')
+    brand_id = (filters or {}).get('brand_id')
+    category = (filters or {}).get('category') or (filters or {}).get('prompt_category')
 
-    start_dt = parse_date(start_s) if start_s else datetime.utcnow() - timedelta(days=30)
-    end_dt = parse_date(end_s) if end_s else datetime.utcnow()
+    # Acepta tanto strings ISO como objetos datetime
+    def _to_dt(val, default):
+        try:
+            from datetime import datetime as _dt
+            if isinstance(val, _dt):
+                return val
+            if isinstance(val, str):
+                return parse_date(val)
+            return default
+        except Exception:
+            return default
+    start_dt = _to_dt(start_s, datetime.utcnow() - timedelta(days=30))
+    end_dt = _to_dt(end_s, datetime.utcnow())
 
     conn = get_db_connection(); cur = conn.cursor()
 
@@ -302,6 +318,12 @@ def _aggregate_data_for_report_db(filters):
         where.append("m.source = %s"); params.append(source)
     if topic and topic != 'all':
         where.append("q.topic = %s"); params.append(topic)
+    if category and category != 'all':
+        where.append("q.category = %s"); params.append(category)
+    if client_id:
+        where.append("q.client_id = %s"); params.append(client_id)
+    if brand_id:
+        where.append("q.brand_id = %s"); params.append(brand_id)
     where_sql = " AND ".join(where)
 
     # Traer filas necesarias para cómputos (detección de marcas + sentimiento)
@@ -409,13 +431,24 @@ def _aggregate_data_for_report_db(filters):
     competitor_leader_name = next((it["name"] for it in sov_list if it["name"] != primary_brand), None)
 
     # Oportunidades / Riesgos / Tendencias / Citas desde insights
+    # Filtros equivalentes para insights (sin campos de mentions como engine/source)
+    where_i = ["i.created_at >= %s AND i.created_at < %s"]
+    params_i = [start_dt, end_dt]
+    if topic and topic != 'all':
+        where_i.append("q.topic = %s"); params_i.append(topic)
+    if category and category != 'all':
+        where_i.append("q.category = %s"); params_i.append(category)
+    if client_id:
+        where_i.append("q.client_id = %s"); params_i.append(client_id)
+    if brand_id:
+        where_i.append("q.brand_id = %s"); params_i.append(brand_id)
+    where_sql_i = " AND ".join(where_i)
     cur.execute(f"""
         SELECT i.payload
         FROM insights i
         JOIN queries q ON i.query_id = q.id
-        WHERE i.created_at >= %s AND i.created_at < %s
-        {" AND q.topic = %s" if (topic and topic != 'all') else ''}
-    """, tuple([start_dt, end_dt] + ([topic] if (topic and topic != 'all') else [])))
+        WHERE {where_sql_i}
+    """, tuple(params_i))
     insights_rows = cur.fetchall()
     opp, risk, trend, quotes = Counter(), Counter(), Counter(), []
     for (payload,) in insights_rows:
@@ -536,10 +569,9 @@ def _aggregate_data_for_report_db(filters):
             SELECT i.payload, i.created_at
             FROM insights i
             JOIN queries q ON i.query_id = q.id
-            WHERE i.created_at >= %s AND i.created_at < %s
-            {" AND q.topic = %s" if (topic and topic != 'all') else ''}
+            WHERE {where_sql_i}
             """,
-            tuple([start_dt, end_dt] + ([topic] if (topic and topic != 'all') else []))
+            tuple(params_i)
         )
         for payload, created_at in cur.fetchall():
             if not isinstance(payload, dict):
@@ -584,9 +616,9 @@ def _aggregate_data_for_report_db(filters):
                    LOWER(COALESCE(m.source_title,'')) AS title
             FROM mentions m
             JOIN queries q ON m.query_id = q.id
-            WHERE m.created_at >= %s AND m.created_at < %s
+            WHERE {where_sql}
             """,
-            (start_dt, end_dt),
+            tuple(params),
         )
         rows_et = cur.fetchall()
         cur.close()
@@ -650,6 +682,137 @@ def _aggregate_data_for_report_db(filters):
         aggregated_data["sentiment_comparison"] = sentiment_comp[:10]
     except Exception:
         aggregated_data["sentiment_comparison"] = []
+
+    # ── Desglose por Categoría (7 áreas) ────────────────────────────────
+    try:
+        base_no_cat = ["m.created_at >= %s AND m.created_at < %s"]
+        params_no_cat = [start_dt, end_dt]
+        if model and model != 'all':
+            base_no_cat.append("m.engine = %s"); params_no_cat.append(model)
+        if source and source != 'all':
+            base_no_cat.append("m.source = %s"); params_no_cat.append(source)
+        if client_id:
+            base_no_cat.append("q.client_id = %s"); params_no_cat.append(client_id)
+        if brand_id:
+            base_no_cat.append("q.brand_id = %s"); params_no_cat.append(brand_id)
+        where_no_cat_sql = " AND ".join(base_no_cat)
+
+        cur = get_db_connection().cursor()
+        cur.execute(
+            f"""
+            SELECT COALESCE(q.category, q.topic) AS cat,
+                   m.sentiment, m.summary, i.payload
+            FROM mentions m
+            JOIN queries q ON m.query_id = q.id
+            LEFT JOIN insights i ON i.id = m.generated_insight_id
+            WHERE {where_no_cat_sql}
+            """,
+            tuple(params_no_cat)
+        )
+        cat_rows = cur.fetchall()
+        cur.close()
+
+        from collections import defaultdict
+        cat_sent = defaultdict(list)
+        cat_summaries = defaultdict(list)
+        cat_opps = defaultdict(lambda: defaultdict(int))
+        cat_risks = defaultdict(lambda: defaultdict(int))
+        cat_quotes = defaultdict(list)
+        for cat, s, summ, payload in cat_rows:
+            cname = (cat or 'Sin categoría')
+            try:
+                if isinstance(s, (int, float)):
+                    cat_sent[cname].append(float(s))
+            except Exception:
+                pass
+            if isinstance(summ, str) and summ.strip():
+                if len(cat_summaries[cname]) < 6:
+                    cat_summaries[cname].append(summ.strip())
+            if isinstance(payload, dict):
+                for t in (payload.get('opportunities') or []):
+                    if isinstance(t, str):
+                        cat_opps[cname][t] += 1
+                for t in (payload.get('risks') or []):
+                    if isinstance(t, str):
+                        cat_risks[cname][t] += 1
+                for q in (payload.get('quotes') or []):
+                    if isinstance(q, str) and len(cat_quotes[cname]) < 4:
+                        cat_quotes[cname].append(q)
+
+        by_category = []
+        for cname in sorted(cat_sent.keys() or {"Sin categoría": []}):
+            opp_sorted = sorted(cat_opps[cname].items(), key=lambda x: x[1], reverse=True)[:5]
+            risk_sorted = sorted(cat_risks[cname].items(), key=lambda x: x[1], reverse=True)[:5]
+            by_category.append({
+                "category": cname,
+                "sentiment_avg": round((sum(cat_sent[cname]) / max(len(cat_sent[cname]), 1)), 2) if cat_sent[cname] else 0.0,
+                "top_opportunities": [t for t, _ in opp_sorted],
+                "top_risks": [t for t, _ in risk_sorted],
+                "examples": cat_summaries[cname][:6],
+                "quotes": cat_quotes[cname][:4],
+            })
+        aggregated_data["by_category"] = by_category
+    except Exception:
+        aggregated_data["by_category"] = []
+
+    # ── Corpus textual por categoría para prosa del informe ─────────────
+    try:
+        cur = get_db_connection().cursor()
+        cur.execute(
+            f"""
+            SELECT COALESCE(q.category, q.topic) AS cat,
+                   m.response, m.sentiment, m.source_title, m.source_url
+            FROM mentions m
+            JOIN queries q ON m.query_id = q.id
+            WHERE {where_sql}
+            ORDER BY m.created_at DESC
+            """,
+            tuple(params)
+        )
+        rows_corpus = cur.fetchall()
+        cur.close()
+
+        from collections import defaultdict
+        bucket = defaultdict(lambda: {"pos": [], "neu": [], "neg": []})
+
+        def _shorten(txt: str, limit: int = 700) -> str:
+            try:
+                t = (txt or '').strip().replace('\n', ' ')
+                if len(t) <= limit:
+                    return t
+                return t[:limit].rsplit(' ', 1)[0] + '…'
+            except Exception:
+                return (txt or '')[:limit]
+
+        for cat, text, s, title, url in rows_corpus:
+            cname = (cat or 'Sin categoría')
+            sentiment_band = 'neu'
+            try:
+                if isinstance(s, (int, float)):
+                    if s > 0.15:
+                        sentiment_band = 'pos'
+                    elif s < -0.15:
+                        sentiment_band = 'neg'
+            except Exception:
+                sentiment_band = 'neu'
+            item = {"excerpt": _shorten(text or ''), "title": title or '', "url": url or '', "sentiment": float(s) if isinstance(s, (int, float)) else 0.0}
+            lst = bucket[cname][sentiment_band]
+            if len(lst) < 10:
+                lst.append(item)
+
+        corpus_by_category = []
+        corpus_for_llm = {}
+        for cname, bands in bucket.items():
+            texts = bands['pos'] + bands['neu'] + bands['neg']
+            corpus_by_category.append({"category": cname, "texts": texts})
+            sample = texts[:6]
+            corpus_for_llm[cname] = [t["excerpt"] for t in sample]
+
+        aggregated_data["corpus_by_category"] = corpus_by_category
+        aggregated_data["corpus_for_llm"] = corpus_for_llm
+    except Exception:
+        aggregated_data["corpus_by_category"] = []
+        aggregated_data["corpus_for_llm"] = {}
 
     # Intención del usuario (informacional, comparativa, transaccional)
     try:
@@ -1269,6 +1432,43 @@ def _create_pdf_report_consulting(content, data):
         pass
 
     if y < inch * 3: p.showPage(); y = height - inch
+
+    # --- NUEVO: Secciones por Categoría con citas ---
+    try:
+        categories = data.get('by_category') or []
+        corpus = data.get('corpus_by_category') or []
+        corpus_map = {c.get('category'): c.get('texts') for c in corpus}
+        for cat in categories:
+            if y < inch * 2:
+                p.showPage(); y = height - inch; draw_header_footer()
+            cname = cat.get('category', 'Sin categoría')
+            p.setFont("Helvetica-Bold", 14)
+            p.drawString(inch, y, f"{cname}")
+            y -= 18
+            y = write_paragraph(
+                f"<b>Sentimiento medio:</b> {cat.get('sentiment_avg', 0.0):.2f}", inch, y
+            )
+            y = write_paragraph(
+                f"<b>Oportunidades:</b> " + ", ".join(cat.get('top_opportunities') or []), inch, y
+            )
+            y = write_paragraph(
+                f"<b>Riesgos:</b> " + ", ".join(cat.get('top_risks') or []), inch, y
+            )
+            quotes = (cat.get('quotes') or [])
+            if not quotes and corpus_map.get(cname):
+                # usar 1-3 extractos del corpus como citas
+                quotes = [t.get('excerpt','') for t in corpus_map.get(cname, [])[:3] if t.get('excerpt')]
+            if quotes:
+                y -= 6
+                p.setFont("Helvetica-Bold", 12)
+                p.drawString(inch, y, "Citas destacadas")
+                y -= 16
+                for q in quotes[:3]:
+                    y = write_paragraph(f"\u201C{q}\u201D", inch, y)
+                    y -= 6
+            y -= 6
+    except Exception:
+        pass
 
     # Sección nueva: Intención del Usuario
     try:
@@ -4079,13 +4279,25 @@ def archive_mention(mention_id):
 @app.route('/api/reports/generate', methods=['POST'])
 def generate_report_endpoint():
     try:
-        filters = request.get_json()
+        payload = request.get_json() or {}
+        # Soporte multi-cliente/categorías
+        filters = {
+            'start_date': parse_date(payload.get('start_date')) if payload.get('start_date') else (datetime.utcnow() - timedelta(days=30)),
+            'end_date': parse_date(payload.get('end_date')) if payload.get('end_date') else datetime.utcnow(),
+            'model': payload.get('model') or 'all',
+            'source': payload.get('source') or 'all',
+            'topic': payload.get('topic') or 'all',
+            'client_id': payload.get('client_id'),
+            'brand_id': payload.get('brand_id'),
+            'category': payload.get('category') or payload.get('prompt_category'),
+        }
         if not filters:
             return jsonify({"error": "Filtros no proporcionados"}), 400
 
         aggregated_data = _aggregate_data_for_report(filters)
 
         # --- Cadena de Analistas Virtuales (versión final) ---
+        # Pasamos el corpus para que los prompts puedan incorporar citas breves
         summary_prompt = get_executive_summary_prompt(aggregated_data)
         s_raw, s_meta = fetch_response_with_metadata(summary_prompt, model="gpt-4o")
         _log_ai_call('executive_summary', summary_prompt, s_raw, s_meta)
@@ -4134,6 +4346,22 @@ def generate_report_endpoint():
         import traceback
         traceback.print_exc()
         return jsonify({"error": "No se pudo generar el informe. Revisa los logs del backend."}), 500
+
+
+@app.route('/api/reports/generate/v2', methods=['POST'])
+def generate_report_endpoint_v2():
+    try:
+        payload = request.get_json() or {}
+        project_id = int(payload.get('project_id') or 1)
+        pdf_bytes = generate_report_v2(project_id)
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            as_attachment=True,
+            download_name=f"Informe_Geocore_{datetime.now().strftime('%Y-%m-%d')}.pdf",
+            mimetype='application/pdf'
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5050, debug=True, use_reloader=False)

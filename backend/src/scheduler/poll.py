@@ -67,7 +67,8 @@ def insert_mention(cur, data: Dict[str, Any]):
             model_name, api_status_code, engine_request_id,
             input_tokens, output_tokens, price_usd,
             analysis_latency_ms, total_pipeline_ms, error_category,
-            source_domain, source_rank, query_text, query_topic, poll_id
+            source_domain, source_rank, query_text, query_topic, poll_id,
+            client_id, brand_id, category
         )
         VALUES (
             %(query_id)s, %(engine)s, %(source)s, %(response)s, %(sentiment)s, %(emotion)s,
@@ -78,7 +79,8 @@ def insert_mention(cur, data: Dict[str, Any]):
             %(model_name)s, %(api_status_code)s, %(engine_request_id)s,
             %(input_tokens)s, %(output_tokens)s, %(price_usd)s,
             %(analysis_latency_ms)s, %(total_pipeline_ms)s, %(error_category)s,
-            %(source_domain)s, %(source_rank)s, %(query_text)s, %(query_topic)s, %(poll_id)s
+            %(source_domain)s, %(source_rank)s, %(query_text)s, %(query_topic)s, %(poll_id)s,
+            %(client_id)s, %(brand_id)s, %(category)s
         )
         RETURNING id
         """,
@@ -89,15 +91,16 @@ def insert_mention(cur, data: Dict[str, Any]):
     )
     return cur.fetchone()[0]
 
-def insert_insights(cur, query_id: int, insights_payload: dict) -> int:
+def insert_insights(cur, query_id: int, insights_payload: dict, client_id: int | None, brand_id: int | None, category: str | None) -> int:
     cur.execute(
-        "INSERT INTO insights (query_id, payload) VALUES (%s, %s) RETURNING id",
-        (query_id, json.dumps(insights_payload)),
+        "INSERT INTO insights (query_id, payload, client_id, brand_id, category) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+        (query_id, json.dumps(insights_payload), client_id, brand_id, category),
     )
     return cur.fetchone()[0]
 
 def run_engine(name: str, fetch_fn: Callable[[str], Union[str, list]],
-               query_id: int, query_text: str, query_topic: str, cur, poll_id: str) -> None:
+               query_id: int, query_text: str, query_topic: str, query_category: str | None,
+               client_id: int | None, brand_id: int | None, cur, poll_id: str) -> None:
     logging.info("▶ %s | query «%s»", name, query_text)
 
     try:
@@ -169,7 +172,7 @@ def run_engine(name: str, fetch_fn: Callable[[str], Union[str, list]],
         if name in {"gpt-4", "pplx-7b-chat", "serpapi"}:
             insights_payload = extract_insights(response_text)
             if insights_payload:
-                insight_id = insert_insights(cur, query_id, insights_payload)
+                insight_id = insert_insights(cur, query_id, insights_payload, client_id, brand_id, query_category)
 
         alert_triggered = sentiment < SENTIMENT_THRESHOLD
         mention_data = {
@@ -195,6 +198,9 @@ def run_engine(name: str, fetch_fn: Callable[[str], Union[str, list]],
             "query_topic": query_topic,
             "language": "unknown",
             "poll_id": poll_id,
+            "client_id": client_id,
+            "brand_id": brand_id,
+            "category": query_category,
         }
 
         mention_id = insert_mention(cur, mention_data)
@@ -214,15 +220,15 @@ def main(loop_once: bool = True, sleep_seconds: int = 6 * 3600):
     while True:
         with psycopg2.connect(**DB_CFG) as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT id, query, topic FROM queries WHERE enabled = TRUE")
-                for query_id, query_text, query_topic in cur.fetchall():
+                cur.execute("SELECT id, query, topic, category, client_id, brand_id FROM queries WHERE enabled = TRUE")
+                for query_id, query_text, query_topic, query_category, client_id, brand_id in cur.fetchall():
                     print(f"\n🔍 Buscando menciones para query: {query_text}")
                     for name, fn in (
                         ("gpt-4", lambda q: fetch_response(q, model="gpt-4o-mini")),
                         ("pplx-7b-chat", fetch_perplexity_response),
                         ("serpapi", fetch_serp_response),
                     ):
-                        run_engine(name, fn, query_id, query_text, query_topic, cur, poll_id)
+                        run_engine(name, fn, query_id, query_text, query_topic, query_category, client_id, brand_id, cur, poll_id)
                 conn.commit()
 
         logging.info(f"🛑 Polling cycle finished for poll_id={poll_id}")
