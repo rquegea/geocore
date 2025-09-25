@@ -78,3 +78,60 @@ def plot_sov_pie(sov_list: List[Tuple[str, float]]) -> Optional[str]:
     return out
 
 
+def plot_combined_visibility_sentiment(dates: List[str], visibility: List[float], sentiment: List[float]) -> Optional[str]:
+    if not dates or not visibility or not sentiment:
+        return None
+    try:
+        import matplotlib.pyplot as plt
+        plt.figure(figsize=(8, 3.2))
+        ax1 = plt.gca()
+        ax1.plot(dates, visibility, color='tab:blue', marker='o', linewidth=1.6, label='Visibilidad')
+        ax1.set_ylabel('Visibilidad (%)', color='tab:blue')
+        ax1.tick_params(axis='y', labelcolor='tab:blue')
+        ax2 = ax1.twinx()
+        ax2.plot(dates, sentiment, color='tab:green', marker='x', linestyle='--', linewidth=1.4, label='Sentimiento')
+        ax2.set_ylabel('Sentimiento', color='tab:green')
+        ax2.tick_params(axis='y', labelcolor='tab:green')
+        ax2.set_ylim(-1, 1)
+        plt.xticks(rotation=45, ha='right')
+        plt.tight_layout()
+        out = _tmp_path("combined_vis_sent_")
+        plt.savefig(out, dpi=160)
+        plt.close()
+        return out
+    except Exception:
+        return None
+
+
+def plot_mentions_volume(dates: List[str], counts: List[int]) -> Optional[str]:
+    if not dates or not counts:
+        return None
+    sns.set_theme(style="whitegrid")
+    plt.figure(figsize=(8, 3))
+    sns.lineplot(x=dates, y=counts, marker="o", linewidth=1.8, color="#1f77b4")
+    plt.xticks(rotation=45, ha="right")
+    plt.tight_layout()
+    out = _tmp_path("mentions_volume_")
+    plt.savefig(out, dpi=160)
+    plt.close()
+    return out
+
+
+def plot_top_topics(topic_counts: Dict[str, int], top_n: int = 10) -> Optional[str]:
+    if not topic_counts:
+        return None
+    items = sorted(topic_counts.items(), key=lambda x: x[1], reverse=True)[:max(1, top_n)]
+    if not items:
+        return None
+    topics = [k for k, _ in items][::-1]
+    counts = [v for _, v in items][::-1]
+    sns.set_theme(style="whitegrid")
+    plt.figure(figsize=(8, 3.6))
+    sns.barplot(x=counts, y=topics, orient="h", palette="Blues_r")
+    plt.tight_layout()
+    out = _tmp_path("top_topics_")
+    plt.savefig(out, dpi=160)
+    plt.close()
+    return out
+
+

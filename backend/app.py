@@ -495,6 +495,7 @@ def _aggregate_data_for_report_db(filters):
             "dates": [d.strftime('%Y-%m-%d') for d in days_sorted],
             "visibility": [round(v, 1) for v in series_visibility],
             "sentiment": [round(v, 2) for v in series_sentiment],
+            "mentions": [int(by_day_total[d]) for d in days_sorted],
         },
         # Serie temporal de menciones del competidor líder (si no somos nosotros)
         "competitor_series": {
@@ -4291,92 +4292,83 @@ def generate_report_endpoint():
 
         aggregated_data = _aggregate_data_for_report(filters)
 
-        # ===== Nuevo: Analista Principal (sustituye Estratega) =====
-        # Genera narrativa y decide los 3 temas de deep dive en una única llamada
+        # 1) Corpus global de menciones (todas las queries, periodo)
+        from src.reports.aggregator import get_all_mentions_for_period
+        start_s = aggregated_data.get('start_date')
+        end_s = aggregated_data.get('end_date')
+        corpus = get_all_mentions_for_period(
+            limit=120,
+            start_date=start_s,
+            end_date=end_s,
+            client_id=filters.get('client_id'),
+            brand_id=filters.get('brand_id'),
+        )
+
+        # 2) Analista Principal (una única llamada con datos + texto)
         from src.engines.openai_engine import fetch_response_with_metadata
         from src.engines.strategic_prompts import get_main_analyst_prompt
-        main_prompt = get_main_analyst_prompt(aggregated_data)
-        main_raw, main_meta = fetch_response_with_metadata(main_prompt, model="gpt-4o")
-        _log_ai_call('main_analyst', main_prompt, main_raw, main_meta)
-        main_json = _clean_model_json(main_raw) or {}
-        informe = (main_json.get('informe') or {}) if isinstance(main_json, dict) else {}
-        # Mapear a las estructuras usadas por el PDF consultoría
-        summary_content = {
-            'executive_summary': {
-                'title': '1. Resumen Ejecutivo',
-                'headline': informe.get('headline') or '',
-                'key_findings': [],
-                'overall_assessment': informe.get('evaluacion_general') or ''
-            }
-        }
-        deep_content = {
-            'deep_dive_analysis': {
-                'title': 'Análisis Profundo',
-                'visibility_by_model': '',
-                'visibility_by_topic': '',
-                'sentiment_comparison': '',
-            }
-        }
-        # Insertar el análisis extenso como parte del executive_summary.overall_assessment si existe
-        if informe.get('analisis_profundo'):
-            summary_content['executive_summary']['overall_assessment'] += ("\n\n" + str(informe.get('analisis_profundo')))
-        # Temas para la capa 2
-        temas_criticos = list((main_json.get('deep_dive_temas') or [])[:3]) if isinstance(main_json, dict) else []
+        prompt = get_main_analyst_prompt(aggregated_data, corpus)
+        raw, meta = fetch_response_with_metadata(prompt, model="gpt-4o")
+        _log_ai_call('main_analyst', prompt, raw, meta)
+        main_json = _clean_model_json(raw) or {}
 
-        # Capa 2: Investigador → deep dive por cada tema crítico sobre menciones completas
-        deep_dives = []
-        if temas_criticos:
-            try:
-                from src.reports.aggregator import get_raw_mentions_for_topic
-                from src.engines.strategic_prompts import get_deep_dive_mentions_prompt
-                for tema in temas_criticos:
-                    try:
-                        menciones = get_raw_mentions_for_topic(str(tema), limit=25)
-                        prompt_dd = get_deep_dive_mentions_prompt(str(tema), menciones)
-                        dd_raw, dd_meta = fetch_response_with_metadata(prompt_dd, model="gpt-4o")
-                        _log_ai_call('deep_dive_topic', prompt_dd, dd_raw, dd_meta)
-                        dd_json = _clean_model_json(dd_raw) or {}
-                        deep_dives.append({"tema": str(tema), **dd_json})
-                    except Exception:
-                        deep_dives.append({"tema": str(tema), "sintesis_del_hallazgo": "", "causa_raiz": "", "citas_destacadas": []})
-            except Exception:
-                deep_dives = []
+        # 3) Gráficos y KPIs
+        from src.reports import plotter
+        from src.reports.pdf_writer import build_strategic_pdf
+        k = aggregated_data.get('kpis', {})
+        brand_name = aggregated_data.get('brand') or '-'
+        kpi_rows = [
+            ["Marca", str(brand_name)],
+            ["Total menciones", str(k.get("total_mentions", 0))],
+            ["Sentimiento promedio", f"{float(k.get('sentiment_avg', 0.0)):.2f}"],
+            ["SOV total", f"{float(k.get('sov_score', 0.0)):.1f}%"],
+            ["Visibilidad media", f"{float(k.get('visibility_score', 0.0)):.1f}%"],
+        ]
 
-        aggregated_data.setdefault('deep_dives', deep_dives)
+        ts = aggregated_data.get('time_series', {}) or {}
+        dates = ts.get('dates') or []
+        images = {}
+        try:
+            images['combined_vis_sent'] = plotter.plot_combined_visibility_sentiment(
+                dates, ts.get('visibility') or [], ts.get('sentiment') or []
+            )
+        except Exception:
+            images['combined_vis_sent'] = None
+        try:
+            images['mentions_volume'] = plotter.plot_mentions_volume(
+                dates, ts.get('mentions') or []
+            )
+        except Exception:
+            images['mentions_volume'] = None
+        try:
+            sov_src = aggregated_data.get('sov_chart_data') or []
+            sov_list = []
+            for it in sov_src:
+                try:
+                    name = it.get('name') if isinstance(it, dict) else None
+                    sov = float(it.get('sov')) if isinstance(it, dict) else None
+                    if name is not None and sov is not None:
+                        sov_list.append((name, sov))
+                except Exception:
+                    continue
+            images['sov_pie'] = plotter.plot_sov_pie(sov_list)
+        except Exception:
+            images['sov_pie'] = None
+        try:
+            images['top_topics'] = plotter.plot_top_topics(aggregated_data.get('topic_counts') or {})
+        except Exception:
+            images['top_topics'] = None
 
-        # --- La narrativa principal ya viene del Analista Principal ---
-
-        # --- NUEVO: Analista Competitivo ---
-        comp_prompt = get_competitive_analysis_prompt(aggregated_data)
-        comp_raw, comp_meta = fetch_response_with_metadata(comp_prompt, model="gpt-4o")
-        _log_ai_call('competitive_analysis', comp_prompt, comp_raw, comp_meta)
-        comp_content = _clean_model_json(comp_raw) or {}
-
-        # Nuevo analista de correlaciones y anomalías
-        corr_prompt = get_correlation_anomalies_prompt(aggregated_data)
-        c_raw, c_meta = fetch_response_with_metadata(corr_prompt, model="gpt-4o")
-        _log_ai_call('correlations_anomalies', corr_prompt, c_raw, c_meta)
-        corr_content = _clean_model_json(c_raw) or {}
-
-        recom_input = {**aggregated_data, **summary_content, **deep_content, **comp_content, **corr_content}
-        recom_prompt = get_recommendations_prompt(recom_input)
-        r_raw, r_meta = fetch_response_with_metadata(recom_prompt, model="gpt-4o")
-        _log_ai_call('recommendations', recom_prompt, r_raw, r_meta)
-        recom_content = _clean_model_json(r_raw) or {}
-
-        meth_prompt = get_methodology_prompt()
-        m_raw, m_meta = fetch_response_with_metadata(meth_prompt, model="gpt-4o")
-        _log_ai_call('methodology', meth_prompt, m_raw, m_meta)
-        meth_content = _clean_model_json(m_raw) or {}
-
-        full_report_content = {**summary_content, **deep_content, **comp_content, **corr_content, **recom_content, **meth_content}
-
-        pdf_buffer = _create_pdf_report_consulting(full_report_content, aggregated_data)
+        pdf_bytes = build_strategic_pdf(
+            narrative=main_json if isinstance(main_json, dict) else {},
+            kpi_rows=kpi_rows,
+            images=images,
+        )
 
         return send_file(
-            pdf_buffer,
+            io.BytesIO(pdf_bytes),
             as_attachment=True,
-            download_name=f"Informe_Consultoria_{datetime.now().strftime('%Y-%m-%d')}.pdf",
+            download_name=f"Informe_Ejecutivo_{datetime.now().strftime('%Y-%m-%d')}.pdf",
             mimetype='application/pdf'
         )
     except Exception as e:

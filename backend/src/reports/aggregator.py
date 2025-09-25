@@ -385,3 +385,77 @@ def get_raw_mentions_for_topic(topic: str, limit: int = 25) -> List[str]:
         return out
     finally:
         session.close()
+
+
+def get_all_mentions_for_period(
+    limit: int = 100,
+    *,
+    start_date: Optional[str] | None = None,
+    end_date: Optional[str] | None = None,
+    client_id: Optional[int] | None = None,
+    brand_id: Optional[int] | None = None,
+) -> List[str]:
+    """
+    Devuelve un corpus global de menciones (texto crudo) sin filtrar por tema, dentro de un
+    rango de fechas. Recoge menciones recientes y representativas de TODAS las queries.
+
+    - Usa un límite entre 100 y 150 para equilibrio coste/calidad.
+    - Descarta textos vacíos y muy cortos.
+    - Ordena por fecha descendente para priorizar actualidad.
+    """
+    from datetime import datetime, timedelta
+    # Normalizar fechas
+    def _to_dt(val, default):
+        try:
+            if isinstance(val, datetime):
+                return val
+            if isinstance(val, str) and val:
+                return datetime.strptime(val[:10], "%Y-%m-%d")
+            return default
+        except Exception:
+            return default
+
+    end_dt = _to_dt(end_date, datetime.utcnow())
+    start_dt = _to_dt(start_date, end_dt - timedelta(days=30))
+
+    session = get_session()
+    try:
+        where = [
+            "m.created_at >= :start::date",
+            "m.created_at < (:end::date + INTERVAL '1 day')",
+        ]
+        params: Dict[str, Any] = {
+            "start": start_dt.strftime("%Y-%m-%d"),
+            "end": end_dt.strftime("%Y-%m-%d"),
+            "lim": int(max(1, min(150, limit))),
+        }
+        if client_id is not None:
+            where.append("q.client_id = :client_id")
+            params["client_id"] = int(client_id)
+        if brand_id is not None:
+            where.append("q.brand_id = :brand_id")
+            params["brand_id"] = int(brand_id)
+
+        sql = text(
+            f"""
+            SELECT m.response
+            FROM mentions m
+            JOIN queries q ON q.id = m.query_id
+            WHERE {' AND '.join(where)}
+            ORDER BY m.created_at DESC
+            LIMIT :lim
+            """
+        )
+
+        rows = session.execute(sql, params).all()
+        corpus: List[str] = []
+        for (resp,) in rows:
+            if not isinstance(resp, str):
+                continue
+            txt = resp.strip()
+            if len(txt) < 40:  # descartar fragmentos demasiado cortos
+                continue
+            corpus.append(txt)
+        return corpus
+    finally:
+        session.close()

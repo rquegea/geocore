@@ -35,43 +35,54 @@ def get_detailed_category_prompt(category_name: str, category_data: list, all_su
     return prompt
 
 
-def get_main_analyst_prompt(aggregated_data: dict) -> str:
+def get_main_analyst_prompt(aggregated_data: dict, global_mentions_corpus: list[str]) -> str:
     """
-    Prompt del Analista Principal (Capa 1 unificada): integra KPIs + texto para producir
-    un único JSON con narrativa y selección de 3 temas para deep dive.
+    Analista Principal al estilo twolaps: integra KPIs + corpus global de menciones
+    para producir un ÚNICO JSON con todos los textos del informe y selección de temas.
 
     Salida esperada (JSON estricto, sin markdown):
     {
-      "informe": {
-        "headline": "...",
-        "evaluacion_general": "...",
-        "analisis_profundo": "..."
+      "headline": "...",
+      "evaluacion_general": "...",
+      "analisis_profundo": "...",
+      "analisis_competencia": "...",
+      "analisis_mercado": "...",
+      "cualitativo_global": {
+        "sintesis_del_hallazgo": "...",
+        "causa_raiz": "...",
+        "citas_destacadas": ["...", "..."]
       },
       "deep_dive_temas": ["tema 1", "tema 2", "tema 3"]
     }
     """
     data_json = json.dumps(aggregated_data, ensure_ascii=False, indent=2, default=str)
+    corpus = "\n\n".join([str(m)[:4000] for m in (global_mentions_corpus or []) if isinstance(m, str)])
     return (
-        "Actúa como Analista Principal (Chief Insights Analyst) especializado en educación superior. "
-        "Tu misión es LEER y RAZONAR sobre todos los datos cuantitativos y cualitativos disponibles "
-        "para redactar la narrativa ejecutiva del informe y decidir los 3 temas más importantes para investigar en profundidad.\n\n"
+        "Actúa como Analista Principal (Chief Insights Analyst) híbrido, cuantitativo y cualitativo. "
+        "Tu misión es sintetizar KPIs, tendencias y el corpus literal de menciones para redactar el Dossier Ejecutivo.\n\n"
         "INSTRUCCIONES CLAVE:\n"
-        "1) Integra KPIs (tendencias, SOV, sentimiento) con temas positivos/negativos y competidores.\n"
-        "2) Explica causas probables (el porqué) de los patrones observados; sé específico y profesional.\n"
-        "3) Selecciona 3 temas para deep dive que aporten máxima validación con menciones en bruto. Prioriza impacto de negocio.\n"
-        "4) Responde EXCLUSIVAMENTE con el JSON pedido. SIN markdown, SIN comentarios, SIN texto adicional.\n\n"
-        "DATOS PARA ANALIZAR (JSON):\n"
-        f"{data_json}\n\n"
+        "1) Integra KPIs (series, SOV, sentimiento), ranking de competidores y temas clave.\n"
+        "2) Usa el CORPUS GLOBAL para validar hallazgos y extraer citas representativas (textuales).\n"
+        "3) Entrega textos listos para el informe: titular, evaluación general, análisis profundo (con correlaciones),\n"
+        "   análisis de competencia y análisis de mercado.\n"
+        "4) Devuelve también un bloque cualitativo global (síntesis, causa raíz y 3-6 citas).\n"
+        "5) Selecciona 2-3 temas críticos para posibles deep dives.\n"
+        "6) Responde EXCLUSIVAMENTE con el JSON pedido. SIN markdown, SIN comentarios, SIN texto adicional.\n\n"
+        "DATOS CUANTITATIVOS (JSON):\n" + data_json + "\n\n"
+        "CORPUS GLOBAL DE MENCIONES (texto literal, truncado si es largo):\n" + corpus + "\n\n"
         "FORMATO DE SALIDA (JSON ESTRICTO):\n"
         "{\n"
-        "  \"informe\": {\n"
-        "    \"headline\": \"Titular conciso que conecte dato + porqué\",\n"
-        "    \"evaluacion_general\": \"Evaluación ejecutiva clara del periodo (qué pasó y por qué).\",\n"
-        "    \"analisis_profundo\": \"Narrativa de 2-4 párrafos conectando KPIs con temas, competidores y citas.\"\n"
+        "  \"headline\": \"Titular conciso que conecte dato + porqué\",\n"
+        "  \"evaluacion_general\": \"Conclusión ejecutiva del periodo y drivers principales.\",\n"
+        "  \"analisis_profundo\": \"2-4 párrafos conectando KPIs, temas y competencia; incluye correlaciones.\",\n"
+        "  \"analisis_competencia\": \"Lectura de SOV y movimientos competitivos relevantes.\",\n"
+        "  \"analisis_mercado\": \"Lectura de temas clave y señales de mercado (oportunidades/amenazas).\",\n"
+        "  \"cualitativo_global\": {\n"
+        "    \"sintesis_del_hallazgo\": \"3-5 frases que sinteticen el insight global basado en menciones.\",\n"
+        "    \"causa_raiz\": \"Hipótesis de causa raíz con soporte del corpus.\",\n"
+        "    \"citas_destacadas\": [\"cita 1\", \"cita 2\", \"cita 3\"]\n"
         "  },\n"
-        "  \"deep_dive_temas\": [\n"
-        "    \"Tema 1\", \"Tema 2\", \"Tema 3\"\n"
-        "  ]\n"
+        "  \"deep_dive_temas\": [\"Tema 1\", \"Tema 2\"]\n"
         "}"
     )
 

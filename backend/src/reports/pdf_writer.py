@@ -73,6 +73,88 @@ def add_agent_insights_section(pdf: ReportPDF, agent_summary: Dict[str, str], ra
         _add_bucket("risks", "Riesgos destacados")
         _add_bucket("trends", "Tendencias destacadas")
 
+
+def build_strategic_pdf(
+    *,
+    narrative: Dict,
+    kpi_rows: List[List[str]],
+    images: Dict[str, Optional[str]],
+) -> bytes:
+    """
+    Genera el PDF final según la estructura narrativa solicitada:
+    - Página 1: Dashboard Ejecutivo (headline, evaluación, KPIs, gráfico combinado)
+    - Sección 1: Análisis Estratégicos y de Mercado (Competencia, Mercado)
+    - Sección 2: Análisis Cuantitativo y Correlaciones (Tendencias, Analisis Profundo)
+    - Anexo: Cualitativo Global (síntesis, causa raíz, citas)
+    """
+    pdf = ReportPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=12)
+    pdf.add_page()
+
+    # Página 1: Dashboard Ejecutivo
+    headline = (narrative.get("headline") or "").strip()
+    overall = (narrative.get("evaluacion_general") or "").strip()
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, "Dashboard Ejecutivo", 0, 1, "L")
+    if headline:
+        pdf.set_font("Helvetica", "B", 13)
+        pdf.multi_cell(0, 7, headline)
+        pdf.ln(2)
+    if overall:
+        pdf.set_font("Helvetica", size=11)
+        pdf.multi_cell(0, 6, overall)
+        pdf.ln(2)
+    if kpi_rows:
+        add_title(pdf, "KPIs")
+        add_table(pdf, kpi_rows)
+    if images.get("combined_vis_sent"):
+        add_title(pdf, "Evolución de Visibilidad y Sentimiento")
+        add_image(pdf, images.get("combined_vis_sent"))
+
+    # Sección 1: Análisis Estratégicos y de Mercado
+    pdf.add_page()
+    add_title(pdf, "Sección 1: Análisis Estratégicos y de Mercado")
+    comp_text = (narrative.get("analisis_competencia") or "").strip()
+    if comp_text:
+        add_title(pdf, "Análisis de Competencia")
+        add_paragraph(pdf, comp_text)
+    if images.get("sov_pie"):
+        add_image(pdf, images.get("sov_pie"))
+    market_text = (narrative.get("analisis_mercado") or "").strip()
+    if market_text:
+        add_title(pdf, "Análisis de Mercado")
+        add_paragraph(pdf, market_text)
+    if images.get("top_topics"):
+        add_image(pdf, images.get("top_topics"))
+
+    # Sección 2: Análisis Cuantitativo y Correlaciones
+    pdf.add_page()
+    add_title(pdf, "Sección 2: Análisis Cuantitativo y Correlaciones")
+    if images.get("mentions_volume"):
+        add_title(pdf, "Tendencias: Volumen de Menciones")
+        add_image(pdf, images.get("mentions_volume"))
+    deep_text = (narrative.get("analisis_profundo") or "").strip()
+    if deep_text:
+        add_title(pdf, "Correlaciones Transversales (Análisis Profundo)")
+        add_paragraph(pdf, deep_text)
+
+    # Anexo: Cualitativo Global
+    annex = (narrative.get("cualitativo_global") or {}) if isinstance(narrative, dict) else {}
+    if annex:
+        pdf.add_page()
+        add_title(pdf, "Anexo: Análisis Cualitativo Profundo (Global)")
+        if annex.get("sintesis_del_hallazgo"):
+            add_paragraph(pdf, f"Síntesis del hallazgo: {annex.get('sintesis_del_hallazgo')}")
+        if annex.get("causa_raiz"):
+            add_paragraph(pdf, f"Causa raíz: {annex.get('causa_raiz')}")
+        citas = annex.get("citas_destacadas") or []
+        if isinstance(citas, list) and citas:
+            add_title(pdf, "Citas destacadas")
+            for c in citas[:8]:
+                add_paragraph(pdf, f"\u201C{str(c)}\u201D")
+
+    return bytes(pdf.output(dest="S").encode("latin-1"))
+
 def build_pdf(content: Dict) -> bytes:
     pdf = ReportPDF(orientation="P", unit="mm", format="A4")
     pdf.set_auto_page_break(auto=True, margin=12)
