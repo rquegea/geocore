@@ -133,7 +133,7 @@ def _synthesize_clusters(cluster_summaries: List[Dict[str, Any]]) -> Dict[str, A
 
 
 def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = None,
-                    only_action_plan: bool = False, save_insights_json: bool = True) -> bytes:
+                    save_insights_json: bool = True) -> bytes:
     session = aggregator.get_session()
     try:
         kpis = aggregator.get_kpi_summary(session, project_id)
@@ -213,16 +213,10 @@ def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = Non
     except Exception:
         plan_text = ""
 
-    # Si solo queremos probar la Parte 2, generamos un PDF mínimo con esa sección
-    if only_action_plan:
-        pdf = pdf_writer.ReportPDF(orientation="P", unit="mm", format="A4")
-        pdf.set_auto_page_break(auto=True, margin=12)
-        pdf.add_page()
-        pdf_writer.add_title(pdf, "Plan de Acción Estratégico")
-        pdf_writer.add_paragraph(pdf, plan_text or "(Sin contenido)" )
-        return pdf.output(dest="S")
-
     strategic_sections = _generate_strategic_content(insights_json, aggregated)
+    # Asegurar que el Plan de Acción provenga de la cadena Parte 2
+    if plan_text:
+        strategic_sections["action_plan"] = plan_text
     agent_summary_text = ""
     try:
         agent_prompt = s_prompts.get_agent_insights_summary_prompt({"agent_insights": agent_insights})
