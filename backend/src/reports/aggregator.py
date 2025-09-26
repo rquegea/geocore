@@ -552,9 +552,11 @@ def get_industry_sov_ranking(
         session = get_session()
         own_session = True
     try:
+        # Traer también key_topics para replicar la detección del endpoint
         sql = text(
             """
             SELECT
+              m.key_topics,
               LOWER(COALESCE(m.response,'')) AS resp,
               LOWER(COALESCE(m.source_title,'')) AS title,
               i.payload
@@ -568,12 +570,19 @@ def get_industry_sov_ranking(
         rows = session.execute(sql, {"start_date": start_date or "1970-01-01", "end_date": end_date or "2999-12-31"}).mappings().all()
         from collections import Counter
         counts: Counter[str] = Counter()
-        # Sinónimos normalizados
+        # Sinónimos normalizados (canónico -> lista de variantes en minúsculas)
         norm_synonyms: Dict[str, list[str]] = {c: [c.lower()] + [s.lower() for s in alts] for c, alts in BRAND_SYNONYMS.items()}
         for r in rows:
             payload = r.get("payload") or {}
             resp = (r.get("resp") or "").lower()
             title = (r.get("title") or "").lower()
+            # key_topics puede ser TEXT[] o JSONB; normalizamos a lista en minúsculas
+            try_topics: list[str] = []
+            try:
+                if isinstance(r.get("key_topics"), (list, tuple)):
+                    try_topics = [str(t).strip().lower() for t in (r.get("key_topics") or [])]
+            except Exception:
+                try_topics = []
             payload_brands: list[str] = []
             if isinstance(payload, dict):
                 raw_b = payload.get("brands")
@@ -590,7 +599,7 @@ def get_industry_sov_ranking(
                 if canon in seen:
                     continue
                 for s in syns:
-                    if s and (s in resp or s in title or s in payload_brands):
+                    if s in try_topics or (s and (s in resp or s in title or s in payload_brands)):
                         counts[canon] += 1
                         seen.add(canon)
                         break
@@ -614,9 +623,11 @@ def get_visibility_ranking(
         session = get_session()
         own_session = True
     try:
+        # Traer también key_topics para replicar la detección del endpoint
         sql = text(
             """
             SELECT
+              m.key_topics,
               LOWER(COALESCE(m.response,'')) AS resp,
               LOWER(COALESCE(m.source_title,'')) AS title,
               i.payload
@@ -636,6 +647,12 @@ def get_visibility_ranking(
             payload = r.get("payload") or {}
             resp = (r.get("resp") or "").lower()
             title = (r.get("title") or "").lower()
+            try_topics: list[str] = []
+            try:
+                if isinstance(r.get("key_topics"), (list, tuple)):
+                    try_topics = [str(t).strip().lower() for t in (r.get("key_topics") or [])]
+            except Exception:
+                try_topics = []
             payload_brands: list[str] = []
             if isinstance(payload, dict):
                 raw_b = payload.get("brands")
@@ -650,7 +667,7 @@ def get_visibility_ranking(
             detected: list[str] = []
             for canon, syns in norm_synonyms.items():
                 for s in syns:
-                    if s and (s in resp or s in title or s in payload_brands):
+                    if s in try_topics or (s and (s in resp or s in title or s in payload_brands)):
                         detected.append(canon)
                         break
             for canon in set(detected):

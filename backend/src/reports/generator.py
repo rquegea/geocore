@@ -302,10 +302,13 @@ def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = Non
     session = aggregator.get_session()
     try:
         kpis = aggregator.get_kpi_summary(session, project_id)
-        evo = aggregator.get_sentiment_evolution(session, project_id)
+        # Para alinear con el frontend, usamos la serie de % positivo del endpoint /api/sentiment
+        pos_series = aggregator.get_sentiment_positive_series(session, project_id)
         by_cat = aggregator.get_sentiment_by_category(session, project_id)
         top5, bottom5 = aggregator.get_topics_by_sentiment(session, project_id)
         sov_trends = aggregator.get_share_of_voice_and_trends(session, project_id)
+        # Serie de visibilidad diaria exactamente como /api/visibility (granularity=day)
+        vis_dates, vis_vals = aggregator.get_visibility_series(session, project_id)
         agent_insights = aggregator.get_agent_insights_data(session, project_id, limit=200)
         # Nuevo: permitir inyectar clusters precalculados para evitar recomputar
         if clusters is None:
@@ -322,8 +325,8 @@ def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = Non
             "competitor_mentions": sov_trends.get("current", {}).get("competitor_mentions", {}),
         },
         "client_name": kpis.get("brand_name"),
-        "time_series": {
-            "sentiment_per_day": [{"date": d, "average": s} for d, s in evo],
+        "time_series": {  # mantenemos compatibilidad pero ya como % positivo 0–100
+            "sentiment_per_day": [(d, float(v)) for d, v in pos_series],
         },
         "trends": sov_trends.get("trends", {}),
         "agent_insights": agent_insights,
@@ -375,8 +378,18 @@ def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = Non
     except Exception:
         agent_summary_text = ""
 
+    # Gráficos alineados a la API: sentimiento como % positivo y visibilidad diaria
+    try:
+        sent_img = plotter.plot_line_series([d for d, _ in pos_series], [float(v) for _, v in pos_series], title="% de menciones positivas", ylabel="Positivo (%)", ylim=(0, 100), color="#16a34a")
+    except Exception:
+        sent_img = None
+    try:
+        vis_img = plotter.plot_line_series(vis_dates, vis_vals, title="Puntuación de visibilidad", ylabel="Visibilidad (%)", ylim=(0, 100), color="#000000")
+    except Exception:
+        vis_img = None
     images = {
-        "sentiment_evolution": plotter.plot_sentiment_evolution(evo),
+        "sentiment_evolution": sent_img,
+        "part1_visibility_line": vis_img,
         "sentiment_by_category": plotter.plot_sentiment_by_category(by_cat),
         "topics_top_bottom": plotter.plot_topics_top_bottom(top5, bottom5),
         "sov_pie": plotter.plot_sov_pie([(name, cnt) for name, cnt in kpis.get("sov_table", [])[:6]]),
@@ -410,13 +423,13 @@ def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = Non
     }
 
     try:
-        if evo:
-            first_s = evo[0][1]
-            last_s = evo[-1][1]
+        if pos_series:
+            first_s = pos_series[0][1]
+            last_s = pos_series[-1][1]
             delta = last_s - first_s
             trend_word = "mejora" if delta > 0.05 else ("empeora" if delta < -0.05 else "se mantiene estable")
-            min_day, min_val = min(evo, key=lambda x: x[1])
-            max_day, max_val = max(evo, key=lambda x: x[1])
+            min_day, min_val = min(pos_series, key=lambda x: x[1])
+            max_day, max_val = max(pos_series, key=lambda x: x[1])
             content_for_pdf["annex"]["evolution_text"] = (
                 f"El sentimiento {trend_word} (Δ={delta:.2f}). Mínimo en {min_day} ({min_val:.2f}) y máximo en {max_day} ({max_val:.2f})."
             )

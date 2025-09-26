@@ -1,0 +1,61 @@
+{
+  "executive_summary": "The Core School maintains a strong share of voice in the entertainment education sector, with opportunities to expand its program offerings and collaborations. However, it faces high competition and needs to enhance its international recognition.",
+  "key_findings": [
+    "The Core School has a stable sentiment trend with occasional peaks, indicating a generally positive perception.",
+    "The school holds a 100% share of voice in its category, but faces strong competition from CES and ECAM.",
+    "The perception of The Core School is positive, with opportunities to enhance its program offerings and international collaborations."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expandir la oferta de programas en escritura de guiones y producción audiovisual práctica.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Expandir colaboraciones con empresas del sector audiovisual para mejorar la inserción laboral de los estudiantes.",
+      "impact": "Alto"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Alta competencia de otras escuelas especializadas en cine y producción audiovisual en Madrid.",
+      "mitigation": "Diferenciarse mediante programas únicos y colaboraciones estratégicas."
+    },
+    {
+      "risk": "Falta de reconocimiento internacional comparado con instituciones como EICTV.",
+      "mitigation": "Fortalecer alianzas internacionales y promover programas globales."
+    }
+  ],
+  "recommendations": [
+    "Desarrollar programas online para llegar a un público más amplio.",
+    "Colaborar con instituciones internacionales para atraer estudiantes globales.",
+    "Fortalecer la promoción de programas únicos y diferenciadores."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-14",
+          "type": "spike",
+          "metric": "sentiment",
+          "note": "Sentiment reached 100, possibly due to positive news or events."
+        },
+        {
+          "date": "2025-09-16",
+          "type": "spike",
+          "metric": "sentiment",
+          "note": "Another peak at 100, indicating sustained positive perception."
+        }
+      ],
+      "sentiment_vs_volume": "Sentiment peaks coincide with stable mention volumes, indicating positive perception without significant volume changes."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [],
+        "sentiment_vs_volume": "Stable sentiment with consistent mention volume, suggesting steady interest in program offerings."
+      }
+    ]
+  }
+}
