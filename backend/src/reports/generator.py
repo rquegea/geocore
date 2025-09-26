@@ -290,76 +290,13 @@ def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = Non
     except Exception:
         pass
 
-    pdf = pdf_writer.ReportPDF(orientation="P", unit="mm", format="A4")
-    pdf.set_auto_page_break(auto=True, margin=12)
-    pdf.add_page()
-
-    pdf_writer.add_title(pdf, "Resumen Ejecutivo")
-    pdf_writer.add_paragraph(pdf, strategic_sections.get("executive_summary", ""))
-
-    pdf_writer.add_title(pdf, "Plan de Acción Estratégico")
-    pdf_writer.add_paragraph(pdf, strategic_sections.get("action_plan", ""))
-
-    # Nuevas secciones del equipo de analistas
-    if strategic_sections.get("competitive_analysis"):
-        pdf_writer.add_title(pdf, "Análisis Competitivo")
-        pdf_writer.add_paragraph(pdf, strategic_sections.get("competitive_analysis", ""))
-    if strategic_sections.get("trends"):
-        pdf_writer.add_title(pdf, "Tendencias y Señales Emergentes")
-        pdf_writer.add_paragraph(pdf, strategic_sections.get("trends", ""))
-
-    pdf_writer.add_title(pdf, "KPIs Principales y Share of Voice")
-    pdf_writer.add_table(pdf, content_for_pdf["kpi_rows"])
-    pdf_writer.add_image(pdf, images.get("sov_pie"))
-
-    # Nueva sección: Temas por Clusters
-    if content_for_pdf.get("clusters"):
-        pdf_writer.add_title(pdf, "Temas y Hallazgos por Clusters")
-        for c in content_for_pdf["clusters"][:10]:
-            header = f"- {c.get('topic_name', '(sin nombre)')} | volumen: {c.get('volume', 0)} | sentiment: {float(c.get('sentiment', 0.0)):.2f}"
-            pdf_writer.add_paragraph(pdf, header)
-            for kp in (c.get("key_points") or [])[:3]:
-                pdf_writer.add_paragraph(pdf, f"  • {kp}")
-
-    # Nueva sección: Síntesis Estratégica a partir de Clusters
-    if content_for_pdf.get("clusters_synthesis"):
-        pdf_writer.add_title(pdf, "Síntesis Estratégica (basada en clusters)")
-        syn = content_for_pdf["clusters_synthesis"]
-        try:
-            metas = syn.get("meta_narrativas") or []
-            if metas:
-                pdf_writer.add_paragraph(pdf, "Meta-narrativas:")
-                for m in metas[:5]:
-                    pdf_writer.add_paragraph(pdf, f"- {m}")
-            if syn.get("oportunidad_principal"):
-                pdf_writer.add_paragraph(pdf, f"Oportunidad principal: {syn['oportunidad_principal']}")
-            if syn.get("riesgo_inminente"):
-                pdf_writer.add_paragraph(pdf, f"Riesgo inminente: {syn['riesgo_inminente']}")
-            plan = syn.get("plan_estrategico") or []
-            if plan:
-                pdf_writer.add_paragraph(pdf, "Plan estratégico:")
-                for p in plan[:6]:
-                    pdf_writer.add_paragraph(pdf, f"- {p}")
-        except Exception:
-            pass
-
-    pdf_writer.add_title(pdf, "Anexo: Análisis Detallado y Visualizaciones")
-    pdf_writer.add_image(pdf, images.get("sentiment_evolution"))
-    if content_for_pdf["annex"].get("evolution_text"):
-        pdf_writer.add_paragraph(pdf, content_for_pdf["annex"]["evolution_text"])
-
-    pdf_writer.add_image(pdf, images.get("sentiment_by_category"))
-    if content_for_pdf["annex"].get("category_text"):
-        pdf_writer.add_paragraph(pdf, content_for_pdf["annex"]["category_text"])
-
-    pdf_writer.add_image(pdf, images.get("topics_top_bottom"))
-    if content_for_pdf["annex"].get("topics_text"):
-        pdf_writer.add_paragraph(pdf, content_for_pdf["annex"]["topics_text"])
-
-    # Inserta la wordcloud si está disponible
-    pdf_writer.add_image(pdf, images.get("wordcloud"))
-
-    return pdf.output(dest="S")
+    # Construir el PDF usando el ESQUELETO y poblando solo lo que ya tenemos
+    # Parte 1: usamos build_skeleton_with_content para insertar gráficos disponibles
+    company = kpis.get("brand_name") or aggregated.get("client_name") or "Empresa"
+    base_pdf = pdf_writer.build_skeleton_with_content(company, images, strategic={
+        "action_plan": strategic_sections.get("action_plan", "")
+    })
+    return base_pdf
 
 
 def generate_hybrid_report(full_data: Dict[str, Any]) -> bytes:

@@ -450,7 +450,7 @@ def build_empty_structure_pdf(company_name: str) -> bytes:
 
 
 # --- NUEVO: Estructura con contenido para Parte 1 ---
-def build_skeleton_with_content(company_name: str, images: Dict[str, Optional[str]]) -> bytes:
+def build_skeleton_with_content(company_name: str, images: Dict[str, Optional[str]], strategic: Dict[str, str] | None = None) -> bytes:
     """
     Genera un PDF con la estructura (portada + índice + secciones) e inserta
     contenido visual en las secciones de la Parte 1 cuando haya imágenes disponibles.
@@ -582,10 +582,14 @@ def build_skeleton_with_content(company_name: str, images: Dict[str, Optional[st
         for k in keys:
             add_image(pdf, images.get(k), width=180)
 
-    # Parte 2 (cabeceras)
+    # Parte 2 (cabeceras) + inserción de contenidos estratégicos si vienen
     _write_section_page("Parte 2: Informe Estratégico")
     for s in parte2:
         _write_section_page(s)
+        if strategic and s == "Plan de Acción Estratégico":
+            text = (strategic.get("action_plan") or "").strip()
+            if text:
+                add_paragraph(pdf, text)
 
     # Parte 3 (cabeceras)
     _write_section_page("Parte 3: Anexo - Análisis Detallado por Categoría")
