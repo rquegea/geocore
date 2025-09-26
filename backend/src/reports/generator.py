@@ -298,40 +298,66 @@ def _synthesize_clusters(cluster_summaries: List[Dict[str, Any]]) -> Dict[str, A
 
 
 def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = None,
-                    save_insights_json: bool = True) -> bytes:
+                    save_insights_json: bool = True,
+                    *, start_date: str | None = None, end_date: str | None = None) -> bytes:
     session = aggregator.get_session()
     try:
-        kpis = aggregator.get_kpi_summary(session, project_id)
-        # Para alinear con el frontend, usamos la serie de % positivo del endpoint /api/sentiment
-        pos_series = aggregator.get_sentiment_positive_series(session, project_id)
-        by_cat = aggregator.get_sentiment_by_category(session, project_id)
-        top5, bottom5 = aggregator.get_topics_by_sentiment(session, project_id)
-        sov_trends = aggregator.get_share_of_voice_and_trends(session, project_id)
-        # Serie de visibilidad diaria exactamente como /api/visibility (granularity=day)
-        vis_dates, vis_vals = aggregator.get_visibility_series(session, project_id)
+        # 1) Nombre de marca del proyecto (solo para mostrar)
+        kpis_name_only = aggregator.get_kpi_summary(session, project_id)
+        brand_name = kpis_name_only.get("brand_name") or "Empresa"
+
+        # 2) Métricas y gráficos GLOBALES (todos los topics)
+        #    SOV global por marca
+        sov_pairs = aggregator.get_industry_sov_ranking(session, start_date=start_date, end_date=end_date)
+        brand_sov = next((float(v or 0.0) for n, v in sov_pairs if str(n).strip() == str(brand_name).strip()), 0.0)
+
+        #    Visibilidad global diaria
+        vis_dates, vis_vals = aggregator.get_visibility_series(session, project_id, start_date=start_date, end_date=end_date)
+
+        #    Sentimiento: % de positivos
+        pos_series = aggregator.get_sentiment_positive_series(session, project_id, start_date=start_date, end_date=end_date)
+
+        #    Datos por categoría solo para el anexo y gráficos secundarios
+        by_cat = aggregator.get_sentiment_by_category(session, project_id, start_date=start_date, end_date=end_date)
+        top5, bottom5 = aggregator.get_topics_by_sentiment(session, project_id, start_date=start_date, end_date=end_date)
+
+        #    Total de menciones del periodo (todas las queries)
+        from sqlalchemy import text as _text
+        s_date = start_date or "1970-01-01"
+        e_date = end_date or "2999-12-31"
+        total_mentions_row = session.execute(_text("""
+            SELECT COUNT(*) FROM mentions m
+            WHERE m.created_at >= CAST(:start AS date)
+              AND m.created_at < (CAST(:end AS date) + INTERVAL '1 day')
+        """), {"start": s_date, "end": e_date}).first()
+        total_mentions = int(total_mentions_row[0] if total_mentions_row and total_mentions_row[0] is not None else 0)
+
+        # 3) Insights del agente para Parte 2
         agent_insights = aggregator.get_agent_insights_data(session, project_id, limit=200)
         # Nuevo: permitir inyectar clusters precalculados para evitar recomputar
         if clusters is None:
-            clusters = aggregator.aggregate_clusters_for_report(session, project_id, max_rows=5000)
+            clusters = aggregator.aggregate_clusters_for_report(session, project_id, start_date=start_date, end_date=end_date, max_rows=5000)
     finally:
         session.close()
 
     aggregated: Dict[str, Any] = {
         "kpis": {
-            "total_mentions": kpis.get("total_mentions"),
-            "average_sentiment": kpis.get("sentiment_avg"),
-            "share_of_voice": kpis.get("sov"),
-            "sov_by_category": sov_trends.get("current", {}).get("sov_by_category", {}),
-            "competitor_mentions": sov_trends.get("current", {}).get("competitor_mentions", {}),
+            "total_mentions": total_mentions,
+            "average_sentiment": float((sum(v for _, v in pos_series) / max(len(pos_series), 1) / 100.0) * 2.0 - 1.0) if pos_series else 0.0,
+            "share_of_voice": float(brand_sov),
+            "sov_table": [(n, v) for n, v in sov_pairs],
         },
-        "client_name": kpis.get("brand_name"),
-        "time_series": {  # mantenemos compatibilidad pero ya como % positivo 0–100
+        "client_name": brand_name,
+        "time_series": {
             "sentiment_per_day": [(d, float(v)) for d, v in pos_series],
         },
-        "trends": sov_trends.get("trends", {}),
+        "visibility_timeseries": (vis_dates, vis_vals),
         "agent_insights": agent_insights,
-        # Clusters crudos para posibles usos posteriores
         "clusters_raw": clusters,
+        # Datos por categoría SOLO para anexos/gráficos secundarios
+        "sentiment_by_category": by_cat,
+        "topics_top5": top5,
+        "topics_bottom5": bottom5,
     }
 
     # Nivel 1: análisis por cluster
@@ -390,9 +416,10 @@ def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = Non
     images = {
         "sentiment_evolution": sent_img,
         "part1_visibility_line": vis_img,
+        "sov_pie": plotter.plot_sov_pie([(name, val) for name, val in sov_pairs[:10]]),
+        # Anexos
         "sentiment_by_category": plotter.plot_sentiment_by_category(by_cat),
         "topics_top_bottom": plotter.plot_topics_top_bottom(top5, bottom5),
-        "sov_pie": plotter.plot_sov_pie([(name, cnt) for name, cnt in kpis.get("sov_table", [])[:6]]),
     }
 
     # Nueva: Wordcloud cualitativa reciente (corpus global)
@@ -404,7 +431,7 @@ def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = Non
 
     content_for_pdf: Dict[str, Any] = {
         "strategic": strategic_sections,
-        "kpi_rows": _build_kpi_rows(kpis),
+        "kpi_rows": _build_kpi_rows(aggregated["kpis"]),
         "images": images,
         "agent_insights": {
             "summary": agent_summary_text,
@@ -456,7 +483,7 @@ def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = Non
 
     # Bundle unificado con imágenes + textos
     content_bundle: Dict[str, Any] = {
-        "company_name": kpis.get("brand_name") or aggregated.get("client_name") or "Empresa",
+        "company_name": brand_name or aggregated.get("client_name") or "Empresa",
         "images": images,
         "strategic": {
             "executive_summary": strategic_sections.get("executive_summary", ""),

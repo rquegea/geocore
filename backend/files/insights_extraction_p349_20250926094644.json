@@ -1,0 +1,61 @@
+{
+  "executive_summary": "The Core School maintains a strong share of voice in the entertainment education sector, with a generally positive sentiment. However, competition in Madrid is intense, and there are opportunities to expand program offerings and collaborations.",
+  "key_findings": [
+    "The Core School has a dominant share of voice in the curriculum and programs category, indicating strong market presence.",
+    "Competitors like CES and ECAM have significant mentions, highlighting competitive pressure in Madrid.",
+    "The Core School's sentiment is consistently positive, reflecting a strong brand perception among stakeholders."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expandir la oferta de programas en escritura de guiones y producción audiovisual práctica.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Expandir colaboraciones con empresas del sector audiovisual para mejorar la inserción laboral de los estudiantes.",
+      "impact": "Alto"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Alta competencia de otras escuelas especializadas en cine y producción audiovisual en Madrid.",
+      "mitigation": "Diferenciarse mediante programas únicos y colaboraciones estratégicas."
+    },
+    {
+      "risk": "Falta de reconocimiento internacional comparado con instituciones como EICTV.",
+      "mitigation": "Fortalecer alianzas internacionales y aumentar la visibilidad global."
+    }
+  ],
+  "recommendations": [
+    "Desarrollar programas online para llegar a un público más amplio.",
+    "Colaborar con instituciones internacionales como EICTV para atraer estudiantes globales.",
+    "Aumentar la visibilidad de los programas únicos de The Core School para diferenciarse de la competencia."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-14",
+          "type": "spike",
+          "metric": "sentiment",
+          "note": "Sentiment reached 100, possibly due to positive news or events."
+        },
+        {
+          "date": "2025-09-16",
+          "type": "spike",
+          "metric": "sentiment",
+          "note": "Another peak in sentiment at 100, indicating consistent positive perception."
+        }
+      ],
+      "sentiment_vs_volume": "Sentiment remains high despite stable volume, indicating strong brand perception."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [],
+        "sentiment_vs_volume": "Stable sentiment with consistent mentions suggests a well-regarded curriculum."
+      }
+    ]
+  }
+}

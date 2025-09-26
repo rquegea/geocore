@@ -7,6 +7,7 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, PieChart, 
 import { format } from "date-fns"
 import { es } from "date-fns/locale"
 import { type PromptDetails } from "@/services/api"
+import { smoothZerosWithPrevAvg } from "@/lib/utils"
 
 export interface PromptDetailModalProps {
   open: boolean
@@ -56,12 +57,13 @@ export default function PromptDetailModal(props: PromptDetailModalProps) {
   // Normalizar series para evitar NaN en tooltips y gráficos
   const visSeries = React.useMemo(() => {
     const src = promptDetails?.timeseries || []
-    return src.map((d) => {
+    const mapped = src.map((d) => {
       const ts = (d as any).ts ?? new Date((d as any).date).getTime()
       const raw = (d as any).value
       const value = typeof raw === 'number' && isFinite(raw) ? raw : 0
       return { ts, value }
     })
+    return smoothZerosWithPrevAvg(mapped)
   }, [promptDetails])
   const sovSeries = React.useMemo(() => {
     const src = promptDetails?.sov_timeseries || []

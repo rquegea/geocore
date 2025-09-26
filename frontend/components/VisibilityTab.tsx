@@ -29,6 +29,7 @@ function computeDeltaFromSeries(series: VisibilityPoint[]): number {
 
 import type { DateRange } from "react-day-picker"
 import { getVisibility, type VisibilityApiResponse as ApiVisibility } from "@/services/api"
+import { smoothZerosWithPrevAvg } from "@/lib/utils"
 
 export default function VisibilityTab(props: VisibilityTabProps) {
   const { brandName, isHourlyRange, xDomain, xTicks, visibilityChartType, visibilityChartKey, dateRange, model, topic } = props
@@ -54,6 +55,11 @@ export default function VisibilityTab(props: VisibilityTabProps) {
     load()
     return () => { cancelled = true }
   }, [dateRange, model, topic, brandName, isHourlyRange])
+
+  // Preparar serie suavizada para evitar caídas a 0 puntuales
+  const baseSeries = (visibility?.series || []) as any
+  const smoothedSeries = smoothZerosWithPrevAvg(baseSeries)
+  const deltaFromRange = computeDeltaFromSeries(smoothedSeries as any)
 
   if (!visibility || loading) {
     return (
@@ -83,7 +89,6 @@ export default function VisibilityTab(props: VisibilityTabProps) {
     return formatMadridTime(ts, isHourlyRange)
   }
   const valueFormatter = (v: number) => [`${Number(v).toFixed(1)}%`, 'Visibilidad'] as const
-  const deltaFromRange = computeDeltaFromSeries(visibility.series)
   const deltaPositive = deltaFromRange >= 0
   return (
     <Card className="shadow-sm bg-white h-full min-h-[420px]">
@@ -106,7 +111,7 @@ export default function VisibilityTab(props: VisibilityTabProps) {
         <div className="flex-1 flex items-center justify-center">
           <ResponsiveContainer width="100%" height="100%">
             {visibilityChartType === "line" ? (
-              <LineChart data={visibility.series} key={visibilityChartKey}>
+              <LineChart data={smoothedSeries as any} key={visibilityChartKey}>
                 <XAxis
                   dataKey={(d: any) => (typeof d.ts === 'number' ? d.ts : new Date(d.date).getTime())}
                   axisLine={false}
@@ -134,7 +139,7 @@ export default function VisibilityTab(props: VisibilityTabProps) {
                 <Line type="monotone" dataKey="value" stroke="#000" strokeWidth={2} dot={{ fill: "#000", strokeWidth: 2, r: 4 }} />
               </LineChart>
             ) : (
-              <AreaChart data={visibility.series} key={visibilityChartKey}>
+              <AreaChart data={smoothedSeries as any} key={visibilityChartKey}>
                 <XAxis
                   dataKey={(d: any) => (typeof d.ts === 'number' ? d.ts : new Date(d.date).getTime())}
                   axisLine={false}

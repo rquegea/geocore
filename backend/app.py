@@ -4394,7 +4394,11 @@ def generate_report_endpoint():
 
         # 2) Generar PDF con cadena de agentes (incluye Parte 2: Plan de Acción)
         from src.reports.generator import generate_report
-        pdf_bytes = generate_report(project_id)
+        pdf_bytes = generate_report(
+            project_id,
+            start_date=filters.get('start_date').strftime('%Y-%m-%d'),
+            end_date=filters.get('end_date').strftime('%Y-%m-%d'),
+        )
 
         return send_file(
             io.BytesIO(pdf_bytes),
