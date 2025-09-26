@@ -1,0 +1,57 @@
+{
+  "executive_summary": "The Core School maintains a stable sentiment and share of voice in a competitive market. Key opportunities include expanding program offerings and enhancing industry collaborations.",
+  "key_findings": [
+    "The Core School's sentiment remains stable at 0.625, indicating consistent brand perception.",
+    "The Core School holds a competitive share of voice at 11.5%, trailing behind CES and ECAM.",
+    "Positive sentiment is maintained despite fluctuations in visibility, suggesting strong brand loyalty."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expandir la oferta de programas en escritura de guiones y producción audiovisual práctica.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Expandir colaboraciones con empresas del sector audiovisual para mejorar la inserción laboral de los estudiantes.",
+      "impact": "Alto"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Alta competencia de otras escuelas especializadas en cine y producción audiovisual en Madrid.",
+      "mitigation": "Diferenciarse mediante programas únicos y colaboraciones estratégicas."
+    }
+  ],
+  "recommendations": [
+    "Desarrollar y promocionar nuevos programas académicos para atraer más estudiantes.",
+    "Fortalecer las relaciones con empresas del sector para mejorar la empleabilidad de los graduados.",
+    "Aumentar la visibilidad a través de campañas de marketing dirigidas."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-26",
+          "type": "spike",
+          "metric": "mentions",
+          "note": "Increased mentions possibly due to a new program announcement or event."
+        },
+        {
+          "date": "2025-09-15",
+          "type": "drop",
+          "metric": "visibility",
+          "note": "Temporary decrease in visibility, possibly due to reduced marketing activity."
+        }
+      ],
+      "sentiment_vs_volume": "Volume spikes on 2025-09-26 coincide with a stable sentiment, indicating positive reception."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [],
+        "sentiment_vs_volume": "Stable sentiment with no significant volume changes."
+      }
+    ]
+  }
+}

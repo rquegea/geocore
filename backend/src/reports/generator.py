@@ -343,15 +343,23 @@ def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = Non
     # KPI: sentimiento medio global del periodo (media de la serie diaria)
     sentiment_avg = (sum(v for _, v in sent_evo) / max(len(sent_evo), 1)) if sent_evo else 0.0
 
+    # Derivar lista simple de competidores desde la tabla de SOV
+    competitors_list = [str(n) for n, _ in sov_pairs if str(n).strip() != str(brand_name).strip()]
+
     aggregated: Dict[str, Any] = {
         "kpis": {
             "total_mentions": total_mentions,
             "sentiment_avg": float(sentiment_avg),
+            "average_sentiment": float(sentiment_avg),  # alias esperado por prompts
             "sov": float(brand_sov),
+            "share_of_voice": float(brand_sov),  # alias esperado por prompts
             "sov_table": [(n, v) for n, v in sov_pairs],
             "brand_name": brand_name,
+            # Añadir sentimientos por categoría para deep-dives por tema
+            "sentiment_by_category": by_cat,
         },
         "client_name": brand_name,
+        "market_competitors": competitors_list,
         "time_series": {
             "sentiment_per_day": [(d, float(v)) for d, v in sent_evo],
         },
@@ -498,6 +506,133 @@ def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = Non
             "action_plan": strategic_sections.get("action_plan", ""),
         },
     }
+
+    # --- NUEVO: análisis por categoría (Parte 3) ---
+    try:
+        def _norm(s: str) -> str:
+            s = (s or "").lower().strip()
+            repl = {
+                "á": "a", "é": "e", "í": "i", "ó": "o", "ú": "u", "ü": "u", "ñ": "n",
+                "&": "and",
+            }
+            for k, v in repl.items():
+                s = s.replace(k, v)
+            return " ".join(s.split())
+
+        categories_es = [
+            "Audiencia e Investigación",
+            "Marca y Reputación",
+            "Competencia y Benchmarking",
+            "Plan de estudios y Programas",
+            "Tendencias Digitales y Marketing",
+            "Empleo y Profesiones",
+            "Motivaciones y Disparadores",
+            "Padres y Preocupaciones",
+            "Becas y Coste",
+            "Share of Voice y Monitorización",
+        ]
+        # Sinónimos en inglés para matching flexible
+        synonyms: dict[str, list[str]] = {
+            "Audiencia e Investigación": ["audience & research", "audience and research", "audience"],
+            "Marca y Reputación": ["brand & reputation", "brand and reputation", "reputation"],
+            "Competencia y Benchmarking": ["competition & benchmarking", "competition and benchmarking", "benchmarking"],
+            "Plan de estudios y Programas": ["curriculum & programs", "curriculum and programs", "programs"],
+            "Tendencias Digitales y Marketing": ["digital trends & marketing", "digital trends and marketing", "marketing"],
+            "Empleo y Profesiones": ["employment & jobs", "employment and jobs", "jobs"],
+            "Motivaciones y Disparadores": ["motivation & triggers", "motivation and triggers", "triggers"],
+            "Padres y Preocupaciones": ["parents & family concerns", "parents and family concerns", "parents"],
+            "Becas y Coste": ["scholarships & cost", "scholarships and cost", "scholarships"],
+            "Share of Voice y Monitorización": ["share of voice & monitoring", "share of voice and monitoring", "share of voice"],
+        }
+
+        buckets = agent_insights.get("buckets", {}) or {}
+
+        category_texts: dict[str, str] = {}
+        for cat in categories_es:
+            keys = [_norm(cat)] + [_norm(x) for x in synonyms.get(cat, [])]
+            def _item_matches(it: dict) -> bool:
+                fields = []
+                for k in ("topic", "category", "section", "label", "area"):
+                    v = it.get(k)
+                    if isinstance(v, str):
+                        fields.append(v)
+                tags = it.get("tags") or []
+                if isinstance(tags, list):
+                    fields.extend([str(t) for t in tags])
+                text = it.get("text") or it.get("opportunity") or it.get("risk") or it.get("trend") or ""
+                fields.append(text)
+                joined = _norm(" ".join([str(f) for f in fields if isinstance(f, str)]))
+                return any(k in joined for k in keys)
+
+            ops = [it for it in (buckets.get("opportunities") or []) if isinstance(it, dict) and _item_matches(it)][:3]
+            rks = [it for it in (buckets.get("risks") or []) if isinstance(it, dict) and _item_matches(it)][:3]
+            trn = [it for it in (buckets.get("trends") or []) if isinstance(it, dict) and _item_matches(it)][:3]
+
+            lines: list[str] = []
+            try:
+                sov_curr = (aggregated.get("sov") or {}).get("current") or {}
+                entry = None
+                for k2, v2 in (sov_curr.get("sov_by_category", {}).items() if isinstance(sov_curr.get("sov_by_category", {}), dict) else []):
+                    if _norm(str(k2)) in keys or any(_norm(str(k2)) in _norm(kx) for kx in [cat] + synonyms.get(cat, [])):
+                        entry = v2; break
+                if isinstance(entry, dict):
+                    client = float(entry.get("client", 0)); total = float(entry.get("total", 0))
+                    pct = (client / max(total, 1.0)) * 100.0
+                    lines.append(f"Visibilidad y cuota de conversación (SOV) en la categoría: {pct:.1f}% sobre su total.")
+            except Exception:
+                pass
+
+            def _fmt(it: dict) -> str:
+                return str(it.get("text") or it.get("opportunity") or it.get("risk") or it.get("trend") or "-")
+
+            if ops:
+                lines.append("Oportunidades relevantes:")
+                lines.extend(["- " + _fmt(x) for x in ops])
+            if rks:
+                lines.append("Riesgos a vigilar:")
+                lines.extend(["- " + _fmt(x) for x in rks])
+            if trn:
+                lines.append("Tendencias y señales del tema:")
+                lines.extend(["- " + _fmt(x) for x in trn])
+
+            # CTA simple al final si existe alguna recomendación en recomendaciones
+            try:
+                recs = insights_json.get("recommendations") or []
+                if isinstance(recs, list) and recs:
+                    lines.append("CTA sugerida:")
+                    lines.append("- " + str(recs[0]))
+            except Exception:
+                pass
+
+            # Añadir sentimiento al final, en menor prioridad
+            try:
+                s_val = by_cat.get(cat) if isinstance(by_cat, dict) else None
+                if s_val is None:
+                    for k2, v2 in (by_cat.items() if isinstance(by_cat, dict) else []):
+                        if _norm(str(k2)) in keys or any(_norm(str(k2)) in _norm(kx) for kx in [cat] + synonyms.get(cat, [])):
+                            s_val = v2; break
+                if s_val is not None:
+                    lines.append(f"Sentimiento promedio (referencia): {float(s_val):.2f}.")
+            except Exception:
+                pass
+
+            text_block = "\n".join(lines).strip()
+
+            if not text_block:
+                # Fallback: usar un prompt breve para generar 1 párrafo por categoría
+                try:
+                    dd_prompt = s_prompts.get_deep_dive_analysis_prompt(cat, aggregated.get("kpis", {}), brand_name)
+                    text_block = fetch_response(dd_prompt, model="gpt-4o-mini", temperature=0.3, max_tokens=300) or ""
+                except Exception:
+                    text_block = ""
+
+            if text_block:
+                category_texts[cat] = text_block
+
+        if category_texts:
+            content_bundle["strategic"]["category_analyses"] = category_texts
+    except Exception:
+        pass
 
     # Render final del esqueleto con contenido
     return pdf_writer.build_skeleton_from_content(content_bundle)

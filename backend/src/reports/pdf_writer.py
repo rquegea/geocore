@@ -372,18 +372,9 @@ def build_empty_structure_pdf(company_name: str) -> bytes:
 
     # Definir estructura solicitada
     parte1 = [
-        "Dashboard Ejecutivo",
-        "Resumen Ejecutivo de KPIs",
         "Share of Voice vs. Competencia",
-        "Evolución del Sentimiento (diario)",
-        "Evolución del Volumen de Menciones (diario)",
-        "Serie temporal - Análisis de competencia",
-        "Serie temporal - Análisis de marketing y estrategia",
-        "Serie temporal - Análisis de mercado",
-        "Serie temporal - Análisis contextual",
-        "Serie temporal - Análisis de oportunidades",
-        "Serie temporal - Análisis de riesgos",
-        "Serie temporal - Análisis de sentimiento y reputación",
+        "Analisis de visibilidad (diaria)",
+        "Evolución del sentimiento",
     ]
     parte2 = [
         "Informe Estratégico",
@@ -393,16 +384,6 @@ def build_empty_structure_pdf(company_name: str) -> bytes:
         "Análisis Competitivo",
         "Plan de Acción Estratégico",
         "Correlaciones Transversales entre Categorías",
-    ]
-    parte3 = [
-        "Anexo: Análisis Detallado por Categoría",
-        "Análisis de competencia",
-        "Análisis de marketing y estrategia",
-        "Análisis de mercado",
-        "Análisis contextual",
-        "Análisis de oportunidades",
-        "Análisis de riesgos",
-        "Análisis de sentimiento y reputación",
     ]
 
     def _write_index_block(title: str, items: List[str]):
@@ -415,7 +396,6 @@ def build_empty_structure_pdf(company_name: str) -> bytes:
 
     _write_index_block("Parte 1: Resumen Visual y KPIs", parte1)
     _write_index_block("Parte 2: Informe Estratégico", parte2)
-    _write_index_block("Parte 3: Anexo - Análisis Detallado por Categoría", parte3)
 
     # 3) Secciones en blanco
     def _write_section_page(title: str):
@@ -432,11 +412,6 @@ def build_empty_structure_pdf(company_name: str) -> bytes:
     # Parte 2
     _write_section_page("Parte 2: Informe Estratégico")
     for s in parte2:
-        _write_section_page(s)
-
-    # Parte 3
-    _write_section_page("Parte 3: Anexo - Análisis Detallado por Categoría")
-    for s in parte3:
         _write_section_page(s)
 
     out = pdf.output(dest="S")
@@ -478,18 +453,9 @@ def build_skeleton_with_content(company_name: str, images: Dict[str, Optional[st
     add_title(pdf, "Índice")
 
     parte1 = [
-        "Dashboard Ejecutivo",
-        "Resumen Ejecutivo de KPIs",
         "Share of Voice vs. Competencia",
-        "Evolución del Sentimiento (diario)",
-        "Evolución del Volumen de Menciones (diario)",
-        "Serie temporal - Análisis de competencia",
-        "Serie temporal - Análisis de marketing y estrategia",
-        "Serie temporal - Análisis de mercado",
-        "Serie temporal - Análisis contextual",
-        "Serie temporal - Análisis de oportunidades",
-        "Serie temporal - Análisis de riesgos",
-        "Serie temporal - Análisis de sentimiento y reputación",
+        "Analisis de visibilidad (diaria)",
+        "Evolución del sentimiento",
     ]
     parte2 = [
         "Informe Estratégico",
@@ -499,16 +465,6 @@ def build_skeleton_with_content(company_name: str, images: Dict[str, Optional[st
         "Análisis Competitivo",
         "Plan de Acción Estratégico",
         "Correlaciones Transversales entre Categorías",
-    ]
-    parte3 = [
-        "Anexo: Análisis Detallado por Categoría",
-        "Análisis de competencia",
-        "Análisis de marketing y estrategia",
-        "Análisis de mercado",
-        "Análisis contextual",
-        "Análisis de oportunidades",
-        "Análisis de riesgos",
-        "Análisis de sentimiento y reputación",
     ]
 
     def _write_index_block(title: str, items: List[str]):
@@ -521,7 +477,6 @@ def build_skeleton_with_content(company_name: str, images: Dict[str, Optional[st
 
     _write_index_block("Parte 1: Resumen Visual y KPIs", parte1)
     _write_index_block("Parte 2: Informe Estratégico", parte2)
-    _write_index_block("Parte 3: Anexo - Análisis Detallado por Categoría", parte3)
 
     # 3) Secciones: cabeceras + contenido de Parte 1 cuando aplique
     def _write_section_page(title: str):
@@ -535,52 +490,22 @@ def build_skeleton_with_content(company_name: str, images: Dict[str, Optional[st
 
     # Mapeo de secciones -> claves de imágenes
     section_to_image_keys: Dict[str, List[str]] = {
-        # Dashboard Ejecutivo (tres KPIs): SOV global, Visibilidad global, Sentimiento global
         "Share of Voice vs. Competencia": ["sov_pie", "part1_sov_donut"],
-        "Evolución del Sentimiento (diario)": ["sentiment_evolution", "part1_sentiment_line"],
-        # Usamos la línea de visibilidad global
-        "Serie temporal - Análisis de competencia": ["part1_visibility_line", "topics_top_bottom"],
-        # Resto de secciones
-        "Resumen Ejecutivo de KPIs": ["part1_category_distribution", "sentiment_by_category"],
+        "Analisis de visibilidad (diaria)": ["part1_visibility_line", "visibility_line"],
+        "Evolución del sentimiento": ["part1_sentiment_line", "sentiment_evolution"],
     }
 
     for s in parte1:
         _write_section_page(s)
-        keys = section_to_image_keys.get(s, [])
         if s == "Share of Voice vs. Competencia":
-            # Dos columnas: izquierda SOV pie, derecha ranking (imagen precompuesta: images["sov_ranking_table"]) si existe
-            page_width = pdf.w - 2 * pdf.l_margin
-            col_w = page_width / 2.0
-            y0 = pdf.get_y()
-            # Izquierda
-            pdf.set_xy(pdf.l_margin, y0)
-            add_image(pdf, images.get(keys[0] if keys else None), width=col_w - 6)
-            # Derecha (ranking renderizado como imagen, si no hay, dejar vacío)
-            pdf.set_xy(pdf.l_margin + col_w, y0)
-            add_image(pdf, images.get("sov_ranking_table"), width=col_w - 6)
+            add_image(pdf, images.get("sov_pie") or images.get("part1_sov_donut"), width=180)
             continue
-        if s == "Evolución del Sentimiento (diario)":
-            # Dos columnas: izquierda línea sentimiento, derecha barra distribución (imagen images["sentiment_distribution"]) si existe
-            page_width = pdf.w - 2 * pdf.l_margin
-            col_w = page_width / 2.0
-            y0 = pdf.get_y()
-            pdf.set_xy(pdf.l_margin, y0)
-            add_image(pdf, images.get(keys[0] if keys else None), width=col_w - 6)
-            pdf.set_xy(pdf.l_margin + col_w, y0)
-            add_image(pdf, images.get("sentiment_distribution"), width=col_w - 6)
+        if s == "Analisis de visibilidad (diaria)":
+            add_image(pdf, images.get("part1_visibility_line") or images.get("visibility_line"), width=180)
             continue
-        if s == "Evolución del Volumen de Menciones (diario)":
-            # Dos columnas: izquierda visibilidad (línea), derecha ranking visibilidad
-            page_width = pdf.w - 2 * pdf.l_margin
-            col_w = page_width / 2.0
-            y0 = pdf.get_y()
-            pdf.set_xy(pdf.l_margin, y0)
-            add_image(pdf, images.get("visibility_line"), width=col_w - 6)
-            pdf.set_xy(pdf.l_margin + col_w, y0)
-            add_image(pdf, images.get("visibility_ranking_table"), width=col_w - 6)
+        if s == "Evolución del sentimiento":
+            add_image(pdf, images.get("part1_sentiment_line") or images.get("sentiment_evolution"), width=180)
             continue
-        for k in keys:
-            add_image(pdf, images.get(k), width=180)
 
     # Parte 2 (cabeceras) + inserción de contenidos estratégicos si vienen
     _write_section_page("Parte 2: Informe Estratégico")
@@ -611,11 +536,7 @@ def build_skeleton_with_content(company_name: str, images: Dict[str, Optional[st
                 text = (strategic.get("correlations") or "").strip()
                 if text:
                     add_paragraph(pdf, text)
-
-    # Parte 3 (cabeceras)
-    _write_section_page("Parte 3: Anexo - Análisis Detallado por Categoría")
-    for s in parte3:
-        _write_section_page(s)
+    # Eliminado Parte 3 según solicitud
 
     out = pdf.output(dest="S")
     if isinstance(out, (bytes, bytearray)):

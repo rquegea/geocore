@@ -1,0 +1,57 @@
+{
+  "executive_summary": "The Core School maintains a stable sentiment with a moderate share of voice in a competitive market. Opportunities exist to expand program offerings and collaborations to enhance student outcomes.",
+  "key_findings": [
+    "The Core School's sentiment remains stable, indicating consistent perception.",
+    "CES leads in share of voice, highlighting strong market presence.",
+    "The Core School's sentiment spikes align with increased mentions, suggesting effective engagement."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expandir la oferta de programas en escritura de guiones y producción audiovisual práctica.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Expandir colaboraciones con empresas del sector audiovisual para mejorar la inserción laboral de los estudiantes.",
+      "impact": "Alto"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Alta competencia de otras escuelas especializadas en cine y producción audiovisual en Madrid.",
+      "mitigation": "Diferenciarse mediante programas únicos y colaboraciones estratégicas."
+    }
+  ],
+  "recommendations": [
+    "Desarrollar programas online para ampliar el alcance.",
+    "Fortalecer las colaboraciones con empresas del sector para mejorar la empleabilidad de los estudiantes.",
+    "Promover las fortalezas de The Core School en campañas de marketing para aumentar la visibilidad."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-25",
+          "type": "spike",
+          "metric": "mentions",
+          "note": "Increased mentions possibly due to a positive event or announcement."
+        },
+        {
+          "date": "2025-09-26",
+          "type": "spike",
+          "metric": "sentiment",
+          "note": "Sentiment spike likely linked to favorable reviews or coverage."
+        }
+      ],
+      "sentiment_vs_volume": "Volume spikes on 2025-09-25 coincide with a sentiment increase, suggesting positive engagement."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [],
+        "sentiment_vs_volume": "No significant anomalies detected in this category."
+      }
+    ]
+  }
+}

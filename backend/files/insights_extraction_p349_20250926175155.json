@@ -1,0 +1,57 @@
+{
+  "executive_summary": "The Core School mantiene una presencia estable en el mercado del entretenimiento y artes audiovisuales, con oportunidades significativas para expandir su oferta y colaboraciones. Sin embargo, enfrenta riesgos de alta competencia en Madrid.",
+  "key_findings": [
+    "El sentimiento hacia The Core School es generalmente positivo y estable, lo que indica una percepción favorable en el mercado.",
+    "The Core School tiene un Share of Voice del 11.5%, siendo superada por competidores como CES y ECAM.",
+    "El sentimiento positivo está asociado con la percepción de calidad en programas de guion y producción audiovisual."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expandir la oferta de programas en escritura de guiones y producción audiovisual práctica.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Expandir colaboraciones con empresas del sector audiovisual para mejorar la inserción laboral de los estudiantes.",
+      "impact": "Alto"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Alta competencia de otras escuelas especializadas en cine y producción audiovisual en Madrid.",
+      "mitigation": "Diferenciarse mediante la oferta de programas únicos y colaboraciones estratégicas."
+    }
+  ],
+  "recommendations": [
+    "Desarrollar programas online para llegar a un público más amplio.",
+    "Fortalecer las colaboraciones con empresas del sector para mejorar la empleabilidad de los estudiantes.",
+    "Promocionar los programas de escritura de guiones y producción audiovisual práctica para atraer más estudiantes."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-26",
+          "type": "spike",
+          "metric": "mentions",
+          "note": "Aumento significativo en menciones posiblemente debido a un evento o anuncio."
+        },
+        {
+          "date": "2025-09-21",
+          "type": "spike",
+          "metric": "sentiment",
+          "note": "Incremento en el sentimiento positivo, posiblemente relacionado con una noticia favorable."
+        }
+      ],
+      "sentiment_vs_volume": "El aumento en volumen de menciones coincide con un aumento en el sentimiento positivo, sugiriendo una recepción favorable de eventos recientes."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [],
+        "sentiment_vs_volume": "El sentimiento se mantiene estable con ligeras variaciones, sin cambios significativos en el volumen."
+      }
+    ]
+  }
+}

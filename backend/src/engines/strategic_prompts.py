@@ -171,18 +171,80 @@ def get_strategic_plan_prompt(insights_json: dict) -> str:
 
     **INSTRUCCIÓN:**
     Propón un plan de acción priorizado (corto/medio plazo), asignando recomendaciones a oportunidades específicas y contemplando mitigaciones para los riesgos. Escribe 2-3 párrafos con lenguaje claro y accionable.
+    DEVUELVE SOLO TEXTO CORRIDO en prosa. NO devuelvas JSON, ni listas con guiones, ni encabezados markdown.
     """
 
 
 def get_executive_summary_prompt(aggregated_data: dict) -> str:
-    kpis = aggregated_data.get('kpis', {})
+    """
+    Prompt robusto para el Resumen Ejecutivo.
+    Usa fallbacks para evitar valores 0 o ausentes y deriva competidores / SOV
+    desde estructuras disponibles cuando falten claves concretas.
+    """
+    kpis = aggregated_data.get('kpis', {}) or {}
     client_name = aggregated_data.get('client_name', 'Nuestra marca')
-    competitors = aggregated_data.get('market_competitors', [])
-    total_mentions = kpis.get('total_mentions', 0)
-    avg_sent = kpis.get('average_sentiment', 0.0)
-    sov_total = kpis.get('share_of_voice', 0.0)
-    competitor_mentions = kpis.get('competitor_mentions', {})
-    sov_by_cat = kpis.get('sov_by_category', {})
+
+    # Totales básicos
+    total_mentions = int(kpis.get('total_mentions') or 0)
+
+    # Sentimiento promedio: preferir average_sentiment; fallback a sentiment_avg
+    avg_sent = (
+        kpis.get('average_sentiment')
+        if kpis.get('average_sentiment') is not None
+        else kpis.get('sentiment_avg', 0.0)
+    )
+    try:
+        avg_sent = float(avg_sent or 0.0)
+    except Exception:
+        avg_sent = 0.0
+
+    # SOV total: preferir share_of_voice; fallback a sov
+    sov_total = (
+        kpis.get('share_of_voice')
+        if kpis.get('share_of_voice') is not None
+        else kpis.get('sov', 0.0)
+    )
+    try:
+        sov_total = float(sov_total or 0.0)
+    except Exception:
+        sov_total = 0.0
+
+    # Tabla de SOV para derivar competidores cuando no haya lista explícita
+    sov_table = kpis.get('sov_table') or []  # esperado como [(brand, value), ...]
+
+    # Competidores explícitos o derivados desde la tabla, excluyendo la marca cliente
+    competitors = aggregated_data.get('market_competitors') or []
+    if not competitors and isinstance(sov_table, list):
+        try:
+            # Obtener nombre de marca si estuviera en KPIs
+            client_brand = kpis.get('brand_name') or aggregated_data.get('client_name')
+            competitors = [str(b) for b, _ in sov_table if str(b) != str(client_brand)]
+        except Exception:
+            competitors = []
+
+    # SOV por categoría: preferir bloque externo aggregated.sov.current
+    sov_by_cat = {}
+    try:
+        sov_block = aggregated_data.get('sov') or {}
+        current = sov_block.get('current') or {}
+        sov_by_cat = current.get('sov_by_category') or {}
+    except Exception:
+        sov_by_cat = {}
+    if not sov_by_cat:
+        sov_by_cat = kpis.get('sov_by_category') or {}
+
+    # Menciones por competidor: preferir aggregated.sov.current.competitor_mentions; fallback a tabla
+    competitor_mentions = {}
+    try:
+        curr = (aggregated_data.get('sov') or {}).get('current') or {}
+        competitor_mentions = curr.get('competitor_mentions') or {}
+    except Exception:
+        competitor_mentions = {}
+    if not competitor_mentions and isinstance(sov_table, list):
+        try:
+            competitor_mentions = {str(b): float(v) for b, v in sov_table}
+        except Exception:
+            competitor_mentions = {}
 
     comp_json = json.dumps(competitor_mentions, ensure_ascii=False, indent=2)
     sov_cat_json = json.dumps(sov_by_cat, ensure_ascii=False, indent=2)
@@ -203,7 +265,7 @@ def get_executive_summary_prompt(aggregated_data: dict) -> str:
     {sov_cat_json}
     ```
 
-    **Menciones de competidores (conteo):**
+    **Menciones de competidores (conteo o % aproximado):**
     ```json
     {comp_json}
     ```

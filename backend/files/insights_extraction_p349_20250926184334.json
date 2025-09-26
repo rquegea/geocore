@@ -1,0 +1,57 @@
+{
+  "executive_summary": "The Core School mantiene un sentimiento positivo estable, pero enfrenta alta competencia en el mercado de educación audiovisual en Madrid. Existen oportunidades para expandir programas y colaboraciones que pueden mejorar su posición competitiva.",
+  "key_findings": [
+    "El sentimiento general hacia The Core School es positivo y estable, lo que indica una percepción favorable de su oferta educativa.",
+    "The Core School tiene una participación de voz del 11.5%, enfrentando fuerte competencia de CES y ECAM.",
+    "El sentimiento positivo hacia los programas curriculares sugiere una buena aceptación de su enfoque educativo."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expandir la oferta de programas en escritura de guiones y producción audiovisual práctica.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Expandir colaboraciones con empresas del sector audiovisual para mejorar la inserción laboral de los estudiantes.",
+      "impact": "Alto"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Alta competencia de otras escuelas especializadas en cine y producción audiovisual en Madrid.",
+      "mitigation": "Diferenciarse a través de programas únicos y colaboraciones estratégicas."
+    }
+  ],
+  "recommendations": [
+    "Desarrollar y promocionar programas únicos en escritura de guiones y producción práctica.",
+    "Fortalecer alianzas con empresas del sector para mejorar la empleabilidad de los graduados.",
+    "Aumentar la visibilidad internacional para atraer estudiantes globales."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-11",
+          "type": "spike",
+          "metric": "mentions",
+          "note": "Inicio de un aumento significativo en menciones."
+        },
+        {
+          "date": "2025-09-25",
+          "type": "spike",
+          "metric": "volume",
+          "note": "Pico en visibilidad posiblemente relacionado con un evento o anuncio."
+        }
+      ],
+      "sentiment_vs_volume": "El volumen de menciones aumentó sin afectar negativamente el sentimiento, que se mantuvo estable."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [],
+        "sentiment_vs_volume": "El sentimiento positivo se mantiene estable, reflejando una percepción favorable de los programas ofrecidos."
+      }
+    ]
+  }
+}

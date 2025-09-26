@@ -1,0 +1,61 @@
+{
+  "executive_summary": "The Core School mantiene una presencia estable en el mercado con un sentimiento positivo constante. Sin embargo, enfrenta alta competencia en Madrid, lo que presenta tanto riesgos como oportunidades para expandir su oferta y colaboraciones.",
+  "key_findings": [
+    "El sentimiento hacia The Core School es consistentemente positivo, lo que indica una percepción favorable del mercado.",
+    "The Core School tiene una participación de voz del 11.5%, lo que sugiere una fuerte competencia con otras instituciones en Madrid.",
+    "La percepción del cliente se mantiene positiva, pero la falta de reconocimiento internacional es un área a mejorar."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expandir la oferta de programas en escritura de guiones y producción audiovisual práctica.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Expandir colaboraciones con empresas del sector audiovisual para mejorar la inserción laboral de los estudiantes.",
+      "impact": "Alto"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Alta competencia de otras escuelas especializadas en cine y producción audiovisual en Madrid.",
+      "mitigation": "Desarrollar programas únicos y fortalecer colaboraciones internacionales."
+    },
+    {
+      "risk": "Falta de reconocimiento internacional comparado con instituciones como EICTV.",
+      "mitigation": "Aumentar la visibilidad internacional a través de asociaciones y marketing."
+    }
+  ],
+  "recommendations": [
+    "Desarrollar programas online para atraer a un público más amplio.",
+    "Fortalecer las colaboraciones con empresas del sector audiovisual.",
+    "Implementar estrategias de marketing para mejorar el reconocimiento internacional."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-11",
+          "type": "spike",
+          "metric": "mentions",
+          "note": "Inicio de un aumento significativo en menciones."
+        },
+        {
+          "date": "2025-09-25",
+          "type": "spike",
+          "metric": "mentions",
+          "note": "Otro aumento notable en menciones, posiblemente relacionado con un evento o anuncio."
+        }
+      ],
+      "sentiment_vs_volume": "El volumen de menciones aumentó en ciertos días sin afectar negativamente el sentimiento, que se mantuvo estable."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [],
+        "sentiment_vs_volume": "El sentimiento se mantuvo estable, sin cambios significativos en el volumen."
+      }
+    ]
+  }
+}

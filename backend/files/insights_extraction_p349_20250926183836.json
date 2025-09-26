@@ -1,0 +1,61 @@
+{
+  "executive_summary": "The Core School mantiene un sentimiento positivo estable, pero enfrenta alta competencia en el mercado de educación audiovisual en Madrid. Las oportunidades clave incluyen la expansión de programas y colaboraciones con la industria.",
+  "key_findings": [
+    "El sentimiento general hacia The Core School es positivo y estable, lo que indica una percepción favorable en el mercado.",
+    "The Core School tiene un 11.5% de share of voice, enfrentando alta competencia de CES y ECAM.",
+    "La percepción del cliente es positiva, especialmente en la categoría de Curriculum & Programs, con un sentimiento promedio de 0.623."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expandir la oferta de programas en escritura de guiones y producción audiovisual práctica.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Expandir colaboraciones con empresas del sector audiovisual para mejorar la inserción laboral de los estudiantes.",
+      "impact": "Alto"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Alta competencia de otras escuelas especializadas en cine y producción audiovisual en Madrid.",
+      "mitigation": "Diferenciarse mediante programas únicos y colaboraciones estratégicas."
+    },
+    {
+      "risk": "Falta de reconocimiento internacional comparado con instituciones como EICTV.",
+      "mitigation": "Desarrollar alianzas internacionales y programas de intercambio."
+    }
+  ],
+  "recommendations": [
+    "Desarrollar programas online para llegar a un público más amplio.",
+    "Colaborar con instituciones internacionales para atraer estudiantes globales.",
+    "Fortalecer la marca a través de campañas de marketing que destaquen las fortalezas únicas de The Core School."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-11",
+          "type": "spike",
+          "metric": "mentions",
+          "note": "Inicio de un evento o campaña que generó mayor visibilidad."
+        },
+        {
+          "date": "2025-09-25",
+          "type": "spike",
+          "metric": "visibility",
+          "note": "Posible lanzamiento o colaboración que aumentó la visibilidad."
+        }
+      ],
+      "sentiment_vs_volume": "El volumen de menciones y la visibilidad aumentaron sin afectar negativamente el sentimiento, que se mantuvo estable."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [],
+        "sentiment_vs_volume": "El sentimiento positivo se mantuvo estable, reflejando una percepción favorable de los programas ofrecidos."
+      }
+    ]
+  }
+}

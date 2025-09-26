@@ -1,0 +1,51 @@
+{
+  "executive_summary": "The Core School mantiene una presencia estable en el mercado con un sentimiento positivo constante. Sin embargo, enfrenta alta competencia en Madrid, lo que representa tanto un riesgo como una oportunidad para expandir su oferta educativa.",
+  "key_findings": [
+    "The Core School tiene un sentimiento promedio positivo de 0.625, lo que indica una percepción favorable en el mercado.",
+    "La competencia en Madrid es intensa, con CES liderando el share of voice con un 41.1%, mientras que The Core School tiene un 11.5%.",
+    "El sentimiento positivo constante sugiere que los programas de The Core School son bien recibidos, pero la falta de reconocimiento internacional es un área de mejora."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expandir la oferta de programas en escritura de guiones y producción audiovisual práctica.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Expandir colaboraciones con empresas del sector audiovisual para mejorar la inserción laboral de los estudiantes.",
+      "impact": "Alto"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Alta competencia de otras escuelas especializadas en cine y producción audiovisual en Madrid.",
+      "mitigation": "Diferenciarse mediante programas únicos y colaboraciones estratégicas."
+    }
+  ],
+  "recommendations": [
+    "Desarrollar programas online para llegar a un público más amplio.",
+    "Colaborar con instituciones internacionales para mejorar el reconocimiento global.",
+    "Implementar campañas de marketing dirigidas a destacar las fortalezas únicas de The Core School."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-25",
+          "type": "spike",
+          "metric": "mentions",
+          "note": "Incremento significativo en menciones posiblemente debido a una campaña de marketing o evento."
+        }
+      ],
+      "sentiment_vs_volume": "El aumento en menciones no coincide con una caída en el sentimiento, lo que sugiere que la conversación fue positiva o neutral."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [],
+        "sentiment_vs_volume": "El sentimiento positivo se mantiene constante, sin variaciones significativas en el volumen."
+      }
+    ]
+  }
+}

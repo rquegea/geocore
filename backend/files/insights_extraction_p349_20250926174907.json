@@ -1,0 +1,57 @@
+{
+  "executive_summary": "The Core School maintains a stable sentiment with slight fluctuations in volume. Opportunities exist in expanding program offerings and collaborations, while competition poses a significant risk.",
+  "key_findings": [
+    "The Core School's sentiment remains stable, indicating consistent brand perception.",
+    "The Core School holds a competitive SOV of 11.5%, but faces strong competition from CES and ECAM.",
+    "Positive sentiment peaks suggest favorable reception of The Core School's offerings."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expandir la oferta de programas en escritura de guiones y producción audiovisual práctica.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Expandir colaboraciones con empresas del sector audiovisual para mejorar la inserción laboral de los estudiantes.",
+      "impact": "Alto"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Alta competencia de otras escuelas especializadas en cine y producción audiovisual en Madrid.",
+      "mitigation": "Diferenciarse mediante programas únicos y colaboraciones estratégicas."
+    }
+  ],
+  "recommendations": [
+    "Desarrollar programas online para llegar a un público más amplio.",
+    "Fortalecer la presencia internacional a través de colaboraciones con instituciones globales.",
+    "Aumentar la visibilidad de los éxitos de los estudiantes y egresados para mejorar la percepción de marca."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-26",
+          "type": "spike",
+          "metric": "mentions",
+          "note": "Significant increase in mentions likely due to a notable event or announcement."
+        },
+        {
+          "date": "2025-09-21",
+          "type": "spike",
+          "metric": "sentiment",
+          "note": "Higher sentiment possibly linked to positive feedback or coverage."
+        }
+      ],
+      "sentiment_vs_volume": "Volume spikes on 2025-09-26 coincide with stable sentiment, indicating neutral to positive reception."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [],
+        "sentiment_vs_volume": "Stable sentiment with no significant volume changes."
+      }
+    ]
+  }
+}
