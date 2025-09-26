@@ -257,6 +257,18 @@ export const getInsights = async (
       baseItems.push(...classic)
     }
 
+    // 4) NUEVO: consumir stream plano sin top-N por bucket (insights_raw)
+    if (Array.isArray(data.insights_raw)) {
+      const startId = 1200000
+      const rawRows: InsightRow[] = (data.insights_raw as any[]).map((r: any, i: number) => ({
+        id: startId + i,
+        query_id: Number(r?.query_id ?? 0),
+        created_at: r?.created_at ?? null,
+        payload: (r?.payload || {}) as InsightPayload,
+      }))
+      baseItems.push(...rawRows)
+    }
+
     return { insights: baseItems, pagination: { limit, offset, count: baseItems.length } }
   }
 

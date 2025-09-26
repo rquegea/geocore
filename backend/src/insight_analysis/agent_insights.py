@@ -40,7 +40,7 @@ def normalize_agent_payloads(rows: List[Dict[str, Any]]) -> Dict[str, List[Dict[
     return out
 
 
-def summarize_agent_insights(rows: List[Dict[str, Any]], limit_per_bucket: int = 10) -> Dict[str, Any]:
+def summarize_agent_insights(rows: List[Dict[str, Any]], limit_per_bucket: int = 50) -> Dict[str, Any]:
     """
     Top-N per bucket plus meta counts.
     """

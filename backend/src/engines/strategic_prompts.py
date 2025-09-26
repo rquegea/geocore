@@ -216,12 +216,72 @@ def get_executive_summary_prompt(aggregated_data: dict) -> str:
 
 
 def get_competitive_analysis_prompt(aggregated_data: dict) -> str:
-    kpis = aggregated_data.get('kpis', {})
+    """Prompt robusto para la sección de competencia.
+
+    Usa siempre datos reales disponibles en el objeto agregado. Si faltan claves
+    en `kpis`, toma fallbacks desde:
+      - `kpis.sov_table` para construir competidores y reparto de share.
+      - `sov.current.sov_by_category` y `sov.current.competitor_mentions`.
+    Así evitamos casos donde sale "0%" o "sin competidores" pese a existir datos.
+    """
+    kpis = aggregated_data.get('kpis', {}) or {}
     client_name = aggregated_data.get('client_name', 'Nuestra marca')
-    competitors = aggregated_data.get('market_competitors', [])
-    sov_total = kpis.get('share_of_voice', 0.0)
-    competitor_mentions = kpis.get('competitor_mentions', {})
-    sov_by_cat = kpis.get('sov_by_category', {})
+
+    # 1) Competidores y reparto base
+    competitors: list[str] = []
+    # a) si viene una lista explícita
+    if isinstance(aggregated_data.get('market_competitors'), list):
+        competitors = [str(x) for x in aggregated_data.get('market_competitors') if x]
+    # b) derivar de la tabla de SOV si está disponible
+    sov_table = kpis.get('sov_table') or []
+    if not competitors and isinstance(sov_table, list):
+        try:
+            # tabla como [(brand, value_pct), ...]
+            competitors = [str(b) for b, _ in sov_table if isinstance(b, str)]
+        except Exception:
+            pass
+
+    # 2) SOV total del cliente; si no viene share_of_voice usa kpis.sov o 0.0
+    sov_total = (
+        kpis.get('share_of_voice')
+        or kpis.get('sov')
+        or 0.0
+    )
+
+    # 3) SOV por categoría: preferir bloque de `sov.current`
+    sov_by_cat = {}
+    sov_block = aggregated_data.get('sov') or {}
+    try:
+        current = sov_block.get('current') or {}
+        by_cat = current.get('sov_by_category') or {}
+        # convertir a forma compacta cliente/total si viene expandido
+        for cat, entry in (by_cat.items() if isinstance(by_cat, dict) else []):
+            if isinstance(entry, dict):
+                sov_by_cat[str(cat)] = {
+                    'client': int(entry.get('client', 0)),
+                    'total': int(entry.get('total', 0)),
+                }
+    except Exception:
+        pass
+    # fallback a lo que pueda venir en kpis
+    if not sov_by_cat:
+        sov_by_cat = kpis.get('sov_by_category') or {}
+
+    # 4) Menciones por competidor: preferir `sov.current.competitor_mentions`
+    competitor_mentions = {}
+    try:
+        curr = (aggregated_data.get('sov') or {}).get('current') or {}
+        competitor_mentions = curr.get('competitor_mentions') or {}
+    except Exception:
+        competitor_mentions = {}
+
+    # Como último recurso, derivar menciones aproximadas de la tabla de SOV
+    if not competitor_mentions and isinstance(sov_table, list):
+        try:
+            competitor_mentions = {str(b): float(v) for b, v in sov_table}
+        except Exception:
+            competitor_mentions = {}
+
     comp_json = json.dumps(competitor_mentions, ensure_ascii=False, indent=2)
     sov_cat_json = json.dumps(sov_by_cat, ensure_ascii=False, indent=2)
 
@@ -231,7 +291,7 @@ def get_competitive_analysis_prompt(aggregated_data: dict) -> str:
     **TAREA:** Redacta la sección "Análisis Competitivo" del informe.
 
     **Contexto:** Cliente = {client_name}. Competidores = {', '.join(competitors) if competitors else 'N/D'}.
-    - SOV total del cliente: {sov_total:.2f}%
+    - SOV total del cliente: {float(sov_total):.2f}%
     - SOV por categoría (cliente/total):
     ```json
     {sov_cat_json}

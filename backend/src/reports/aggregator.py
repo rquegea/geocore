@@ -747,7 +747,7 @@ def get_sentiment_positive_series(
         if own_session:
             session.close()
 
-def get_agent_insights_data(session: Optional[Session], project_id: int, limit: int = 200) -> Dict[str, Any]:
+def get_agent_insights_data(session: Optional[Session], project_id: int | None, limit: int = 200) -> Dict[str, Any]:
     """
     Recupera payloads de la tabla insights asociados al proyecto (query_id) y
     devuelve un resumen normalizado para prompts y PDF.
@@ -757,18 +757,76 @@ def get_agent_insights_data(session: Optional[Session], project_id: int, limit: 
         session = get_session()
         own_session = True
     try:
+        if project_id is None or int(project_id) <= 0:
+            sql = text(
+                """
+                SELECT i.payload
+                FROM insights i
+                ORDER BY i.created_at DESC
+                LIMIT :lim
+                """
+            )
+            params = {"lim": int(limit)}
+        else:
+            sql = text(
+                """
+                SELECT i.payload
+                FROM insights i
+                WHERE i.query_id = :pid
+                ORDER BY i.created_at DESC
+                LIMIT :lim
+                """
+            )
+            params = {"pid": int(project_id), "lim": int(limit)}
+        rows = session.execute(sql, params).mappings().all()
+        payload_rows = [{"payload": r.get("payload")} for r in rows]
+        return summarize_agent_insights(payload_rows)
+    finally:
+        if own_session:
+            session.close()
+
+
+def get_agent_insight_payloads(
+    session: Optional[Session],
+    project_id: int,
+    *,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    limit: int = 1000,
+) -> List[Dict[str, Any]]:
+    """
+    Devuelve filas crudas de la tabla insights (payload y created_at) para un proyecto
+    y rango temporal opcional. Útil para poblar la UI con TODAS las entradas sin
+    recortes Top-N.
+    """
+    own_session = False
+    if session is None:
+        session = get_session()
+        own_session = True
+    try:
+        where = ["i.query_id = :pid"]
+        params: Dict[str, Any] = {"pid": int(project_id), "lim": int(max(1, min(limit, 5000)))}
+        if start_date:
+            where.append("i.created_at >= CAST(:start AS date)")
+            params["start"] = start_date
+        if end_date:
+            where.append("i.created_at < (CAST(:end AS date) + INTERVAL '1 day')")
+            params["end"] = end_date
+
         sql = text(
-            """
-            SELECT i.payload
+            f"""
+            SELECT i.payload, i.created_at
             FROM insights i
-            WHERE i.query_id = :pid
+            WHERE {' AND '.join(where)}
             ORDER BY i.created_at DESC
             LIMIT :lim
             """
         )
-        rows = session.execute(sql, {"pid": project_id, "lim": int(limit)}).mappings().all()
-        payload_rows = [{"payload": r.get("payload")} for r in rows]
-        return summarize_agent_insights(payload_rows)
+        rows = session.execute(sql, params).mappings().all()
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            out.append({"payload": r.get("payload"), "created_at": r.get("created_at")})
+        return out
     finally:
         if own_session:
             session.close()
