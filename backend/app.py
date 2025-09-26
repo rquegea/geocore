@@ -4392,9 +4392,9 @@ def generate_report_endpoint():
             max_rows=5000,
         )
 
-        # 2) Generar PDF híbrido con KPIs + Clusters (informe completo)
-        from src.reports.generator import generate_hybrid_report
-        pdf_bytes = generate_hybrid_report(full_data)
+        # 2) Generar PDF con cadena de agentes (incluye Parte 2: Plan de Acción)
+        from src.reports.generator import generate_report
+        pdf_bytes = generate_report(project_id)
 
         return send_file(
             io.BytesIO(pdf_bytes),
