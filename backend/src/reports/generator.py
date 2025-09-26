@@ -1,4 +1,6 @@
 from typing import Dict, List, Any
+import os
+from datetime import datetime
 
 from . import aggregator
 from . import plotter
@@ -130,7 +132,8 @@ def _synthesize_clusters(cluster_summaries: List[Dict[str, Any]]) -> Dict[str, A
         return {}
 
 
-def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = None) -> bytes:
+def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = None,
+                    only_action_plan: bool = False, save_insights_json: bool = True) -> bytes:
     session = aggregator.get_session()
     try:
         kpis = aggregator.get_kpi_summary(session, project_id)
@@ -183,7 +186,41 @@ def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = Non
     # Nivel 2: síntesis estratégica a partir de clusters
     synthesis = _synthesize_clusters(cluster_summaries)
 
+    # Cadena de agentes (Parte 2 - estilo twolaps):
+    # 1) Extracción de insights (JSON estructurado)
     insights_json = _extract_insights_to_json(aggregated)
+    # Guardar JSON para trazabilidad si se solicita
+    if save_insights_json and insights_json:
+        try:
+            backend_dir = os.path.dirname(os.path.dirname(__file__))  # backend/src
+            files_dir = os.path.join(os.path.dirname(backend_dir), "files")  # backend/files
+            os.makedirs(files_dir, exist_ok=True)
+            fname = f"insights_extraction_p{project_id}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.json"
+            with open(os.path.join(files_dir, fname), "w", encoding="utf-8") as f:
+                json.dump(insights_json, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    # 2) Plan de Acción Estratégico a partir del JSON
+    plan_text = ""
+    try:
+        plan_prompt = s_prompts.get_strategic_plan_prompt({
+            "opportunities": insights_json.get("opportunities", []),
+            "risks": insights_json.get("risks", []),
+            "recommendations": insights_json.get("strategic_recommendations", []) or insights_json.get("recommendations", []),
+        })
+        plan_text = fetch_response(plan_prompt, model="gpt-4o", temperature=0.3, max_tokens=1100)
+    except Exception:
+        plan_text = ""
+
+    # Si solo queremos probar la Parte 2, generamos un PDF mínimo con esa sección
+    if only_action_plan:
+        pdf = pdf_writer.ReportPDF(orientation="P", unit="mm", format="A4")
+        pdf.set_auto_page_break(auto=True, margin=12)
+        pdf.add_page()
+        pdf_writer.add_title(pdf, "Plan de Acción Estratégico")
+        pdf_writer.add_paragraph(pdf, plan_text or "(Sin contenido)" )
+        return pdf.output(dest="S")
 
     strategic_sections = _generate_strategic_content(insights_json, aggregated)
     agent_summary_text = ""
