@@ -1,0 +1,51 @@
+{
+  "executive_summary": "The Core School maintains a stable sentiment and presence in the market, but faces strong competition. Strategic partnerships and program expansion are key opportunities.",
+  "key_findings": [
+    "The sentiment for The Core School is stable, indicating consistent market perception.",
+    "The Core School holds a moderate share of voice at 11.5%, facing strong competition from CES and ECAM.",
+    "The perception of The Core School is positive, with a sentiment average of 0.625, indicating favorable views."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expandir la oferta de programas en escritura de guiones y producción audiovisual práctica.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Expandir colaboraciones con empresas del sector audiovisual para mejorar la inserción laboral de los estudiantes.",
+      "impact": "Alto"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Alta competencia de otras escuelas especializadas en cine y producción audiovisual en Madrid.",
+      "mitigation": "Diferenciarse mediante programas únicos y colaboraciones estratégicas."
+    }
+  ],
+  "recommendations": [
+    "Desarrollar programas online para ampliar el alcance.",
+    "Fortalecer colaboraciones con empresas del sector para mejorar la empleabilidad de los estudiantes.",
+    "Aumentar la visibilidad internacional a través de asociaciones con instituciones globales."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-25",
+          "type": "spike",
+          "metric": "mentions",
+          "note": "Significant increase in mentions likely due to a specific event or announcement."
+        }
+      ],
+      "sentiment_vs_volume": "Volume spikes do not coincide with significant sentiment changes, indicating stable perception."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [],
+        "sentiment_vs_volume": "Stable sentiment with no significant volume changes."
+      }
+    ]
+  }
+}

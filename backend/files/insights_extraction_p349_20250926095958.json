@@ -1,0 +1,64 @@
+{
+  "executive_summary": "The Core School maintains a stable sentiment with occasional spikes in mentions. Opportunities exist in expanding program offerings and collaborations, while risks include high competition in Madrid.",
+  "key_findings": [
+    "The Core School's sentiment remains stable with occasional positive spikes, indicating a generally favorable perception.",
+    "The Core School holds a competitive share of voice in the market, but faces strong competition from CES and ECAM.",
+    "The perception of The Core School is positive, with opportunities to enhance its reputation through program expansion."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expandir la oferta de programas en escritura de guiones y producción audiovisual práctica.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Expandir colaboraciones con empresas del sector audiovisual para mejorar la inserción laboral de los estudiantes.",
+      "impact": "Alto"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Alta competencia de otras escuelas especializadas en cine y producción audiovisual en Madrid.",
+      "mitigation": "Diferenciarse mediante programas únicos y colaboraciones estratégicas."
+    }
+  ],
+  "recommendations": [
+    "Desarrollar y promocionar nuevos programas en áreas de alta demanda.",
+    "Fortalecer alianzas con empresas del sector para mejorar la empleabilidad de los graduados.",
+    "Implementar estrategias de marketing para destacar frente a la competencia en Madrid."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-26",
+          "type": "spike",
+          "metric": "mentions",
+          "note": "Significant increase in mentions likely due to a new program announcement."
+        },
+        {
+          "date": "2025-09-14",
+          "type": "spike",
+          "metric": "sentiment",
+          "note": "Positive sentiment peak possibly linked to positive reviews or testimonials."
+        }
+      ],
+      "sentiment_vs_volume": "Increases in mentions generally coincide with stable or slightly increased sentiment, indicating positive reception."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [
+          {
+            "date": "2025-09-14",
+            "type": "spike",
+            "metric": "sentiment",
+            "note": "Positive sentiment spike likely due to program-related announcements."
+          }
+        ],
+        "sentiment_vs_volume": "Stable sentiment with occasional positive spikes during increased mentions."
+      }
+    ]
+  }
+}

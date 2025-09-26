@@ -314,8 +314,8 @@ def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = Non
         #    Visibilidad global diaria
         vis_dates, vis_vals = aggregator.get_visibility_series(session, project_id, start_date=start_date, end_date=end_date)
 
-        #    Sentimiento: % de positivos
-        pos_series = aggregator.get_sentiment_positive_series(session, project_id, start_date=start_date, end_date=end_date)
+        #    Sentimiento: serie diaria de promedio [-1, 1]
+        sent_evo = aggregator.get_sentiment_evolution(session, project_id, start_date=start_date, end_date=end_date)
 
         #    Datos por categoría solo para el anexo y gráficos secundarios
         by_cat = aggregator.get_sentiment_by_category(session, project_id, start_date=start_date, end_date=end_date)
@@ -340,16 +340,20 @@ def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = Non
     finally:
         session.close()
 
+    # KPI: sentimiento medio global del periodo (media de la serie diaria)
+    sentiment_avg = (sum(v for _, v in sent_evo) / max(len(sent_evo), 1)) if sent_evo else 0.0
+
     aggregated: Dict[str, Any] = {
         "kpis": {
             "total_mentions": total_mentions,
-            "average_sentiment": float((sum(v for _, v in pos_series) / max(len(pos_series), 1) / 100.0) * 2.0 - 1.0) if pos_series else 0.0,
-            "share_of_voice": float(brand_sov),
+            "sentiment_avg": float(sentiment_avg),
+            "sov": float(brand_sov),
             "sov_table": [(n, v) for n, v in sov_pairs],
+            "brand_name": brand_name,
         },
         "client_name": brand_name,
         "time_series": {
-            "sentiment_per_day": [(d, float(v)) for d, v in pos_series],
+            "sentiment_per_day": [(d, float(v)) for d, v in sent_evo],
         },
         "visibility_timeseries": (vis_dates, vis_vals),
         "agent_insights": agent_insights,
@@ -406,7 +410,7 @@ def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = Non
 
     # Gráficos alineados a la API: sentimiento como % positivo y visibilidad diaria
     try:
-        sent_img = plotter.plot_line_series([d for d, _ in pos_series], [float(v) for _, v in pos_series], title="% de menciones positivas", ylabel="Positivo (%)", ylim=(0, 100), color="#16a34a")
+        sent_img = plotter.plot_sentiment_evolution(sent_evo)
     except Exception:
         sent_img = None
     try:
@@ -450,13 +454,13 @@ def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = Non
     }
 
     try:
-        if pos_series:
-            first_s = pos_series[0][1]
-            last_s = pos_series[-1][1]
+        if sent_evo:
+            first_s = sent_evo[0][1]
+            last_s = sent_evo[-1][1]
             delta = last_s - first_s
             trend_word = "mejora" if delta > 0.05 else ("empeora" if delta < -0.05 else "se mantiene estable")
-            min_day, min_val = min(pos_series, key=lambda x: x[1])
-            max_day, max_val = max(pos_series, key=lambda x: x[1])
+            min_day, min_val = min(sent_evo, key=lambda x: x[1])
+            max_day, max_val = max(sent_evo, key=lambda x: x[1])
             content_for_pdf["annex"]["evolution_text"] = (
                 f"El sentimiento {trend_word} (Δ={delta:.2f}). Mínimo en {min_day} ({min_val:.2f}) y máximo en {max_day} ({max_val:.2f})."
             )
