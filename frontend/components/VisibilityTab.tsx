@@ -16,6 +16,8 @@ export interface VisibilityTabProps {
   dateRange?: { from?: Date; to?: Date }
   model?: string
   topic?: string
+  clientId?: number
+  brandId?: number
 }
 
 function computeDeltaFromSeries(series: VisibilityPoint[]): number {
@@ -32,7 +34,7 @@ import { getVisibility, type VisibilityApiResponse as ApiVisibility } from "@/se
 import { smoothZerosWithPrevAvg } from "@/lib/utils"
 
 export default function VisibilityTab(props: VisibilityTabProps) {
-  const { brandName, isHourlyRange, xDomain, xTicks, visibilityChartType, visibilityChartKey, dateRange, model, topic } = props
+  const { brandName, isHourlyRange, xDomain, xTicks, visibilityChartType, visibilityChartKey, dateRange, model, topic, clientId, brandId } = props
 
   const [visibility, setVisibility] = useState<ApiVisibility | null>(null)
   const [loading, setLoading] = useState<boolean>(false)
@@ -43,7 +45,7 @@ export default function VisibilityTab(props: VisibilityTabProps) {
       if (!dateRange?.from || !dateRange?.to) return
       try {
         setLoading(true)
-        const filters = { model: model || 'all', topic: topic || 'all', brand: brandName, granularity: isHourlyRange ? 'hour' as const : 'day' as const }
+        const filters = { model: model || 'all', topic: topic || 'all', brand: brandName, granularity: isHourlyRange ? 'hour' as const : 'day' as const, clientId, brandId }
         const res = await getVisibility(dateRange as DateRange, filters)
         if (!cancelled) setVisibility(res)
       } catch {
@@ -54,7 +56,7 @@ export default function VisibilityTab(props: VisibilityTabProps) {
     }
     load()
     return () => { cancelled = true }
-  }, [dateRange, model, topic, brandName, isHourlyRange])
+  }, [dateRange, model, topic, brandName, isHourlyRange, clientId, brandId])
 
   // Preparar serie suavizada para evitar caídas a 0 puntuales
   const baseSeries = (visibility?.series || []) as any

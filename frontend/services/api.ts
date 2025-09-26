@@ -42,7 +42,7 @@ const buildDateQuery = (periodOrRange: DateRange | string): string => {
   return `?range=30d`;
 }
 
-type FilterParams = { model?: string; source?: string; topic?: string; brand?: string; granularity?: 'day' | 'hour' };
+type FilterParams = { model?: string; source?: string; topic?: string; brand?: string; granularity?: 'day' | 'hour'; clientId?: number; brandId?: number };
 
 const appendFilters = (qs: string, filters?: FilterParams): string => {
   if (!filters) return qs;
@@ -51,6 +51,8 @@ const appendFilters = (qs: string, filters?: FilterParams): string => {
   if (filters.source && filters.source !== 'all') url.set('source', filters.source);
   if (filters.topic && filters.topic !== 'all') url.set('topic', filters.topic);
   if (filters.brand) url.set('brand', filters.brand);
+  if (typeof filters.clientId === 'number') url.set('client_id', String(filters.clientId));
+  if (typeof filters.brandId === 'number') url.set('brand_id', String(filters.brandId));
   if (filters.granularity) url.set('granularity', filters.granularity);
   return `?${url.toString()}`;
 }
@@ -84,6 +86,8 @@ export interface VisibilityApiResponse {
 
 export const getTopics = (): Promise<{ topics: string[] }> => fetchFromAPI<{ topics: string[] }>(`/api/topics`);
 export const getModels = (): Promise<{ models: string[] }> => fetchFromAPI<{ models: string[] }>(`/api/models`);
+export const getClients = (): Promise<{ clients: { id: number; name: string; slug?: string }[] }> => fetchFromAPI(`/api/clients`);
+export const getBrands = (clientId?: number): Promise<{ brands: { id: number; name: string; slug?: string }[] }> => fetchFromAPI(`/api/brands${clientId != null ? `?client_id=${clientId}` : ''}`);
 export const getSources = (): Promise<{ sources: string[] }> => fetchFromAPI<{ sources: string[] }>(`/api/sources`);
 
 // Sentiment

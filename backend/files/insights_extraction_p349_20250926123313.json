@@ -1,0 +1,57 @@
+{
+  "executive_summary": "The Core School maintains a stable sentiment with notable spikes in visibility, indicating potential opportunities for strategic partnerships and program expansion. However, high competition in Madrid poses a risk.",
+  "key_findings": [
+    "The Core School's sentiment is stable, suggesting a consistent brand perception.",
+    "The school faces high competition in Madrid, with CES leading in share of voice.",
+    "The Core School's visibility spikes suggest effective engagement strategies."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expand collaborations with audiovisual companies to enhance student employment.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Develop online programs to reach a broader audience.",
+      "impact": "Medio"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "High competition from other specialized schools in Madrid.",
+      "mitigation": "Differentiate through unique program offerings and partnerships."
+    }
+  ],
+  "recommendations": [
+    "Enhance partnerships with industry leaders to improve student outcomes.",
+    "Invest in marketing to increase share of voice in the competitive Madrid market.",
+    "Develop and promote online courses to attract international students."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-25",
+          "type": "spike",
+          "metric": "mentions",
+          "note": "Significant increase in mentions likely due to a positive event or announcement."
+        },
+        {
+          "date": "2025-09-26",
+          "type": "spike",
+          "metric": "visibility",
+          "note": "Visibility peaked, possibly due to increased media coverage or a campaign."
+        }
+      ],
+      "sentiment_vs_volume": "The sentiment remained stable despite fluctuations in volume, indicating consistent perception."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [],
+        "sentiment_vs_volume": "Stable sentiment with no significant volume changes."
+      }
+    ]
+  }
+}

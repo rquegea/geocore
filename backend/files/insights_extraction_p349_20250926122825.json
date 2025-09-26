@@ -1,0 +1,57 @@
+{
+  "executive_summary": "The Core School maintains a stable sentiment and volume of mentions, with opportunities to expand its program offerings and collaborations. However, it faces high competition in Madrid, which could impact its market share.",
+  "key_findings": [
+    "The Core School's sentiment is stable with a slight positive average, indicating a generally favorable perception.",
+    "The school holds a significant share of voice in the market but faces strong competition from CES and ECAM.",
+    "The perception of The Core School is positive, with opportunities to enhance its reputation through program expansion."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expandir la oferta de programas en escritura de guiones y producción audiovisual práctica.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Expandir colaboraciones con empresas del sector audiovisual para mejorar la inserción laboral de los estudiantes.",
+      "impact": "Alto"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Alta competencia de otras escuelas especializadas en cine y producción audiovisual en Madrid.",
+      "mitigation": "Diferenciarse mediante programas únicos y colaboraciones estratégicas."
+    }
+  ],
+  "recommendations": [
+    "Desarrollar programas online para llegar a un público más amplio.",
+    "Colaborar con instituciones internacionales para atraer estudiantes globales.",
+    "Fortalecer las relaciones con empresas del sector para mejorar la empleabilidad de los graduados."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-15",
+          "type": "spike",
+          "metric": "mentions",
+          "note": "Increased visibility due to potential marketing activities or events."
+        },
+        {
+          "date": "2025-09-26",
+          "type": "spike",
+          "metric": "mentions",
+          "note": "Another increase in mentions possibly linked to a specific event or announcement."
+        }
+      ],
+      "sentiment_vs_volume": "The sentiment remains stable despite fluctuations in volume, indicating consistent brand perception."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [],
+        "sentiment_vs_volume": "Stable sentiment suggests consistent satisfaction with the curriculum and programs."
+      }
+    ]
+  }
+}

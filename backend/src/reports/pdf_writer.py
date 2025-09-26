@@ -87,6 +87,21 @@ def _sanitize(text: str) -> str:
     return text
 
 
+def add_centered_image(pdf: ReportPDF, path: Optional[str], width: float = 180):
+    if not path:
+        return
+    try:
+        # Centrar la imagen manualmente ajustando X
+        x = max(pdf.l_margin, (pdf.w - width) / 2.0)
+        y = pdf.get_y()
+        pdf.image(path, x=x, y=y, w=width)
+        # mover cursor a continuación de la imagen
+        pdf.set_y(y + (width * 0.56))  # aproximar alto por relación típica
+        pdf.ln(3)
+    except Exception:
+        pass
+
+
 def add_title(pdf: ReportPDF, text: str):
     pdf.set_font("Helvetica", "B", 16)
     pdf.cell(0, 10, _sanitize(text), 0, 1, "L")
@@ -120,6 +135,129 @@ def add_table(pdf: ReportPDF, rows: List[List[str]]):
         pdf.ln(0)
     pdf.ln(3)
 
+
+def add_formatted_paragraphs(pdf: ReportPDF, raw_text: str):
+    """Renderiza texto con reglas ligeras de formato:
+    - Líneas que empiezan por '### ' -> cursiva (sin ###)
+    - Elimina '**' si aparecen en el texto
+    - La línea exacta 'Sentimiento por Categoría:' se imprime en negrita
+    - Corrige encabezados pegados comunes del LLM
+    """
+    if not isinstance(raw_text, str):
+        return
+    text = raw_text.replace("**", "")
+    # Correcciones de encabezados pegados
+    text = text.replace("Resumenejecutivoyhallazgosprincipales", "Resumen ejecutivo y hallazgos principales")
+    text = text.replace("Hallazgosprincipales", "Hallazgos principales")
+    lines = [ln.rstrip() for ln in text.splitlines() if ln.strip()]
+    for ln in lines:
+        if ln.startswith("### "):
+            pdf.set_font("Helvetica", style="I", size=11)
+            pdf.multi_cell(0, 6, _sanitize(ln[4:]))
+            pdf.ln(1)
+            pdf.set_font("Helvetica", size=11)
+            continue
+        if ln.strip().startswith("Sentimiento por Categoría:"):
+            pdf.set_font("Helvetica", style="B", size=11)
+            pdf.multi_cell(0, 6, _sanitize(ln.strip()))
+            pdf.ln(1)
+            pdf.set_font("Helvetica", size=11)
+            continue
+        add_paragraph(pdf, ln)
+
+
+# --- Pretty print para Plan de Acción (texto suele venir como JSON) ---
+def _strip_fences(text: str) -> str:
+    if not isinstance(text, str):
+        return ""
+    s = text.strip()
+    if s.startswith("```json"):
+        s = s[len("```json"):].strip()
+        if s.endswith("```"):
+            s = s[:-3].strip()
+    if s.startswith("```") and s.endswith("```"):
+        s = s[3:-3].strip()
+    if s.lower().startswith("json\n"):
+        s = s[5:].strip()
+    return s
+
+
+def add_action_plan_pretty(pdf: ReportPDF, raw_text: str):
+    """Renderiza un plan de acción legible a partir de JSON/markdown.
+    Soporta:
+      - {"plan_de_accion_estrategico": [{plazo, acciones:[...]}, ...]}
+      - {"strategic_action_plan": {"strategic_recommendations": [...]}}
+      - Lista simple de acciones
+    Fallback: imprime como texto formateado normal.
+    """
+    try:
+        s = _strip_fences(raw_text)
+        import json as _json
+        if not s or s[:1] not in ("{", "["):
+            add_formatted_paragraphs(pdf, raw_text)
+            return
+        data = _json.loads(s)
+
+        bullets: List[str] = []
+
+        def _emit_action(prefix: str, a: dict):
+            action = a.get("accion") or a.get("action") or a.get("tarea") or a.get("recommendation") or "(acción)"
+            pr = a.get("prioridad") or a.get("priority")
+            tl = a.get("plazo") or a.get("timeline")
+            hdr = f"- {prefix}{'['+pr+'] ' if pr else ''}{action}"
+            bullets.append(hdr)
+            just = a.get("justificacion") or a.get("justification") or a.get("details")
+            if just:
+                bullets.append(f"  • Justificación: {just}")
+            kpis = a.get("kpis")
+            if kpis:
+                bullets.append(f"  • KPIs: {kpis}")
+            opp = a.get("oportunidad") or a.get("opportunity")
+            if opp:
+                bullets.append(f"  • Oportunidad: {opp}")
+            mit = a.get("mitigacion") or a.get("mitigation")
+            if mit:
+                bullets.append(f"  • Mitigación: {mit}")
+            recs = a.get("recomendaciones") or a.get("recommendations")
+            if isinstance(recs, list):
+                for r in recs[:5]:
+                    bullets.append("  • " + str(r))
+
+        if isinstance(data, dict) and isinstance(data.get("plan_de_accion_estrategico"), list):
+            for block in data.get("plan_de_accion_estrategico"):
+                if not isinstance(block, dict):
+                    continue
+                plazo = block.get("plazo") or block.get("timeline") or "General"
+                acciones = block.get("acciones") or block.get("actions") or []
+                for a in acciones:
+                    if isinstance(a, dict):
+                        _emit_action(f"[{plazo}] ", a)
+                    else:
+                        bullets.append(f"- [{plazo}] {str(a)}")
+
+        elif isinstance(data, dict) and isinstance(data.get("strategic_action_plan"), dict):
+            sap = data.get("strategic_action_plan")
+            recs = sap.get("strategic_recommendations") or []
+            for a in recs:
+                if isinstance(a, dict):
+                    _emit_action("", a)
+                else:
+                    bullets.append("- " + str(a))
+
+        elif isinstance(data, list):
+            for it in data:
+                if isinstance(it, dict):
+                    _emit_action("", it)
+                else:
+                    bullets.append("- " + str(it))
+        else:
+            add_formatted_paragraphs(pdf, raw_text)
+            return
+
+        for ln in bullets:
+            add_paragraph(pdf, ln)
+    except Exception:
+        add_formatted_paragraphs(pdf, raw_text)
 
 def add_agent_insights_section(pdf: ReportPDF, agent_summary: Dict[str, str], raw_buckets: Dict[str, list] | None = None):
     """
@@ -371,19 +509,11 @@ def build_empty_structure_pdf(company_name: str) -> bytes:
     add_title(pdf, "Índice")
 
     # Definir estructura solicitada
+    # Ajustado: compactamos Parte 1 en tres secciones y eliminamos páginas de serie temporal
     parte1 = [
         "Dashboard Ejecutivo",
         "Resumen Ejecutivo de KPIs",
-        "Share of Voice vs. Competencia",
         "Evolución del Sentimiento (diario)",
-        "Evolución del Volumen de Menciones (diario)",
-        "Serie temporal - Análisis de competencia",
-        "Serie temporal - Análisis de marketing y estrategia",
-        "Serie temporal - Análisis de mercado",
-        "Serie temporal - Análisis contextual",
-        "Serie temporal - Análisis de oportunidades",
-        "Serie temporal - Análisis de riesgos",
-        "Serie temporal - Análisis de sentimiento y reputación",
     ]
     parte2 = [
         "Informe Estratégico",
@@ -480,16 +610,7 @@ def build_skeleton_with_content(company_name: str, images: Dict[str, Optional[st
     parte1 = [
         "Dashboard Ejecutivo",
         "Resumen Ejecutivo de KPIs",
-        "Share of Voice vs. Competencia",
         "Evolución del Sentimiento (diario)",
-        "Evolución del Volumen de Menciones (diario)",
-        "Serie temporal - Análisis de competencia",
-        "Serie temporal - Análisis de marketing y estrategia",
-        "Serie temporal - Análisis de mercado",
-        "Serie temporal - Análisis contextual",
-        "Serie temporal - Análisis de oportunidades",
-        "Serie temporal - Análisis de riesgos",
-        "Serie temporal - Análisis de sentimiento y reputación",
     ]
     parte2 = [
         "Informe Estratégico",
@@ -535,52 +656,27 @@ def build_skeleton_with_content(company_name: str, images: Dict[str, Optional[st
 
     # Mapeo de secciones -> claves de imágenes
     section_to_image_keys: Dict[str, List[str]] = {
-        # Dashboard Ejecutivo (tres KPIs): SOV global, Visibilidad global, Sentimiento global
-        "Share of Voice vs. Competencia": ["sov_pie", "part1_sov_donut"],
-        "Evolución del Sentimiento (diario)": ["sentiment_evolution", "part1_sentiment_line"],
-        # Usamos la línea de visibilidad global
-        "Serie temporal - Análisis de competencia": ["part1_visibility_line", "topics_top_bottom"],
         # Resto de secciones
-        "Resumen Ejecutivo de KPIs": ["part1_category_distribution", "sentiment_by_category"],
+        "Evolución del Sentimiento (diario)": ["sentiment_evolution"],
+        "Resumen Ejecutivo de KPIs": ["sov_pie"],
     }
 
     for s in parte1:
         _write_section_page(s)
         keys = section_to_image_keys.get(s, [])
-        if s == "Share of Voice vs. Competencia":
-            # Dos columnas: izquierda SOV pie, derecha ranking (imagen precompuesta: images["sov_ranking_table"]) si existe
-            page_width = pdf.w - 2 * pdf.l_margin
-            col_w = page_width / 2.0
-            y0 = pdf.get_y()
-            # Izquierda
-            pdf.set_xy(pdf.l_margin, y0)
-            add_image(pdf, images.get(keys[0] if keys else None), width=col_w - 6)
-            # Derecha (ranking renderizado como imagen, si no hay, dejar vacío)
-            pdf.set_xy(pdf.l_margin + col_w, y0)
-            add_image(pdf, images.get("sov_ranking_table"), width=col_w - 6)
-            continue
         if s == "Evolución del Sentimiento (diario)":
-            # Dos columnas: izquierda línea sentimiento, derecha barra distribución (imagen images["sentiment_distribution"]) si existe
-            page_width = pdf.w - 2 * pdf.l_margin
-            col_w = page_width / 2.0
-            y0 = pdf.get_y()
-            pdf.set_xy(pdf.l_margin, y0)
-            add_image(pdf, images.get(keys[0] if keys else None), width=col_w - 6)
-            pdf.set_xy(pdf.l_margin + col_w, y0)
-            add_image(pdf, images.get("sentiment_distribution"), width=col_w - 6)
-            continue
-        if s == "Evolución del Volumen de Menciones (diario)":
-            # Dos columnas: izquierda visibilidad (línea), derecha ranking visibilidad
-            page_width = pdf.w - 2 * pdf.l_margin
-            col_w = page_width / 2.0
-            y0 = pdf.get_y()
-            pdf.set_xy(pdf.l_margin, y0)
-            add_image(pdf, images.get("visibility_line"), width=col_w - 6)
-            pdf.set_xy(pdf.l_margin + col_w, y0)
-            add_image(pdf, images.get("visibility_ranking_table"), width=col_w - 6)
+            # Gráfico grande y centrado; debajo, puntuación de visibilidad
+            add_centered_image(pdf, images.get(keys[0] if keys else None), width=170)
+            # Debajo: visibilidad con título solicitado
+            add_title(pdf, "Evolución del Volumen de Menciones (diario)")
+            add_centered_image(pdf, images.get("part1_visibility_line"), width=170)
             continue
         for k in keys:
-            add_image(pdf, images.get(k), width=180)
+            # En "Resumen Ejecutivo de KPIs": apilar gráficos y centrar SOV si corresponde
+            if s == "Resumen Ejecutivo de KPIs" and k == "sov_pie":
+                add_centered_image(pdf, images.get(k), width=150)
+            else:
+                add_image(pdf, images.get(k), width=180)
 
     # Parte 2 (cabeceras) + inserción de contenidos estratégicos si vienen
     _write_section_page("Parte 2: Informe Estratégico")
@@ -590,27 +686,27 @@ def build_skeleton_with_content(company_name: str, images: Dict[str, Optional[st
             if s == "Plan de Acción Estratégico":
                 text = (strategic.get("action_plan") or "").strip()
                 if text:
-                    add_paragraph(pdf, text)
+                    add_action_plan_pretty(pdf, text)
             elif s == "Resumen Ejecutivo":
                 text = (strategic.get("executive_summary") or "").strip()
                 if text:
-                    add_paragraph(pdf, text)
+                    add_formatted_paragraphs(pdf, text)
             elif s == "Resumen Ejecutivo y Hallazgos Principales":
                 text = (strategic.get("summary_and_findings") or "").strip()
                 if text:
-                    add_paragraph(pdf, text)
+                    add_formatted_paragraphs(pdf, text)
             elif s == "Análisis Competitivo":
                 text = (strategic.get("competitive_analysis") or "").strip()
                 if text:
-                    add_paragraph(pdf, text)
+                    add_formatted_paragraphs(pdf, text)
             elif s == "Tendencias y Señales Emergentes":
                 text = (strategic.get("trends") or "").strip()
                 if text:
-                    add_paragraph(pdf, text)
+                    add_formatted_paragraphs(pdf, text)
             elif s == "Correlaciones Transversales entre Categorías":
                 text = (strategic.get("correlations") or "").strip()
                 if text:
-                    add_paragraph(pdf, text)
+                    add_formatted_paragraphs(pdf, text)
 
     # Parte 3 (cabeceras)
     _write_section_page("Parte 3: Anexo - Análisis Detallado por Categoría")

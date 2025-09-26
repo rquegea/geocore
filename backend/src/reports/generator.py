@@ -128,17 +128,50 @@ def _generate_full_part2_texts(insights_json: Dict[str, Any], aggregated: Dict[s
                             if not isinstance(a, dict):
                                 plan_items.append("- " + str(a))
                                 continue
-                            act = a.get("accion") or a.get("action") or a.get("tarea") or json.dumps(a, ensure_ascii=False)
+                            # Aceptar más sinónimos: "descripcion" suele venir en estos items
+                            act = (
+                                a.get("accion")
+                                or a.get("action")
+                                or a.get("tarea")
+                                or a.get("descripcion")
+                                or a.get("description")
+                            )
                             pr2 = a.get("prioridad") or a.get("priority") or pr
                             just2 = a.get("justificacion") or a.get("justification")
                             recs2 = a.get("recomendaciones") or a.get("recommendations")
-                            line = "- " + (f"[{pr2}] " if pr2 else "") + (f"[{plazo_item}] " if plazo_item else "") + act
+                            if not act:
+                                # Fallback: representación compacta sin volcar JSON crudo
+                                other_kv = []
+                                for k, v in a.items():
+                                    if k in ("prioridad", "priority", "justificacion", "justification", "recomendaciones", "recommendations"):
+                                        continue
+                                    if k in ("accion", "action", "tarea", "descripcion", "description"):
+                                        continue
+                                    other_kv.append(f"{k}: {v}")
+                                act = ", ".join(other_kv) or "(acción)"
+                            line = "- " + (f"[{pr2}] " if pr2 else "") + (f"[{plazo_item}] " if plazo_item else "") + str(act)
                             plan_items.append(line)
                             if just2:
                                 plan_items.append(f"  • Justificación: {just2}")
                             if isinstance(recs2, list):
                                 for r in recs2[:5]:
                                     plan_items.append("  • " + str(r))
+                        # Mitigación de riesgos (si existe en el mismo bloque temporal)
+                        mr = it.get("mitigacion_riesgos") or it.get("risk_mitigation")
+                        if isinstance(mr, list):
+                            for m in mr:
+                                if isinstance(m, dict):
+                                    riesgo = m.get("riesgo") or m.get("risk")
+                                    estrategia = m.get("estrategia") or m.get("strategy")
+                                    owner_m = m.get("owner") or m.get("responsable")
+                                    plazo_m = m.get("plazo") or m.get("timeline")
+                                    parts = [p for p in [riesgo, estrategia] if p]
+                                    if parts:
+                                        extra = []
+                                        if owner_m: extra.append(f"owner: {owner_m}")
+                                        if plazo_m: extra.append(f"plazo: {plazo_m}")
+                                        suffix = f" — ({', '.join(extra)})" if extra else ""
+                                        plan_items.append("- Mitigación de riesgos: " + " | ".join(parts) + suffix)
                         continue
                     # Fallback: volcar pares clave-valor legibles
                     plan_items.append("- " + _to_text_from_structure(it, section))

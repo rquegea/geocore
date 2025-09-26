@@ -1,0 +1,57 @@
+{
+  "executive_summary": "The Core School maintains a stable sentiment and presence in the market, but faces strong competition. Strategic partnerships and program expansion could enhance its position.",
+  "key_findings": [
+    "The Core School's sentiment remains stable, indicating consistent market perception.",
+    "The Core School holds a moderate share of voice at 11.5%, trailing behind competitors like CES and ECAM.",
+    "The perception of The Core School is generally positive, with opportunities to enhance its reputation through strategic initiatives."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expandir la oferta de programas en escritura de guiones y producción audiovisual práctica.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Expandir colaboraciones con empresas del sector audiovisual para mejorar la inserción laboral de los estudiantes.",
+      "impact": "Alto"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Alta competencia de otras escuelas especializadas en cine y producción audiovisual en Madrid.",
+      "mitigation": "Diferenciarse a través de programas únicos y colaboraciones estratégicas."
+    }
+  ],
+  "recommendations": [
+    "Desarrollar y promocionar programas únicos en escritura de guiones y producción práctica.",
+    "Fortalecer alianzas con empresas del sector para mejorar la empleabilidad de los estudiantes.",
+    "Implementar campañas de marketing para destacar las fortalezas únicas de The Core School frente a la competencia."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-25",
+          "type": "spike",
+          "metric": "mentions",
+          "note": "Significant increase in mentions possibly due to a positive event or campaign."
+        },
+        {
+          "date": "2025-09-21",
+          "type": "spike",
+          "metric": "sentiment",
+          "note": "Higher sentiment possibly linked to positive reviews or announcements."
+        }
+      ],
+      "sentiment_vs_volume": "Increases in mentions generally align with stable or slightly increased sentiment, indicating positive reception."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [],
+        "sentiment_vs_volume": "Sentiment remains stable with no significant volume changes."
+      }
+    ]
+  }
+}

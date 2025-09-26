@@ -40,13 +40,15 @@ export interface SentimentTabProps {
   initialSentimentApi?: SentimentApiResponse | null
   initialTopicsCloud?: { topic: string; count: number; avg_sentiment?: number }[]
   initialTopicGroups?: TopicGroup[]
+  clientId?: number
+  brandId?: number
 }
 
 import type { DateRange } from "react-day-picker"
 import { getSentiment, getTopicsCloud, type SentimentApiResponse } from "@/services/api"
 
 export default function SentimentTab(props: SentimentTabProps) {
-  const { sentimentChartType, sentimentBrush, posHighlightIdx, negHighlightIdx, openGroups, setOpenGroups, translateTopicToSpanish, isHourlyRange, xDomain, xTicks, executionTimestamps, dateRange, model, topic, brandName, initialSentimentApi, initialTopicsCloud, initialTopicGroups } = props
+  const { sentimentChartType, sentimentBrush, posHighlightIdx, negHighlightIdx, openGroups, setOpenGroups, translateTopicToSpanish, isHourlyRange, xDomain, xTicks, executionTimestamps, dateRange, model, topic, brandName, initialSentimentApi, initialTopicsCloud, initialTopicGroups, clientId, brandId } = props
 
   const [topicsCloud, setTopicsCloud] = useState<{ topic: string; count: number; avg_sentiment?: number }[]>(initialTopicsCloud || [])
   const [topicGroups, setTopicGroups] = useState<TopicGroup[]>(initialTopicGroups || [])
@@ -111,7 +113,7 @@ export default function SentimentTab(props: SentimentTabProps) {
     let cancelled = false
     if (!dateRange?.from || !dateRange?.to) return
 
-    const filters = { model: model || 'all', topic: topic || 'all', brand: brandName, granularity: isHourlyRange ? 'hour' as const : 'day' as const }
+    const filters = { model: model || 'all', topic: topic || 'all', brand: brandName, granularity: isHourlyRange ? 'hour' as const : 'day' as const, clientId, brandId }
 
     const lightRefresh = async () => {
       try {

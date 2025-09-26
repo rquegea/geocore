@@ -1,0 +1,57 @@
+{
+  "executive_summary": "The Core School maintains a stable sentiment with a slight increase in mentions, indicating consistent interest. However, it faces strong competition in the audiovisual education sector in Madrid.",
+  "key_findings": [
+    "The Core School's sentiment remains stable, indicating consistent satisfaction among stakeholders.",
+    "CES leads in share of voice, highlighting the competitive landscape in Madrid's audiovisual education sector.",
+    "The Core School's perception is positive, but it needs to enhance its international recognition to compete with global institutions."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expandir la oferta de programas en escritura de guiones y producción audiovisual práctica.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Expandir colaboraciones con empresas del sector audiovisual para mejorar la inserción laboral de los estudiantes.",
+      "impact": "Alto"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Alta competencia de otras escuelas especializadas en cine y producción audiovisual en Madrid.",
+      "mitigation": "Diferenciarse mediante programas únicos y colaboraciones estratégicas."
+    }
+  ],
+  "recommendations": [
+    "Desarrollar programas online para llegar a un público más amplio.",
+    "Colaborar con instituciones internacionales para atraer estudiantes globales.",
+    "Fortalecer la presencia de marca a través de campañas de marketing dirigidas."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-21",
+          "type": "spike",
+          "metric": "sentiment",
+          "note": "Sentiment increased to 0.7, possibly due to positive coverage or events."
+        },
+        {
+          "date": "2025-09-25",
+          "type": "spike",
+          "metric": "mentions",
+          "note": "Mentions spiked to 39.1, likely due to a significant event or announcement."
+        }
+      ],
+      "sentiment_vs_volume": "Increases in volume generally coincide with stable or slightly improved sentiment, indicating positive reception."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [],
+        "sentiment_vs_volume": "Stable sentiment suggests consistent satisfaction with curriculum offerings."
+      }
+    ]
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "executive_summary": "The Core School mantiene una posición competitiva en el mercado de educación audiovisual en Madrid, con un sentimiento positivo estable. Sin embargo, enfrenta desafíos de reconocimiento internacional y competencia local.",
+  "key_findings": [
+    "El sentimiento hacia The Core School es consistentemente positivo, lo que indica una percepción favorable de su oferta educativa.",
+    "The Core School tiene un Share of Voice del 11.5%, compitiendo de cerca con otras instituciones como TAI y ECAM.",
+    "El reconocimiento de The Core School como una institución líder en formación audiovisual es evidente, aunque enfrenta desafíos de reconocimiento internacional."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expandir la oferta de programas en escritura de guiones y producción audiovisual práctica.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Expandir colaboraciones con empresas del sector audiovisual para mejorar la inserción laboral de los estudiantes.",
+      "impact": "Alto"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Alta competencia de otras escuelas especializadas en cine y producción audiovisual en Madrid.",
+      "mitigation": "Diferenciarse mediante programas únicos y colaboraciones estratégicas."
+    },
+    {
+      "risk": "Falta de reconocimiento internacional comparado con instituciones como EICTV.",
+      "mitigation": "Desarrollar alianzas internacionales y programas de intercambio."
+    }
+  ],
+  "recommendations": [
+    "Desarrollar programas online para ampliar el alcance y atraer a estudiantes internacionales.",
+    "Fortalecer las colaboraciones con empresas del sector para mejorar la empleabilidad de los graduados.",
+    "Implementar campañas de marketing dirigidas a mejorar el reconocimiento internacional de la escuela."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-15",
+          "type": "spike",
+          "metric": "mentions",
+          "note": "Aumento significativo en menciones posiblemente debido a un evento o anuncio."
+        },
+        {
+          "date": "2025-09-26",
+          "type": "spike",
+          "metric": "sentiment",
+          "note": "Incremento en sentimiento positivo, posiblemente relacionado con un logro o reconocimiento."
+        }
+      ],
+      "sentiment_vs_volume": "El volumen de menciones y el sentimiento se mantienen generalmente estables, con algunos picos que no afectan significativamente el sentimiento."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [],
+        "sentiment_vs_volume": "El sentimiento positivo se mantiene constante, reflejando una percepción favorable de los programas ofrecidos."
+      }
+    ]
+  }
+}

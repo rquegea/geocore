@@ -2241,6 +2241,14 @@ def parse_filters(request):
     source = request.args.get('source', 'all')
     topic = request.args.get('topic', 'all')
     brand = request.args.get('brand', os.getenv('DEFAULT_BRAND', 'The Core School'))
+    # Multi-tenant (opcional)
+    def _to_int(val):
+        try:
+            return int(val) if val is not None and str(val).strip() != '' else None
+        except Exception:
+            return None
+    client_id = _to_int(request.args.get('client_id'))
+    brand_id = _to_int(request.args.get('brand_id'))
     sentiment = request.args.get('sentiment', 'all')
     hide_bots = request.args.get('hideBots', '0') == '1'
     status_param = request.args.get('status', 'active')
@@ -2254,6 +2262,8 @@ def parse_filters(request):
         'source': source,
         'topic': topic,
         'brand': brand,
+        'client_id': client_id,
+        'brand_id': brand_id,
         'sentiment': sentiment,
         'hide_bots': hide_bots,
         'status': status_param,
@@ -2739,6 +2749,14 @@ def get_mentions():
         if filters.get('hide_bots'):
             where_clauses.append("COALESCE(m.is_bot, FALSE) = FALSE")
 
+        # Multi-tenant filters
+        if filters.get('client_id'):
+            where_clauses.append("q.client_id = %s")
+            params.append(filters['client_id'])
+        if filters.get('brand_id'):
+            where_clauses.append("q.brand_id = %s")
+            params.append(filters['brand_id'])
+
         where_sql = " AND ".join(where_clauses)
 
         base_query = f"""
@@ -2804,6 +2822,10 @@ def get_visibility():
             where.append("m.source = %s"); params.append(filters['source'])
         if filters.get('topic') and filters['topic'] != 'all':
             where.append("COALESCE(q.category, q.topic) = %s"); params.append(filters['topic'])
+        if filters.get('client_id'):
+            where.append("q.client_id = %s"); params.append(filters['client_id'])
+        if filters.get('brand_id'):
+            where.append("q.brand_id = %s"); params.append(filters['brand_id'])
         where_sql = " AND ".join(where)
 
         synonyms = [s.lower() for s in BRAND_SYNONYMS.get(brand, [brand.lower()])]
@@ -2947,6 +2969,10 @@ def get_visibility_ranking():
         # Filtro directo por topic (desde queries)
         if filters.get('topic') and filters['topic'] != 'all':
             where.append("COALESCE(q.category, q.topic) = %s"); params.append(filters['topic'])
+        if filters.get('client_id'):
+            where.append("q.client_id = %s"); params.append(filters['client_id'])
+        if filters.get('brand_id'):
+            where.append("q.brand_id = %s"); params.append(filters['brand_id'])
         where_sql = " AND ".join(where)
 
         # Helper: trae payloads de insights para el rango indicado
@@ -3045,6 +3071,10 @@ def get_industry_ranking():
         # Filtro directo por topic en menciones
         if filters.get('topic') and filters['topic'] != 'all':
             where.append("q.topic = %s"); params.append(filters['topic'])
+        if filters.get('client_id'):
+            where.append("q.client_id = %s"); params.append(filters['client_id'])
+        if filters.get('brand_id'):
+            where.append("q.brand_id = %s"); params.append(filters['brand_id'])
         where_sql = " AND ".join(where)
 
         # Obtener menciones con su topic y los campos necesarios para detección por sinónimos
@@ -3295,6 +3325,10 @@ def get_sentiment():
             where_clauses.append("q.topic = %s"); params.append(filters['topic'])
         if filters.get('brand'):
             where_clauses.append("COALESCE(q.brand, '') = %s"); params.append(filters['brand'])
+        if filters.get('client_id'):
+            where_clauses.append("q.client_id = %s"); params.append(filters['client_id'])
+        if filters.get('brand_id'):
+            where_clauses.append("q.brand_id = %s"); params.append(filters['brand_id'])
 
         where_sql = " AND ".join(where_clauses)
         join_sql = "JOIN queries q ON m.query_id = q.id"
@@ -3499,6 +3533,10 @@ def get_topics_cloud():
             where_clauses.append("m.source = %s"); params.append(filters['source'])
         if filters.get('topic') and filters['topic'] != 'all':
             where_clauses.append("q.topic = %s"); params.append(filters['topic'])
+        if filters.get('client_id'):
+            where_clauses.append("q.client_id = %s"); params.append(filters['client_id'])
+        if filters.get('brand_id'):
+            where_clauses.append("q.brand_id = %s"); params.append(filters['brand_id'])
         where_sql = " AND ".join(where_clauses)
 
         # Desagregar key_topics tolerando TEXT[] o JSONB: convertir siempre con to_jsonb
@@ -3625,6 +3663,31 @@ def get_models():
         cur.close()
         conn.close()
         return jsonify({"models": models})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# --- Multi-tenant: Listados de clients y brands ---
+@app.route('/api/clients', methods=['GET'])
+def list_clients():
+    try:
+        conn = get_db_connection(); cur = conn.cursor()
+        cur.execute("SELECT id, name, COALESCE(slug,'') FROM clients ORDER BY id ASC")
+        rows = cur.fetchall(); cur.close(); conn.close()
+        return jsonify({"clients": [{"id": r[0], "name": r[1], "slug": r[2]} for r in rows]})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/brands', methods=['GET'])
+def list_brands():
+    try:
+        client_id = request.args.get('client_id')
+        conn = get_db_connection(); cur = conn.cursor()
+        if client_id is not None and str(client_id).strip() != '':
+            cur.execute("SELECT id, name, COALESCE(slug,'') FROM brands WHERE client_id = %s ORDER BY id ASC", (int(client_id),))
+        else:
+            cur.execute("SELECT id, name, COALESCE(slug,'') FROM brands ORDER BY id ASC")
+        rows = cur.fetchall(); cur.close(); conn.close()
+        return jsonify({"brands": [{"id": r[0], "name": r[1], "slug": r[2]} for r in rows]})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

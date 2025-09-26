@@ -28,6 +28,7 @@ import {
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, PieChart, Pie, Cell, BarChart, Bar, AreaChart, Area, Brush } from "recharts"
 import Image from "next/image"
 import { getVisibility, getShareOfVoice, getVisibilityRanking, getMentions, getModels, getPrompts, getTopics, getPromptDetails, getSentiment, getTopicsCloud, createPrompt, updatePrompt, deletePrompt, getInsights, categorizePromptApi, type PromptsByTopic, type PromptDetails, type InsightRow, type ShareOfVoiceResponse, type SentimentApiResponse } from "@/services/api"
+import { getClients, getBrands } from "@/services/api"
 import { VisibilityData, Competitor, Mention } from "@/types"
 import { cn } from "@/lib/utils"
 import { DateRange } from "react-day-picker"
@@ -231,6 +232,11 @@ export function AnalyticsDashboard() {
   // Filtro: solo modelo (chat)
   const [modelOptions, setModelOptions] = useState<string[]>([])
   const [selectedModel, setSelectedModel] = useState<string>("all")
+  // Multi-tenant: cliente y marca seleccionados
+  const [clients, setClients] = useState<{ id: number; name: string }[]>([])
+  const [brands, setBrands] = useState<{ id: number; name: string }[]>([])
+  const [selectedClientId, setSelectedClientId] = useState<number | undefined>(undefined)
+  const [selectedBrandId, setSelectedBrandId] = useState<number | undefined>(undefined)
   // Filtro: source (oculto, siempre 'all')
   const selectedSource = "all"
   // Marca principal para filtrar sentimiento/SOV (mostrar The Core según entorno)
@@ -438,9 +444,10 @@ export function AnalyticsDashboard() {
   useEffect(() => {
     const loadFiltersLists = async () => {
       try {
-        const [modelsRes, topicsRes] = await Promise.all([
+        const [modelsRes, topicsRes, clientsRes] = await Promise.all([
           getModels(),
           getTopics(),
+          getClients().catch(() => ({ clients: [] as any[] })),
         ])
         setModelOptions(["all", ...modelsRes.models])
         // Cargar topics reales desde API, robustos a variaciones
@@ -448,6 +455,12 @@ export function AnalyticsDashboard() {
         const canon = (s: string) => s.trim()
         const uniqueTopics = Array.from(new Set(rawTopics.map(canon))).filter(Boolean)
         setTopicOptions(["all", ...uniqueTopics])
+        // Cargar clientes y, si hay uno solo, seleccionarlo automáticamente
+        const list = Array.isArray((clientsRes as any)?.clients) ? (clientsRes as any).clients : []
+        setClients(list.map((c: any) => ({ id: Number(c.id), name: String(c.name) })))
+        if (list.length === 1) {
+          setSelectedClientId(Number(list[0].id))
+        }
       } catch (e) {
         console.error("No se pudieron cargar los listados de filtros", e)
       }
@@ -786,6 +799,29 @@ export function AnalyticsDashboard() {
             </div>
             <span className="text-black font-semibold">Analítica</span>
           </div>
+          {/* Selector multi-tenant: Cliente y Marca */}
+          <div className="space-y-2 mb-4">
+            <Select value={selectedClientId != null ? String(selectedClientId) : ""} onValueChange={(v) => setSelectedClientId(v ? Number(v) : undefined)}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Seleccionar cliente" />
+              </SelectTrigger>
+              <SelectContent>
+                {clients.map(c => (
+                  <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={selectedBrandId != null ? String(selectedBrandId) : ""} onValueChange={(v) => setSelectedBrandId(v ? Number(v) : undefined)} disabled={!clients.length}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Seleccionar marca" />
+              </SelectTrigger>
+              <SelectContent>
+                {brands.map(b => (
+                  <SelectItem key={b.id} value={String(b.id)}>{b.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <div className="relative mb-6">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-500" />
             <Input
@@ -833,6 +869,20 @@ export function AnalyticsDashboard() {
                     onModelChange={setSelectedModel}
                     modelOptions={modelOptions}
                   />
+                  <div className="flex items-center gap-2">
+                    <Select value={selectedClientId != null ? String(selectedClientId) : ""} onValueChange={(v) => setSelectedClientId(v ? Number(v) : undefined)}>
+                      <SelectTrigger className="w-[200px]"><SelectValue placeholder="Cliente" /></SelectTrigger>
+                      <SelectContent>
+                        {clients.map(c => (<SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>))}
+                      </SelectContent>
+                    </Select>
+                    <Select value={selectedBrandId != null ? String(selectedBrandId) : ""} onValueChange={(v) => setSelectedBrandId(v ? Number(v) : undefined)} disabled={!clients.length}>
+                      <SelectTrigger className="w-[200px]"><SelectValue placeholder="Marca" /></SelectTrigger>
+                      <SelectContent>
+                        {brands.map(b => (<SelectItem key={b.id} value={String(b.id)}>{b.name}</SelectItem>))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <Button variant="ghost" size="sm"> <MoreHorizontal className="w-4 h-4" /> </Button>
                 </div>
               </div>
@@ -1150,6 +1200,8 @@ export function AnalyticsDashboard() {
                             end_date: dateRange?.to?.toISOString(),
                             model: selectedModel,
                             topic: selectedTopic,
+                            client_id: selectedClientId,
+                            brand_id: selectedBrandId,
                           }),
                         })
                         if (!response.ok) {
@@ -1280,6 +1332,8 @@ export function AnalyticsDashboard() {
                           dateRange={dateRange}
                           model={selectedModel}
                           topic={selectedTopic}
+                          clientId={selectedClientId}
+                          brandId={selectedBrandId}
                         />
                       </div>
                       <div className="h-full">
@@ -1417,7 +1471,20 @@ export function AnalyticsDashboard() {
                         onModelChange={setSelectedModel}
                         modelOptions={modelOptions}
                       />
-                      <div className="flex items-center gap-2"></div>
+                      <div className="flex items-center gap-2">
+                        <Select value={selectedClientId != null ? String(selectedClientId) : ""} onValueChange={(v) => setSelectedClientId(v ? Number(v) : undefined)}>
+                          <SelectTrigger className="w-[200px]"><SelectValue placeholder="Cliente" /></SelectTrigger>
+                          <SelectContent>
+                            {clients.map(c => (<SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>))}
+                          </SelectContent>
+                        </Select>
+                        <Select value={selectedBrandId != null ? String(selectedBrandId) : ""} onValueChange={(v) => setSelectedBrandId(v ? Number(v) : undefined)} disabled={!clients.length}>
+                          <SelectTrigger className="w-[200px]"><SelectValue placeholder="Marca" /></SelectTrigger>
+                          <SelectContent>
+                            {brands.map(b => (<SelectItem key={b.id} value={String(b.id)}>{b.name}</SelectItem>))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
 
                     <SentimentTab
@@ -1440,6 +1507,8 @@ export function AnalyticsDashboard() {
                       initialSentimentApi={prefSentimentApi}
                       initialTopicsCloud={prefTopicsCloud}
                       initialTopicGroups={prefTopicGroups as any}
+                      clientId={selectedClientId}
+                      brandId={selectedBrandId}
                     />
                   </>
                 )}
