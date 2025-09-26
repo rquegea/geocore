@@ -1,0 +1,55 @@
+{
+  "executive_summary": "The Core School mantiene una presencia estable en el mercado de educación audiovisual en Madrid, con oportunidades de expansión en programas de guion y producción práctica. Sin embargo, enfrenta riesgos de competencia alta y falta de reconocimiento internacional.",
+  "key_findings": [
+    "El mercado de educación audiovisual en Madrid es competitivo, con The Core School manteniendo un 11.5% de SOV.",
+    "CES lidera el mercado con un 41.1% de SOV, lo que representa una amenaza competitiva significativa.",
+    "El sentimiento hacia The Core School es positivo, con un promedio de 0.625, lo que indica una percepción favorable."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expandir la oferta de programas en escritura de guiones y producción audiovisual práctica.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Expandir colaboraciones con empresas del sector audiovisual para mejorar la inserción laboral de los estudiantes.",
+      "impact": "Alto"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Alta competencia de otras escuelas especializadas en cine y producción audiovisual en Madrid.",
+      "mitigation": "Desarrollar programas únicos y fortalecer alianzas estratégicas."
+    },
+    {
+      "risk": "Falta de reconocimiento internacional comparado con instituciones como EICTV.",
+      "mitigation": "Iniciar campañas de marketing internacional y colaboraciones con instituciones reconocidas."
+    }
+  ],
+  "recommendations": [
+    "Desarrollar programas online para atraer a un público más amplio.",
+    "Fortalecer la presencia internacional mediante colaboraciones con instituciones reconocidas.",
+    "Implementar estrategias de marketing para destacar la oferta única de The Core School."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-25",
+          "type": "spike",
+          "metric": "mentions",
+          "note": "Aumento significativo en menciones posiblemente debido a una campaña o evento."
+        }
+      ],
+      "sentiment_vs_volume": "El volumen de menciones muestra un pico el 25 de septiembre, pero el sentimiento se mantiene estable, sugiriendo que el aumento no afectó la percepción."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [],
+        "sentiment_vs_volume": "El sentimiento se mantiene estable, sin correlación directa con cambios en el volumen de menciones."
+      }
+    ]
+  }
+}

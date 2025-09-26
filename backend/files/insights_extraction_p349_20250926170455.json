@@ -1,0 +1,61 @@
+{
+  "executive_summary": "The Core School mantiene una posición competitiva en el mercado de educación audiovisual en Madrid, con un sentimiento positivo estable. Sin embargo, enfrenta riesgos de alta competencia y falta de reconocimiento internacional.",
+  "key_findings": [
+    "El sentimiento general hacia The Core School es positivo y estable, lo que indica una percepción favorable del mercado.",
+    "The Core School tiene un 11.5% de SOV, posicionándose detrás de competidores como CES y ECAM.",
+    "La percepción del cliente es positiva, pero enfrenta desafíos de reconocimiento internacional y competencia local."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expandir la oferta de programas en escritura de guiones y producción audiovisual práctica.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Expandir colaboraciones con empresas del sector audiovisual para mejorar la inserción laboral de los estudiantes.",
+      "impact": "Alto"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Alta competencia de otras escuelas especializadas en cine y producción audiovisual en Madrid.",
+      "mitigation": "Diferenciarse a través de programas únicos y colaboraciones estratégicas."
+    },
+    {
+      "risk": "Falta de reconocimiento internacional comparado con instituciones como EICTV.",
+      "mitigation": "Desarrollar alianzas internacionales y programas de intercambio."
+    }
+  ],
+  "recommendations": [
+    "Desarrollar programas online para llegar a un público más amplio.",
+    "Colaborar con instituciones internacionales como EICTV para atraer estudiantes globales.",
+    "Fortalecer la promoción de los programas únicos de The Core School para mejorar el reconocimiento de marca."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-26",
+          "type": "spike",
+          "metric": "mentions",
+          "note": "Aumento significativo en menciones posiblemente debido a un evento o anuncio."
+        },
+        {
+          "date": "2025-09-15",
+          "type": "drop",
+          "metric": "visibility",
+          "note": "Caída en visibilidad que podría estar relacionada con la falta de actividad o promoción."
+        }
+      ],
+      "sentiment_vs_volume": "El sentimiento se mantiene estable incluso con fluctuaciones en el volumen de menciones."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [],
+        "sentiment_vs_volume": "El sentimiento positivo se mantiene constante, lo que sugiere satisfacción con los programas ofrecidos."
+      }
+    ]
+  }
+}

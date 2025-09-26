@@ -441,20 +441,75 @@ def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = Non
     except Exception:
         agent_summary_text = ""
 
-    # Gráficos alineados a la API: sentimiento como % positivo y visibilidad diaria
+    # Gráficos alineados a la API y frontend: sentimiento como % positivo y visibilidad diaria
     try:
-        sent_img = plotter.plot_sentiment_evolution(sent_evo)
+        # Serie diaria de % de menciones positivas (0–100)
+        session = aggregator.get_session()
+        try:
+            pos_series = aggregator.get_sentiment_positive_series(session, project_id, start_date=start_date, end_date=end_date)
+        finally:
+            session.close()
+        pos_dates = [d for d, _ in pos_series]
+        pos_vals = [float(v) for _, v in pos_series]
+        sent_img = plotter.plot_line_series(pos_dates, pos_vals, title="% de menciones positivas", ylabel="Positivo (%)", ylim=(0, 100), color="#16a34a")
     except Exception:
-        sent_img = None
+        # Fallback a la media [-1,1] si algo falla
+        try:
+            sent_img = plotter.plot_sentiment_evolution(sent_evo)
+        except Exception:
+            sent_img = None
     try:
         vis_img = plotter.plot_line_series(vis_dates, vis_vals, title="Puntuación de visibilidad", ylabel="Visibilidad (%)", ylim=(0, 100), color="#000000")
     except Exception:
         vis_img = None
+
+    # Rankings como imágenes simples (SOV y Visibilidad)
+    sov_rank_img = None
+    vis_rank_img = None
+    try:
+        # SOV ranking a partir de sov_pairs globales
+        labels = [f"{i+1}. {n} — {v:.1f}%" for i, (n, v) in enumerate(sov_pairs[:10])]
+        if labels:
+            import matplotlib.pyplot as plt
+            from .plotter import _tmp_path
+            h = max(1.6, 0.32 * len(labels) + 0.6)
+            plt.figure(figsize=(4.2, h))
+            for i, txt in enumerate(labels):
+                plt.text(0.01, 1.0 - (i+1)/(len(labels)+1), txt, fontsize=9)
+            plt.axis('off')
+            sov_rank_img = _tmp_path("sov_rank_"); plt.tight_layout(); plt.savefig(sov_rank_img, dpi=160, bbox_inches='tight', pad_inches=0.1); plt.close()
+    except Exception:
+        sov_rank_img = None
+    try:
+        session = aggregator.get_session()
+        try:
+            vis_rank_pairs = aggregator.get_visibility_ranking(session, start_date=start_date, end_date=end_date)
+        finally:
+            session.close()
+        items = [f"{i+1}. {n} — {v:.1f}%" for i, (n, v) in enumerate(vis_rank_pairs[:10])]
+        if items:
+            import matplotlib.pyplot as plt
+            from .plotter import _tmp_path
+            h = max(1.6, 0.32 * len(items) + 0.6)
+            plt.figure(figsize=(4.2, h))
+            for i, txt in enumerate(items):
+                plt.text(0.01, 1.0 - (i+1)/(len(items)+1), txt, fontsize=9)
+            plt.axis('off')
+            vis_rank_img = _tmp_path("vis_rank_"); plt.tight_layout(); plt.savefig(vis_rank_img, dpi=160, bbox_inches='tight', pad_inches=0.1); plt.close()
+    except Exception:
+        vis_rank_img = None
     images = {
-        "sentiment_evolution": sent_img,
+        # Preferimos mostrar la línea de % positivo en Parte 1
+        "part1_sentiment_line": sent_img,
+        "sentiment_evolution": sent_img,  # compatibilidad con mapeo existente
+        # Visibilidad global diaria
         "part1_visibility_line": vis_img,
+        "visibility_line": vis_img,  # compatibilidad
+        # SOV global
         "sov_pie": plotter.plot_sov_pie([(name, val) for name, val in sov_pairs[:10]]),
-        # Anexos
+        "sov_ranking_table": sov_rank_img,
+        # Rankings y anexos
+        "visibility_ranking_table": vis_rank_img,
         "sentiment_by_category": plotter.plot_sentiment_by_category(by_cat),
         "topics_top_bottom": plotter.plot_topics_top_bottom(top5, bottom5),
     }

@@ -87,21 +87,6 @@ def _sanitize(text: str) -> str:
     return text
 
 
-def add_centered_image(pdf: ReportPDF, path: Optional[str], width: float = 180):
-    if not path:
-        return
-    try:
-        # Centrar la imagen manualmente ajustando X
-        x = max(pdf.l_margin, (pdf.w - width) / 2.0)
-        y = pdf.get_y()
-        pdf.image(path, x=x, y=y, w=width)
-        # mover cursor a continuación de la imagen
-        pdf.set_y(y + (width * 0.56))  # aproximar alto por relación típica
-        pdf.ln(3)
-    except Exception:
-        pass
-
-
 def add_title(pdf: ReportPDF, text: str):
     pdf.set_font("Helvetica", "B", 16)
     pdf.cell(0, 10, _sanitize(text), 0, 1, "L")
@@ -118,7 +103,16 @@ def add_image(pdf: ReportPDF, path: Optional[str], width: float = 180):
     if not path:
         return
     try:
-        pdf.image(path, w=width)
+        # Centrar por defecto imágenes de ancho "grande" (>= 60% del ancho útil)
+        page_width = pdf.w - pdf.l_margin - pdf.r_margin
+        should_center = width >= (page_width * 0.6)
+        if should_center:
+            x = pdf.l_margin + (page_width - width) / 2.0
+            y = pdf.get_y()
+            pdf.image(path, x=x, y=y, w=width)
+        else:
+            # Respetar la posición actual (p.ej., diseños en dos columnas)
+            pdf.image(path, w=width)
         pdf.ln(3)
     except Exception:
         pass
@@ -134,36 +128,6 @@ def add_table(pdf: ReportPDF, rows: List[List[str]]):
             pdf.multi_cell(col_widths[i], 6, _sanitize(str(cell)), border=1, ln=3, max_line_height=pdf.font_size)
         pdf.ln(0)
     pdf.ln(3)
-
-
-def add_formatted_paragraphs(pdf: ReportPDF, raw_text: str):
-    """Renderiza texto con reglas ligeras de formato:
-    - Líneas que empiezan por '### ' -> cursiva (sin ###)
-    - Elimina '**' si aparecen en el texto
-    - La línea exacta 'Sentimiento por Categoría:' se imprime en negrita
-    - Corrige encabezados pegados comunes del LLM
-    """
-    if not isinstance(raw_text, str):
-        return
-    text = raw_text.replace("**", "")
-    # Correcciones de encabezados pegados
-    text = text.replace("Resumenejecutivoyhallazgosprincipales", "Resumen ejecutivo y hallazgos principales")
-    text = text.replace("Hallazgosprincipales", "Hallazgos principales")
-    lines = [ln.rstrip() for ln in text.splitlines() if ln.strip()]
-    for ln in lines:
-        if ln.startswith("### "):
-            pdf.set_font("Helvetica", style="I", size=11)
-            pdf.multi_cell(0, 6, _sanitize(ln[4:]))
-            pdf.ln(1)
-            pdf.set_font("Helvetica", size=11)
-            continue
-        if ln.strip().startswith("Sentimiento por Categoría:"):
-            pdf.set_font("Helvetica", style="B", size=11)
-            pdf.multi_cell(0, 6, _sanitize(ln.strip()))
-            pdf.ln(1)
-            pdf.set_font("Helvetica", size=11)
-            continue
-        add_paragraph(pdf, ln)
 
 
 def add_agent_insights_section(pdf: ReportPDF, agent_summary: Dict[str, str], raw_buckets: Dict[str, list] | None = None):
@@ -416,11 +380,12 @@ def build_empty_structure_pdf(company_name: str) -> bytes:
     add_title(pdf, "Índice")
 
     # Definir estructura solicitada
-    # Ajustado: compactamos Parte 1 en tres secciones y eliminamos páginas de serie temporal
     parte1 = [
         "Dashboard Ejecutivo",
         "Resumen Ejecutivo de KPIs",
+        "Share of Voice vs. Competencia",
         "Evolución del Sentimiento (diario)",
+        "Evolución del Volumen de Menciones (diario)",
     ]
     parte2 = [
         "Informe Estratégico",
@@ -517,7 +482,9 @@ def build_skeleton_with_content(company_name: str, images: Dict[str, Optional[st
     parte1 = [
         "Dashboard Ejecutivo",
         "Resumen Ejecutivo de KPIs",
+        "Share of Voice vs. Competencia",
         "Evolución del Sentimiento (diario)",
+        "Evolución del Volumen de Menciones (diario)",
     ]
     parte2 = [
         "Informe Estratégico",
@@ -563,27 +530,50 @@ def build_skeleton_with_content(company_name: str, images: Dict[str, Optional[st
 
     # Mapeo de secciones -> claves de imágenes
     section_to_image_keys: Dict[str, List[str]] = {
+        # Gráficos globales prioritarios
+        "Share of Voice vs. Competencia": ["sov_pie", "part1_sov_donut"],
+        "Evolución del Sentimiento (diario)": ["sentiment_evolution", "part1_sentiment_line"],
         # Resto de secciones
-        "Evolución del Sentimiento (diario)": ["sentiment_evolution"],
-        "Resumen Ejecutivo de KPIs": ["sov_pie"],
+        "Resumen Ejecutivo de KPIs": ["part1_category_distribution", "sentiment_by_category"],
     }
 
     for s in parte1:
         _write_section_page(s)
         keys = section_to_image_keys.get(s, [])
+        if s == "Share of Voice vs. Competencia":
+            # Dos columnas: izquierda SOV pie, derecha ranking (imagen precompuesta: images["sov_ranking_table"]) si existe
+            page_width = pdf.w - 2 * pdf.l_margin
+            col_w = page_width / 2.0
+            y0 = pdf.get_y()
+            # Izquierda
+            pdf.set_xy(pdf.l_margin, y0)
+            add_image(pdf, images.get(keys[0] if keys else None), width=col_w - 6)
+            # Derecha (ranking renderizado como imagen, si no hay, dejar vacío)
+            pdf.set_xy(pdf.l_margin + col_w, y0)
+            add_image(pdf, images.get("sov_ranking_table"), width=col_w - 6)
+            continue
         if s == "Evolución del Sentimiento (diario)":
-            # Gráfico grande y centrado; debajo, puntuación de visibilidad
-            add_centered_image(pdf, images.get(keys[0] if keys else None), width=170)
-            # Debajo: visibilidad con título solicitado
-            add_title(pdf, "Evolución del Volumen de Menciones (diario)")
-            add_centered_image(pdf, images.get("part1_visibility_line"), width=170)
+            # Dos columnas: izquierda línea sentimiento, derecha barra distribución (imagen images["sentiment_distribution"]) si existe
+            page_width = pdf.w - 2 * pdf.l_margin
+            col_w = page_width / 2.0
+            y0 = pdf.get_y()
+            pdf.set_xy(pdf.l_margin, y0)
+            add_image(pdf, images.get(keys[0] if keys else None), width=col_w - 6)
+            pdf.set_xy(pdf.l_margin + col_w, y0)
+            add_image(pdf, images.get("sentiment_distribution"), width=col_w - 6)
+            continue
+        if s == "Evolución del Volumen de Menciones (diario)":
+            # Dos columnas: izquierda visibilidad (línea), derecha ranking visibilidad
+            page_width = pdf.w - 2 * pdf.l_margin
+            col_w = page_width / 2.0
+            y0 = pdf.get_y()
+            pdf.set_xy(pdf.l_margin, y0)
+            add_image(pdf, images.get("visibility_line"), width=col_w - 6)
+            pdf.set_xy(pdf.l_margin + col_w, y0)
+            add_image(pdf, images.get("visibility_ranking_table"), width=col_w - 6)
             continue
         for k in keys:
-            # En "Resumen Ejecutivo de KPIs": apilar gráficos y centrar SOV si corresponde
-            if s == "Resumen Ejecutivo de KPIs" and k == "sov_pie":
-                add_centered_image(pdf, images.get(k), width=150)
-            else:
-                add_image(pdf, images.get(k), width=180)
+            add_image(pdf, images.get(k), width=180)
 
     # Parte 2 (cabeceras) + inserción de contenidos estratégicos si vienen
     _write_section_page("Parte 2: Informe Estratégico")
@@ -593,27 +583,27 @@ def build_skeleton_with_content(company_name: str, images: Dict[str, Optional[st
             if s == "Plan de Acción Estratégico":
                 text = (strategic.get("action_plan") or "").strip()
                 if text:
-                    add_formatted_paragraphs(pdf, text)
+                    add_paragraph(pdf, text)
             elif s == "Resumen Ejecutivo":
                 text = (strategic.get("executive_summary") or "").strip()
                 if text:
-                    add_formatted_paragraphs(pdf, text)
+                    add_paragraph(pdf, text)
             elif s == "Resumen Ejecutivo y Hallazgos Principales":
                 text = (strategic.get("summary_and_findings") or "").strip()
                 if text:
-                    add_formatted_paragraphs(pdf, text)
+                    add_paragraph(pdf, text)
             elif s == "Análisis Competitivo":
                 text = (strategic.get("competitive_analysis") or "").strip()
                 if text:
-                    add_formatted_paragraphs(pdf, text)
+                    add_paragraph(pdf, text)
             elif s == "Tendencias y Señales Emergentes":
                 text = (strategic.get("trends") or "").strip()
                 if text:
-                    add_formatted_paragraphs(pdf, text)
+                    add_paragraph(pdf, text)
             elif s == "Correlaciones Transversales entre Categorías":
                 text = (strategic.get("correlations") or "").strip()
                 if text:
-                    add_formatted_paragraphs(pdf, text)
+                    add_paragraph(pdf, text)
 
     # Parte 3 (cabeceras)
     _write_section_page("Parte 3: Anexo - Análisis Detallado por Categoría")

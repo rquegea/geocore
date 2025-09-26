@@ -1,0 +1,51 @@
+{
+  "executive_summary": "The Core School maintains a stable sentiment and visibility in the competitive landscape of audiovisual education in Madrid. Opportunities exist to expand program offerings and collaborations to enhance market position.",
+  "key_findings": [
+    "The Core School's sentiment is stable at 0.625, indicating a generally positive perception.",
+    "The school holds an 11.5% share of voice in a competitive market, ranking fourth among peers.",
+    "Despite stable sentiment, visibility spikes suggest opportunities for increased engagement."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expandir la oferta de programas en escritura de guiones y producción audiovisual práctica.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Expandir colaboraciones con empresas del sector audiovisual para mejorar la inserción laboral de los estudiantes.",
+      "impact": "Alto"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Alta competencia de otras escuelas especializadas en cine y producción audiovisual en Madrid.",
+      "mitigation": "Diferenciarse mediante programas únicos y colaboraciones estratégicas."
+    }
+  ],
+  "recommendations": [
+    "Desarrollar y promocionar nuevos programas en áreas de alta demanda como guion y producción práctica.",
+    "Fortalecer alianzas con empresas del sector para mejorar la empleabilidad de los graduados.",
+    "Implementar campañas de marketing para capitalizar picos de visibilidad y atraer más estudiantes."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-25",
+          "type": "spike",
+          "metric": "mentions",
+          "note": "Significant increase in visibility possibly due to a promotional event or campaign."
+        }
+      ],
+      "sentiment_vs_volume": "The sentiment remains stable despite fluctuations in volume, indicating consistent brand perception."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [],
+        "sentiment_vs_volume": "Sentiment remains stable with no significant correlation to volume changes."
+      }
+    ]
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "executive_summary": "The Core School enfrenta un entorno competitivo con oportunidades para expandir su oferta educativa y colaboraciones, mientras que debe mitigar riesgos de competencia y reconocimiento internacional.",
+  "key_findings": [
+    "El sentimiento general hacia The Core School es positivo y estable, lo que indica una percepción favorable del mercado.",
+    "The Core School tiene un Share of Voice del 11.5%, posicionándose detrás de competidores como CES y ECAM.",
+    "La percepción del cliente es positiva, pero enfrenta desafíos de reconocimiento internacional y competencia local."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expandir la oferta de programas en escritura de guiones y producción audiovisual práctica.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Expandir colaboraciones con empresas del sector audiovisual para mejorar la inserción laboral de los estudiantes.",
+      "impact": "Alto"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Alta competencia de otras escuelas especializadas en cine y producción audiovisual en Madrid.",
+      "mitigation": "Diferenciarse mediante programas únicos y colaboraciones estratégicas."
+    },
+    {
+      "risk": "Falta de reconocimiento internacional comparado con instituciones como EICTV.",
+      "mitigation": "Fortalecer alianzas internacionales y aumentar la presencia en eventos globales."
+    }
+  ],
+  "recommendations": [
+    "Desarrollar programas online para llegar a un público más amplio.",
+    "Colaborar con instituciones internacionales para atraer estudiantes globales.",
+    "Implementar campañas de marketing que destaquen las fortalezas únicas de The Core School."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-25",
+          "type": "spike",
+          "metric": "mentions",
+          "note": "Aumento significativo en menciones posiblemente debido a un evento o anuncio."
+        }
+      ],
+      "sentiment_vs_volume": "El volumen de menciones muestra un pico el 25 de septiembre, mientras que el sentimiento se mantiene estable, sugiriendo que el aumento no afectó la percepción general."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [],
+        "sentiment_vs_volume": "El sentimiento se mantiene estable, sin cambios significativos en el volumen de menciones."
+      }
+    ]
+  }
+}
