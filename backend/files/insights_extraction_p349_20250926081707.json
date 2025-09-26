@@ -1,0 +1,51 @@
+{
+  "executive_summary": "The Core School maintains a stable sentiment with a strong share of voice in the entertainment education sector. Opportunities exist to expand program offerings and enhance industry collaborations to mitigate competitive risks.",
+  "key_findings": [
+    "The Core School has a stable sentiment trend, indicating consistent brand perception.",
+    "The Core School dominates the share of voice in the Curriculum & Programs category, outperforming competitors.",
+    "The sentiment spike on September 21 suggests positive reception to specific program offerings or events."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expandir la oferta de programas en escritura de guiones y producción audiovisual práctica.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Expandir colaboraciones con empresas del sector audiovisual para mejorar la inserción laboral de los estudiantes.",
+      "impact": "Alto"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Alta competencia de otras escuelas especializadas en cine y producción audiovisual en Madrid.",
+      "mitigation": "Diferenciarse mediante programas únicos y colaboraciones estratégicas."
+    }
+  ],
+  "recommendations": [
+    "Desarrollar programas online para ampliar el alcance de la audiencia.",
+    "Fortalecer las colaboraciones con empresas del sector para mejorar la empleabilidad de los estudiantes.",
+    "Promover las fortalezas únicas de The Core School en campañas de marketing para mantener el liderazgo en share of voice."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-21",
+          "type": "spike",
+          "metric": "sentiment",
+          "note": "Increased sentiment possibly due to positive mentions highlighting The Core School's offerings."
+        }
+      ],
+      "sentiment_vs_volume": "The sentiment remains stable despite fluctuations in mentions, indicating consistent perception."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [],
+        "sentiment_vs_volume": "Stable sentiment with consistent mention volume suggests steady interest in programs."
+      }
+    ]
+  }
+}

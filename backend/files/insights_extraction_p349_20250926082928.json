@@ -1,0 +1,51 @@
+{
+  "executive_summary": "The Core School maintains a stable sentiment with consistent mentions, indicating a strong presence in the audiovisual education sector. Opportunities exist to expand program offerings and enhance industry collaborations.",
+  "key_findings": [
+    "The Core School has a stable sentiment and strong share of voice, indicating a solid market position.",
+    "Competitors like CES and ECAM have significant mentions, suggesting active competition in the sector.",
+    "The Core School is perceived positively, with opportunities to leverage its reputation for further growth."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expandir la oferta de programas en escritura de guiones y producción audiovisual práctica.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Expandir colaboraciones con empresas del sector audiovisual para mejorar la inserción laboral de los estudiantes.",
+      "impact": "Alto"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Alta competencia de otras escuelas especializadas en cine y producción audiovisual en Madrid.",
+      "mitigation": "Diferenciarse mediante programas únicos y colaboraciones estratégicas."
+    }
+  ],
+  "recommendations": [
+    "Desarrollar programas online para llegar a un público más amplio.",
+    "Colaborar con instituciones internacionales para atraer estudiantes globales.",
+    "Fortalecer la presencia de marca a través de campañas de marketing dirigidas."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-21",
+          "type": "spike",
+          "metric": "sentiment",
+          "note": "Increased sentiment possibly due to positive mentions highlighting The Core School's offerings."
+        }
+      ],
+      "sentiment_vs_volume": "The sentiment remains stable despite fluctuations in mentions, indicating consistent perception."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [],
+        "sentiment_vs_volume": "Mentions are stable with no significant sentiment changes, suggesting steady interest in programs."
+      }
+    ]
+  }
+}

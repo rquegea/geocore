@@ -108,7 +108,7 @@ export default function VisibilityTab(props: VisibilityTabProps) {
             {visibilityChartType === "line" ? (
               <LineChart data={visibility.series} key={visibilityChartKey}>
                 <XAxis
-                  dataKey={(d: any) => new Date(d.date).getTime()}
+                  dataKey={(d: any) => (typeof d.ts === 'number' ? d.ts : new Date(d.date).getTime())}
                   axisLine={false}
                   tickLine={false}
                   tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }}
@@ -136,7 +136,7 @@ export default function VisibilityTab(props: VisibilityTabProps) {
             ) : (
               <AreaChart data={visibility.series} key={visibilityChartKey}>
                 <XAxis
-                  dataKey={(d: any) => new Date(d.date).getTime()}
+                  dataKey={(d: any) => (typeof d.ts === 'number' ? d.ts : new Date(d.date).getTime())}
                   axisLine={false}
                   tickLine={false}
                   tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }}

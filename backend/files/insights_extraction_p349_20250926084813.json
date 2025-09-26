@@ -1,0 +1,55 @@
+{
+  "executive_summary": "The Core School maintains a stable sentiment with a strong share of voice in the entertainment education sector. Opportunities exist to expand program offerings and collaborations, while risks include high competition and limited international recognition.",
+  "key_findings": [
+    "The Core School holds a dominant share of voice in the curriculum and programs category, indicating strong market presence.",
+    "Competitors like CES and ECAM have significant mentions, suggesting active competition in the sector.",
+    "The Core School's sentiment is consistently positive, reflecting a favorable perception among stakeholders."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expand program offerings in scriptwriting and practical audiovisual production.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Enhance collaborations with audiovisual companies to improve student employability.",
+      "impact": "Alto"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "High competition from other specialized schools in Madrid.",
+      "mitigation": "Differentiate through unique program offerings and partnerships."
+    },
+    {
+      "risk": "Lack of international recognition compared to institutions like EICTV.",
+      "mitigation": "Pursue international collaborations and marketing efforts."
+    }
+  ],
+  "recommendations": [
+    "Develop new programs in high-demand areas such as scriptwriting.",
+    "Strengthen industry partnerships to enhance student career opportunities.",
+    "Increase international marketing efforts to boost global recognition."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-21",
+          "type": "spike",
+          "metric": "sentiment",
+          "note": "Increased sentiment possibly due to positive mentions highlighting program strengths."
+        }
+      ],
+      "sentiment_vs_volume": "The sentiment remains stable despite fluctuations in mentions, indicating consistent perception."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [],
+        "sentiment_vs_volume": "Mentions are stable with no significant sentiment changes, suggesting consistent interest in programs."
+      }
+    ]
+  }
+}

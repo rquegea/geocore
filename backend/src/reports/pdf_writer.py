@@ -586,10 +586,31 @@ def build_skeleton_with_content(company_name: str, images: Dict[str, Optional[st
     _write_section_page("Parte 2: Informe Estratégico")
     for s in parte2:
         _write_section_page(s)
-        if strategic and s == "Plan de Acción Estratégico":
-            text = (strategic.get("action_plan") or "").strip()
-            if text:
-                add_paragraph(pdf, text)
+        if strategic:
+            if s == "Plan de Acción Estratégico":
+                text = (strategic.get("action_plan") or "").strip()
+                if text:
+                    add_paragraph(pdf, text)
+            elif s == "Resumen Ejecutivo":
+                text = (strategic.get("executive_summary") or "").strip()
+                if text:
+                    add_paragraph(pdf, text)
+            elif s == "Resumen Ejecutivo y Hallazgos Principales":
+                text = (strategic.get("summary_and_findings") or "").strip()
+                if text:
+                    add_paragraph(pdf, text)
+            elif s == "Análisis Competitivo":
+                text = (strategic.get("competitive_analysis") or "").strip()
+                if text:
+                    add_paragraph(pdf, text)
+            elif s == "Tendencias y Señales Emergentes":
+                text = (strategic.get("trends") or "").strip()
+                if text:
+                    add_paragraph(pdf, text)
+            elif s == "Correlaciones Transversales entre Categorías":
+                text = (strategic.get("correlations") or "").strip()
+                if text:
+                    add_paragraph(pdf, text)
 
     # Parte 3 (cabeceras)
     _write_section_page("Parte 3: Anexo - Análisis Detallado por Categoría")
@@ -603,3 +624,13 @@ def build_skeleton_with_content(company_name: str, images: Dict[str, Optional[st
         return bytes(str(out).encode("latin-1"))
     except Exception:
         return bytes(str(out).encode("utf-8", errors="ignore"))
+
+
+def build_skeleton_from_content(content: Dict) -> bytes:
+    """Convenience wrapper que acepta un único diccionario con todo el contenido.
+    Espera: { company_name: str, images: Dict[str,str|None], strategic: Dict[str,str] }
+    """
+    company_name = (content.get("company_name") or "Empresa") if isinstance(content, dict) else "Empresa"
+    images = (content.get("images") or {}) if isinstance(content, dict) else {}
+    strategic = (content.get("strategic") or {}) if isinstance(content, dict) else {}
+    return build_skeleton_with_content(company_name, images, strategic)

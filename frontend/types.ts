@@ -20,6 +20,7 @@ export interface Mention {
   
   export interface VisibilityData {
       date: string;
+      ts?: number;
       value: number;
   }
   

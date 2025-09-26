@@ -1,0 +1,55 @@
+{
+  "executive_summary": "The Core School maintains a stable sentiment with a strong share of voice in the entertainment education sector. Opportunities exist to expand program offerings and collaborations, while risks include high competition and limited international recognition.",
+  "key_findings": [
+    "The Core School holds a dominant share of voice in the curriculum and programs category, indicating strong market presence.",
+    "Competitors like CES and ECAM have significant mentions, highlighting competitive pressure.",
+    "The Core School's sentiment is generally positive, reflecting a favorable perception among stakeholders."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expandir la oferta de programas en escritura de guiones y producción audiovisual práctica.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Expandir colaboraciones con empresas del sector audiovisual para mejorar la inserción laboral de los estudiantes.",
+      "impact": "Alto"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Alta competencia de otras escuelas especializadas en cine y producción audiovisual en Madrid.",
+      "mitigation": "Diferenciarse mediante programas únicos y colaboraciones estratégicas."
+    },
+    {
+      "risk": "Falta de reconocimiento internacional comparado con instituciones como EICTV.",
+      "mitigation": "Fortalecer alianzas internacionales y promover programas globales."
+    }
+  ],
+  "recommendations": [
+    "Desarrollar programas online para llegar a un público más amplio.",
+    "Colaborar con instituciones internacionales para atraer estudiantes globales.",
+    "Aumentar la visibilidad internacional a través de campañas de marketing dirigidas."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-21",
+          "type": "spike",
+          "metric": "sentiment",
+          "note": "Increased sentiment possibly due to positive mentions highlighting The Core School's offerings."
+        }
+      ],
+      "sentiment_vs_volume": "The sentiment remains stable despite fluctuations in mention volume, indicating consistent perception."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [],
+        "sentiment_vs_volume": "Stable sentiment with consistent mention volume, suggesting steady interest in programs."
+      }
+    ]
+  }
+}

@@ -35,52 +35,217 @@ def _extract_insights_to_json(aggregated: Dict[str, Any]) -> Dict[str, Any]:
         data = json.loads(text)
         return {
             "executive_summary": data.get("executive_summary", "") if isinstance(data.get("executive_summary"), str) else "",
-            "executive_summary_points": data.get("key_findings", [])[:3] if isinstance(data.get("key_findings"), list) else [],
             "key_findings": data.get("key_findings", []),
             "opportunities": data.get("opportunities", []),
             "risks": data.get("risks", []),
-            "strategic_recommendations": data.get("recommendations", []),
+            "recommendations": data.get("recommendations", []),
+            "time_series_analysis": data.get("time_series_analysis", {}),
         }
     except Exception:
         return {}
 
 
-def _generate_strategic_content(insights_json: Dict[str, Any], aggregated: Dict[str, Any]) -> Dict[str, str]:
-    sections: Dict[str, str] = {}
+def _generate_full_part2_texts(insights_json: Dict[str, Any], aggregated: Dict[str, Any]) -> Dict[str, str]:
+    """Genera todos los textos de la Parte 2 invocando prompts especialistas.
+    Aplica limpieza robusta: elimina fences y, si la IA devuelve JSON, lo parsea
+    y lo transforma a párrafos/bullets legibles.
+    """
+    out: Dict[str, str] = {}
+
+    def _strip_fences(text: str) -> str:
+        if not text:
+            return ""
+        s = text.strip()
+        # Quitar fences tipo ```json ... ``` o ``` ... ```
+        if s.startswith("```json"):
+            s = s[len("```json"):].strip()
+            if s.endswith("```"):
+                s = s[:-3].strip()
+        if s.startswith("```") and s.endswith("```"):
+            s = s[3:-3].strip()
+        # Quitar prefijo "json" si viene suelto
+        if s.lower().startswith("json ") or s.lower().startswith("json\n"):
+            s = s[4:].strip()
+        # Si hay texto previo y luego un JSON, extraer desde el primer '{' o '['
+        try:
+            first_brace = s.find('{')
+            first_brack = s.find('[')
+            pos = min([p for p in [first_brace, first_brack] if p != -1]) if (first_brace != -1 or first_brack != -1) else -1
+            if pos > 0:
+                # Si antes solo hay "json" o espacio, recortar
+                prefix = s[:pos].strip().lower()
+                if prefix in ("", "json"):
+                    s = s[pos:]
+        except Exception:
+            pass
+        return s
+
+    def _to_text_from_structure(data: Any, section: str | None = None) -> str:
+        # Especial: plan de acción
+        if section == "action_plan":
+            plan_items: list[str] = []
+            src = None
+            if isinstance(data, dict):
+                # Estructuras comunes
+                for key in ("plan_de_accion_estrategico", "plan_estrategico", "plan", "acciones", "actions"):
+                    if isinstance(data.get(key), list):
+                        src = data.get(key); break
+                if src is None and isinstance(data.get("recommendations"), list):
+                    src = data.get("recommendations")
+            elif isinstance(data, list):
+                src = data
+            if isinstance(src, list):
+                for it in src:
+                    if not isinstance(it, dict):
+                        plan_items.append("- " + str(it))
+                        continue
+                    # Caso A: item con prioridad/accion directamente
+                    pr = it.get("prioridad") or it.get("priority")
+                    ac = it.get("accion") or it.get("action") or it.get("tarea")
+                    plazo = it.get("plazo") or it.get("timeline") or it.get("due")
+                    owner = it.get("owner") or it.get("responsable")
+                    just = it.get("justificacion") or it.get("justification")
+                    recs = it.get("recomendaciones") or it.get("recommendations")
+                    if ac:
+                        bullet = "- " + (f"[{pr}] " if pr else "") + ac
+                        suffix = []
+                        if plazo: suffix.append(f"plazo: {plazo}")
+                        if owner: suffix.append(f"owner: {owner}")
+                        if suffix:
+                            bullet += " — (" + ", ".join(suffix) + ")"
+                        plan_items.append(bullet)
+                        if just:
+                            plan_items.append(f"  • Justificación: {just}")
+                        if isinstance(recs, list):
+                            for r in recs[:5]:
+                                plan_items.append("  • " + str(r))
+                        continue
+                    # Caso B: item con 'acciones' anidadas por plazo u otra dimensión
+                    acciones = it.get("acciones") or it.get("actions")
+                    plazo_item = it.get("plazo") or it.get("timeline")
+                    if isinstance(acciones, list):
+                        for a in acciones:
+                            if not isinstance(a, dict):
+                                plan_items.append("- " + str(a))
+                                continue
+                            act = a.get("accion") or a.get("action") or a.get("tarea") or json.dumps(a, ensure_ascii=False)
+                            pr2 = a.get("prioridad") or a.get("priority") or pr
+                            just2 = a.get("justificacion") or a.get("justification")
+                            recs2 = a.get("recomendaciones") or a.get("recommendations")
+                            line = "- " + (f"[{pr2}] " if pr2 else "") + (f"[{plazo_item}] " if plazo_item else "") + act
+                            plan_items.append(line)
+                            if just2:
+                                plan_items.append(f"  • Justificación: {just2}")
+                            if isinstance(recs2, list):
+                                for r in recs2[:5]:
+                                    plan_items.append("  • " + str(r))
+                        continue
+                    # Fallback: volcar pares clave-valor legibles
+                    plan_items.append("- " + _to_text_from_structure(it, section))
+                return "\n".join([ln for ln in plan_items if ln.strip()])
+            # fallback genérico
+            return _to_text_from_structure({"plan": data})
+
+        # Genérico
+        if isinstance(data, str):
+            return data.strip()
+        if isinstance(data, list):
+            lines: list[str] = []
+            for it in data:
+                if isinstance(it, (dict, list)):
+                    txt = _to_text_from_structure(it, section)
+                    if txt:
+                        for ln in txt.splitlines():
+                            lines.append("- " + ln if not ln.startswith("-") else ln)
+                else:
+                    lines.append("- " + str(it))
+            return "\n".join(lines)
+        if isinstance(data, dict):
+            lines: list[str] = []
+            for k, v in data.items():
+                key = str(k).strip().replace("_", " ").capitalize()
+                if isinstance(v, (dict, list)):
+                    sub = _to_text_from_structure(v, section)
+                    if sub:
+                        lines.append(f"{key}:")
+                        lines.extend([("- " + ln if not ln.startswith("-") else ln) for ln in sub.splitlines()])
+                else:
+                    val = str(v).strip()
+                    if val:
+                        lines.append(f"- {key}: {val}")
+            return "\n".join(lines)
+        try:
+            return str(data)
+        except Exception:
+            return ""
+
+    def _normalize_section(raw: str, section: str) -> str:
+        s = _strip_fences(raw)
+        # Intentar parsear JSON si aplica
+        parsed: Any | None = None
+        try:
+            if s.startswith("{") or s.startswith("["):
+                parsed = json.loads(s)
+        except Exception:
+            parsed = None
+        if parsed is not None:
+            return _to_text_from_structure(parsed, section)
+        return s
+
+    # Resumen Ejecutivo (experto)
     try:
-        # Preferir el redactor del resumen ejecutivo basado en los insights estructurados
-        if insights_json.get("executive_summary") or insights_json.get("key_findings"):
-            exec_prompt = s_prompts.get_strategic_summary_prompt({
-                "executive_summary": insights_json.get("executive_summary", ""),
-                "key_findings": insights_json.get("key_findings", []),
-            })
-        else:
-            exec_prompt = s_prompts.get_executive_summary_prompt(aggregated)
-        sections["executive_summary"] = fetch_response(exec_prompt, model="gpt-4o", temperature=0.3, max_tokens=900)
+        exec_prompt = s_prompts.get_executive_summary_prompt(aggregated)
+        out["executive_summary"] = _normalize_section(fetch_response(exec_prompt, model="gpt-4o", temperature=0.3, max_tokens=900), "executive_summary")
     except Exception:
-        sections["executive_summary"] = ""
+        out["executive_summary"] = _normalize_section(insights_json.get("executive_summary", ""), "executive_summary")
+
+    # Resumen Ejecutivo y Hallazgos (usar strategic_summary sobre JSON)
+    try:
+        sum_prompt = s_prompts.get_strategic_summary_prompt({
+            "executive_summary": insights_json.get("executive_summary", ""),
+            "key_findings": insights_json.get("key_findings", []),
+        })
+        out["summary_and_findings"] = _normalize_section(fetch_response(sum_prompt, model="gpt-4o", temperature=0.3, max_tokens=900), "summary_and_findings")
+    except Exception:
+        out["summary_and_findings"] = ""
+
+    # Análisis Competitivo (usa KPIs agregados ya presentes en aggregated)
+    try:
+        comp_prompt = s_prompts.get_competitive_analysis_prompt(aggregated)
+        out["competitive_analysis"] = _normalize_section(fetch_response(comp_prompt, model="gpt-4o-mini", temperature=0.3, max_tokens=900), "competitive_analysis")
+    except Exception:
+        out["competitive_analysis"] = ""
+
+    # Tendencias y Señales (usa aggregated.trends)
+    try:
+        trends_prompt = s_prompts.get_trends_anomalies_prompt(aggregated)
+        out["trends"] = _normalize_section(fetch_response(trends_prompt, model="gpt-4o-mini", temperature=0.3, max_tokens=900), "trends")
+    except Exception:
+        out["trends"] = ""
+
+    # Correlaciones Transversales (si hubiera un bloque en insights_json)
+    try:
+        corr = insights_json.get("time_series_analysis", {})
+        if corr:
+            corr_prompt = s_prompts.get_correlation_interpretation_prompt(aggregated, corr)
+            out["correlations"] = _normalize_section(fetch_response(corr_prompt, model="gpt-4o-mini", temperature=0.3, max_tokens=900), "correlations")
+        else:
+            out["correlations"] = ""
+    except Exception:
+        out["correlations"] = ""
+
+    # Plan de Acción Estratégico (oportunidades + riesgos + recomendaciones)
     try:
         plan_prompt = s_prompts.get_strategic_plan_prompt({
             "opportunities": insights_json.get("opportunities", []),
             "risks": insights_json.get("risks", []),
-            "recommendations": insights_json.get("strategic_recommendations", []),
+            "recommendations": insights_json.get("recommendations", []),
         })
-        sections["action_plan"] = fetch_response(plan_prompt, model="gpt-4o", temperature=0.3, max_tokens=1100)
+        out["action_plan"] = _normalize_section(fetch_response(plan_prompt, model="gpt-4o", temperature=0.3, max_tokens=1100), "action_plan")
     except Exception:
-        sections["action_plan"] = ""
-    # Sección: Análisis Competitivo
-    try:
-        comp_prompt = s_prompts.get_competitive_analysis_prompt(aggregated)
-        sections["competitive_analysis"] = fetch_response(comp_prompt, model="gpt-4o-mini", temperature=0.3, max_tokens=900)
-    except Exception:
-        sections["competitive_analysis"] = ""
-    # Sección: Tendencias y Anomalías
-    try:
-        trends_prompt = s_prompts.get_trends_anomalies_prompt(aggregated)
-        sections["trends"] = fetch_response(trends_prompt, model="gpt-4o-mini", temperature=0.3, max_tokens=900)
-    except Exception:
-        sections["trends"] = ""
-    return sections
+        out["action_plan"] = ""
+
+    return out
 
 
 def _analyze_cluster(cluster_obj: Dict[str, Any]) -> Dict[str, Any]:
@@ -201,22 +366,8 @@ def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = Non
         except Exception:
             pass
 
-    # 2) Plan de Acción Estratégico a partir del JSON
-    plan_text = ""
-    try:
-        plan_prompt = s_prompts.get_strategic_plan_prompt({
-            "opportunities": insights_json.get("opportunities", []),
-            "risks": insights_json.get("risks", []),
-            "recommendations": insights_json.get("strategic_recommendations", []) or insights_json.get("recommendations", []),
-        })
-        plan_text = fetch_response(plan_prompt, model="gpt-4o", temperature=0.3, max_tokens=1100)
-    except Exception:
-        plan_text = ""
-
-    strategic_sections = _generate_strategic_content(insights_json, aggregated)
-    # Asegurar que el Plan de Acción provenga de la cadena Parte 2
-    if plan_text:
-        strategic_sections["action_plan"] = plan_text
+    # 2) Generar todos los textos especialistas para Parte 2 usando el JSON de insights
+    strategic_sections = _generate_full_part2_texts(insights_json, aggregated)
     agent_summary_text = ""
     try:
         agent_prompt = s_prompts.get_agent_insights_summary_prompt({"agent_insights": agent_insights})
@@ -290,13 +441,22 @@ def generate_report(project_id: int, clusters: List[Dict[str, Any]] | None = Non
     except Exception:
         pass
 
-    # Construir el PDF usando el ESQUELETO y poblando solo lo que ya tenemos
-    # Parte 1: usamos build_skeleton_with_content para insertar gráficos disponibles
-    company = kpis.get("brand_name") or aggregated.get("client_name") or "Empresa"
-    base_pdf = pdf_writer.build_skeleton_with_content(company, images, strategic={
-        "action_plan": strategic_sections.get("action_plan", "")
-    })
-    return base_pdf
+    # Bundle unificado con imágenes + textos
+    content_bundle: Dict[str, Any] = {
+        "company_name": kpis.get("brand_name") or aggregated.get("client_name") or "Empresa",
+        "images": images,
+        "strategic": {
+            "executive_summary": strategic_sections.get("executive_summary", ""),
+            "summary_and_findings": strategic_sections.get("summary_and_findings", ""),
+            "competitive_analysis": strategic_sections.get("competitive_analysis", ""),
+            "trends": strategic_sections.get("trends", ""),
+            "correlations": strategic_sections.get("correlations", ""),
+            "action_plan": strategic_sections.get("action_plan", ""),
+        },
+    }
+
+    # Render final del esqueleto con contenido
+    return pdf_writer.build_skeleton_from_content(content_bundle)
 
 
 def generate_hybrid_report(full_data: Dict[str, Any]) -> bytes:

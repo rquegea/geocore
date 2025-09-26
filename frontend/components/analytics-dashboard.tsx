@@ -438,21 +438,16 @@ export function AnalyticsDashboard() {
   useEffect(() => {
     const loadFiltersLists = async () => {
       try {
-        const [modelsRes] = await Promise.all([
+        const [modelsRes, topicsRes] = await Promise.all([
           getModels(),
+          getTopics(),
         ])
         setModelOptions(["all", ...modelsRes.models])
-        // Fijamos el catálogo de tipos de análisis (índice del informe)
-        const ANALYSIS_TYPES = [
-          "Análisis de Competencia",
-          "Análisis de Marketing y Estrategia",
-          "Análisis de Mercado",
-          "Análisis Contextual",
-          "Análisis de Oportunidades",
-          "Análisis de Riesgos",
-          "Análisis de Sentimiento y Reputación",
-        ]
-        setTopicOptions(["all", ...ANALYSIS_TYPES])
+        // Cargar topics reales desde API, robustos a variaciones
+        const rawTopics: string[] = Array.isArray((topicsRes as any)?.topics) ? (topicsRes as any).topics : []
+        const canon = (s: string) => s.trim()
+        const uniqueTopics = Array.from(new Set(rawTopics.map(canon))).filter(Boolean)
+        setTopicOptions(["all", ...uniqueTopics])
       } catch (e) {
         console.error("No se pudieron cargar los listados de filtros", e)
       }
