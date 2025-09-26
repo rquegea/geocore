@@ -1,0 +1,61 @@
+{
+  "executive_summary": "The Core School mantiene una presencia estable en el mercado con un sentimiento positivo general. Sin embargo, enfrenta alta competencia en Madrid, lo que presenta tanto riesgos como oportunidades para expandir su oferta y colaboraciones.",
+  "key_findings": [
+    "El mercado de formación audiovisual en Madrid es altamente competitivo, con The Core School manteniendo un 11.5% de SOV.",
+    "CES lidera el mercado con un 41.1% de SOV, lo que representa un desafío significativo para The Core School.",
+    "El sentimiento hacia The Core School es consistentemente positivo, lo que indica una percepción favorable entre los stakeholders."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expandir la oferta de programas en escritura de guiones y producción audiovisual práctica.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Expandir colaboraciones con empresas del sector audiovisual para mejorar la inserción laboral de los estudiantes.",
+      "impact": "Alto"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Alta competencia de otras escuelas especializadas en cine y producción audiovisual en Madrid.",
+      "mitigation": "Desarrollar programas únicos y fortalecer alianzas estratégicas."
+    },
+    {
+      "risk": "Falta de reconocimiento internacional comparado con instituciones como EICTV.",
+      "mitigation": "Colaborar con instituciones internacionales para aumentar la visibilidad global."
+    }
+  ],
+  "recommendations": [
+    "Desarrollar programas online para llegar a un público más amplio.",
+    "Fortalecer la marca a través de campañas de marketing dirigidas.",
+    "Aumentar las colaboraciones con empresas del sector para mejorar la empleabilidad de los graduados."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-15",
+          "type": "spike",
+          "metric": "mentions",
+          "note": "Aumento significativo en menciones posiblemente debido a un evento o lanzamiento."
+        },
+        {
+          "date": "2025-09-26",
+          "type": "spike",
+          "metric": "sentiment",
+          "note": "Incremento en sentimiento positivo, posiblemente por una noticia favorable."
+        }
+      ],
+      "sentiment_vs_volume": "El volumen de menciones y el sentimiento positivo parecen correlacionarse, sugiriendo que eventos positivos aumentan la conversación."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [],
+        "sentiment_vs_volume": "El sentimiento positivo se mantiene estable, sin grandes fluctuaciones en volumen."
+      }
+    ]
+  }
+}

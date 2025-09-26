@@ -166,99 +166,6 @@ def add_formatted_paragraphs(pdf: ReportPDF, raw_text: str):
         add_paragraph(pdf, ln)
 
 
-# --- Pretty print para Plan de Acción (texto suele venir como JSON) ---
-def _strip_fences(text: str) -> str:
-    if not isinstance(text, str):
-        return ""
-    s = text.strip()
-    if s.startswith("```json"):
-        s = s[len("```json"):].strip()
-        if s.endswith("```"):
-            s = s[:-3].strip()
-    if s.startswith("```") and s.endswith("```"):
-        s = s[3:-3].strip()
-    if s.lower().startswith("json\n"):
-        s = s[5:].strip()
-    return s
-
-
-def add_action_plan_pretty(pdf: ReportPDF, raw_text: str):
-    """Renderiza un plan de acción legible a partir de JSON/markdown.
-    Soporta:
-      - {"plan_de_accion_estrategico": [{plazo, acciones:[...]}, ...]}
-      - {"strategic_action_plan": {"strategic_recommendations": [...]}}
-      - Lista simple de acciones
-    Fallback: imprime como texto formateado normal.
-    """
-    try:
-        s = _strip_fences(raw_text)
-        import json as _json
-        if not s or s[:1] not in ("{", "["):
-            add_formatted_paragraphs(pdf, raw_text)
-            return
-        data = _json.loads(s)
-
-        bullets: List[str] = []
-
-        def _emit_action(prefix: str, a: dict):
-            action = a.get("accion") or a.get("action") or a.get("tarea") or a.get("recommendation") or "(acción)"
-            pr = a.get("prioridad") or a.get("priority")
-            tl = a.get("plazo") or a.get("timeline")
-            hdr = f"- {prefix}{'['+pr+'] ' if pr else ''}{action}"
-            bullets.append(hdr)
-            just = a.get("justificacion") or a.get("justification") or a.get("details")
-            if just:
-                bullets.append(f"  • Justificación: {just}")
-            kpis = a.get("kpis")
-            if kpis:
-                bullets.append(f"  • KPIs: {kpis}")
-            opp = a.get("oportunidad") or a.get("opportunity")
-            if opp:
-                bullets.append(f"  • Oportunidad: {opp}")
-            mit = a.get("mitigacion") or a.get("mitigation")
-            if mit:
-                bullets.append(f"  • Mitigación: {mit}")
-            recs = a.get("recomendaciones") or a.get("recommendations")
-            if isinstance(recs, list):
-                for r in recs[:5]:
-                    bullets.append("  • " + str(r))
-
-        if isinstance(data, dict) and isinstance(data.get("plan_de_accion_estrategico"), list):
-            for block in data.get("plan_de_accion_estrategico"):
-                if not isinstance(block, dict):
-                    continue
-                plazo = block.get("plazo") or block.get("timeline") or "General"
-                acciones = block.get("acciones") or block.get("actions") or []
-                for a in acciones:
-                    if isinstance(a, dict):
-                        _emit_action(f"[{plazo}] ", a)
-                    else:
-                        bullets.append(f"- [{plazo}] {str(a)}")
-
-        elif isinstance(data, dict) and isinstance(data.get("strategic_action_plan"), dict):
-            sap = data.get("strategic_action_plan")
-            recs = sap.get("strategic_recommendations") or []
-            for a in recs:
-                if isinstance(a, dict):
-                    _emit_action("", a)
-                else:
-                    bullets.append("- " + str(a))
-
-        elif isinstance(data, list):
-            for it in data:
-                if isinstance(it, dict):
-                    _emit_action("", it)
-                else:
-                    bullets.append("- " + str(it))
-        else:
-            add_formatted_paragraphs(pdf, raw_text)
-            return
-
-        for ln in bullets:
-            add_paragraph(pdf, ln)
-    except Exception:
-        add_formatted_paragraphs(pdf, raw_text)
-
 def add_agent_insights_section(pdf: ReportPDF, agent_summary: Dict[str, str], raw_buckets: Dict[str, list] | None = None):
     """
     Inserta la sección de "Insights de Agentes" con un resumen ejecutivo y, opcionalmente,
@@ -686,7 +593,7 @@ def build_skeleton_with_content(company_name: str, images: Dict[str, Optional[st
             if s == "Plan de Acción Estratégico":
                 text = (strategic.get("action_plan") or "").strip()
                 if text:
-                    add_action_plan_pretty(pdf, text)
+                    add_formatted_paragraphs(pdf, text)
             elif s == "Resumen Ejecutivo":
                 text = (strategic.get("executive_summary") or "").strip()
                 if text:

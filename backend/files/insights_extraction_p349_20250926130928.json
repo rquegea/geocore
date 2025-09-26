@@ -1,0 +1,61 @@
+{
+  "executive_summary": "The Core School maintains a stable sentiment with a moderate share of voice in a competitive market. Opportunities exist to expand program offerings and collaborations to enhance student outcomes.",
+  "key_findings": [
+    "The Core School's sentiment remains stable despite competitive pressures.",
+    "CES leads in share of voice, indicating strong market presence.",
+    "The Core School is perceived positively, with opportunities to enhance recognition."
+  ],
+  "opportunities": [
+    {
+      "opportunity": "Expandir la oferta de programas en escritura de guiones y producción audiovisual práctica.",
+      "impact": "Alto"
+    },
+    {
+      "opportunity": "Expandir colaboraciones con empresas del sector audiovisual para mejorar la inserción laboral de los estudiantes.",
+      "impact": "Alto"
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Alta competencia de otras escuelas especializadas en cine y producción audiovisual en Madrid.",
+      "mitigation": "Diferenciarse mediante programas únicos y colaboraciones estratégicas."
+    },
+    {
+      "risk": "Falta de reconocimiento internacional comparado con instituciones como EICTV.",
+      "mitigation": "Fortalecer alianzas internacionales y aumentar la visibilidad global."
+    }
+  ],
+  "recommendations": [
+    "Desarrollar programas online para llegar a un público más amplio.",
+    "Fortalecer la marca mediante campañas de marketing dirigidas.",
+    "Aumentar las colaboraciones con empresas del sector para mejorar la empleabilidad de los graduados."
+  ],
+  "time_series_analysis": {
+    "global": {
+      "trend": "estable",
+      "anomalies": [
+        {
+          "date": "2025-09-15",
+          "type": "spike",
+          "metric": "mentions",
+          "note": "Increased visibility possibly due to a specific event or campaign."
+        },
+        {
+          "date": "2025-09-26",
+          "type": "spike",
+          "metric": "sentiment",
+          "note": "Positive sentiment peak, potentially linked to positive news or reviews."
+        }
+      ],
+      "sentiment_vs_volume": "Volume spikes do not coincide with sentiment drops, indicating stable perception."
+    },
+    "by_category": [
+      {
+        "category": "Curriculum & Programs",
+        "trend": "estable",
+        "anomalies": [],
+        "sentiment_vs_volume": "Stable sentiment with no significant volume changes."
+      }
+    ]
+  }
+}
